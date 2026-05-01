@@ -1,0 +1,1 @@
+namespace CosmoImage.Operations.Effects;

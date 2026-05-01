@@ -1,0 +1,47 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <Compile Remove="Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cosmo.Transport\src\Cosmo.Transport\Cosmo.Transport.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Docnet.Core" Version="2.6.0" />
+    <PackageReference Include="JpegLibrary" Version="0.4.32" />
+    <PackageReference Include="Magick.NET-Q8-arm64" Version="14.13.0" />
+    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="MetadataExtractor" Version="2.9.3" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.7" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    Global usings for the folder-matched subnamespaces. Lets every source
+    file reference VipsImage, VipsImageOps, VipsTiffLoader, VipsResize, etc.
+    without sprinkling `using CosmoImage.X;` everywhere. The folder
+    structure remains the source of organization; this just keeps the
+    cross-references readable.
+  -->
+  <ItemGroup>
+    <Using Include="CosmoImage.Core" />
+    <Using Include="CosmoImage.Loaders" />
+    <Using Include="CosmoImage.Savers" />
+    <Using Include="CosmoImage.Operations.Geometric" />
+    <Using Include="CosmoImage.Operations.Color" />
+    <Using Include="CosmoImage.Operations.Convolution" />
+    <Using Include="CosmoImage.Operations.Drawing" />
+    <Using Include="CosmoImage.Operations.Effects" />
+    <Using Include="CosmoImage.Operations.Analysis" />
+    <Using Include="CosmoImage.Operations.Misc" />
+  </ItemGroup>
+
+</Project>
