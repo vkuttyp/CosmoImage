@@ -97,9 +97,9 @@ flattening, premultiplication. **Major gap area.**
 | `falsecolour` | ✅ | `Falsecolor()` — built-in jet colour ramp; 1-band UChar → RGB |
 | `grid` (lay tiles into grid) | ✅ | `Grid(tileHeight, across, down)` — tall N×tile stack → 2D grid. Trailing cells zero-filled |
 | `ifthenelse` (per-pixel ternary) | ✅ | `Ifthenelse(then, else)` — UChar condition broadcasts (1-band) or selects per-band (N-band). UChar + Float then/else |
-| `insert` (paste image at point) | 🟡 | `Composite` covers the common case |
-| `join` (join two images side-by-side) | ❌ | |
-| `arrayjoin` (join N images in a grid) | ❌ | |
+| `insert` (paste image at point) | ✅ | `Insert(sub, x, y, expand=false, background)` — expand=true grows output to the union bounding box |
+| `join` (join two images side-by-side) | ✅ | `Join(other, direction, shim, align, background)` — optional linear-blend seam over `shim` pixels |
+| `arrayjoin` (join N images in a grid) | ✅ | `Arrayjoin(inputs, across, shim, background, hAlign, vAlign)` — per-row max-height / per-column max-width geometry |
 | `msb` (most-significant-byte extraction) | ❌ | |
 | `replicate` (tile to bigger size) | ✅ | `Replicate(across, down)` — scanline-slab copy across tile seams |
 | `scale` (linear stretch to 0..255) | ✅ | `Scale(log=false, exponent=0.25)` — linear or log-scale stretch to UChar; aggregate min/max via `VipsStats` |

@@ -97,6 +97,19 @@ public enum VipsDirection
     Last = 2
 }
 
+/// <summary>
+/// Cross-axis alignment for compose ops (Join etc). For a horizontal
+/// join, <c>Low</c> is top-aligned and <c>High</c> is bottom-aligned;
+/// vertical join, <c>Low</c> is left-aligned and <c>High</c> is right.
+/// </summary>
+public enum VipsAlign
+{
+    Low = 0,
+    Centre = 1,
+    High = 2,
+    Last = 3
+}
+
 public enum VipsAngle
 {
     D0 = 0,

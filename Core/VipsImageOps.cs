@@ -12,6 +12,7 @@ using CosmoImage.Operations.Drawing;
 using CosmoImage.Operations.Effects;
 using CosmoImage.Operations.Analysis;
 using CosmoImage.Operations.Misc;
+using CosmoImage.Operations.Mosaicing;
 
 namespace CosmoImage.Core;
 
@@ -1171,6 +1172,34 @@ public static partial class VipsImageOps
     public static double DECMC(double L1, double a1, double b1, double L2, double a2, double b2,
         double l = 2, double c = 1)
         => VipsdECMC.ComputeDECMC(L1, a1, b1, L2, a2, b2, l, c);
+
+    // From Operations/Mosaicing/VipsArrayjoin.cs
+    /// <summary>Lay N inputs out into a grid (default single row).</summary>
+    public static VipsImage Arrayjoin(VipsImage[] inputs, int across = 0, int shim = 0,
+        double[]? background = null,
+        VipsAlign hAlign = VipsAlign.Low, VipsAlign vAlign = VipsAlign.Low)
+        => Run(new VipsArrayjoin {
+            Inputs = inputs, Across = across, Shim = shim, Background = background,
+            HAlign = hAlign, VAlign = vAlign,
+        });
+
+    // From Operations/Mosaicing/VipsJoin.cs
+    /// <summary>Paste two images side-by-side (or top-to-bottom) with optional linear-blend seam.</summary>
+    public static VipsImage Join(VipsImage left, VipsImage right,
+        VipsDirection direction = VipsDirection.Horizontal,
+        int shim = 0, VipsAlign align = VipsAlign.Low, double[]? background = null)
+        => Run(new VipsJoin {
+            Left = left, Right = right, Direction = direction,
+            Shim = shim, Align = align, Background = background,
+        });
+
+    // From Operations/Mosaicing/VipsInsert.cs
+    /// <summary>Paste <paramref name="sub"/> into <paramref name="base"/> at (x, y); optionally expand to fit.</summary>
+    public static VipsImage Insert(VipsImage @base, VipsImage sub, int x, int y,
+        bool expand = false, double[]? background = null)
+        => Run(new VipsInsert {
+            Base = @base, Sub = sub, X = x, Y = y, Expand = expand, Background = background,
+        });
 
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);

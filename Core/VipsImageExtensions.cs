@@ -504,6 +504,17 @@ public static class VipsImageExtensions
     public static VipsImage DECMC(this VipsImage image, VipsImage other, double l = 2, double c = 1)
         => VipsImageOps.DECMC(image, other, l, c);
 
+    /// <summary>Paste <paramref name="right"/> beside this image (default horizontal, hard seam).</summary>
+    public static VipsImage Join(this VipsImage image, VipsImage right,
+        VipsDirection direction = VipsDirection.Horizontal,
+        int shim = 0, VipsAlign align = VipsAlign.Low, double[]? background = null)
+        => VipsImageOps.Join(image, right, direction, shim, align, background);
+
+    /// <summary>Paste <paramref name="sub"/> into this image at (x, y).</summary>
+    public static VipsImage Insert(this VipsImage image, VipsImage sub, int x, int y,
+        bool expand = false, double[]? background = null)
+        => VipsImageOps.Insert(image, sub, x, y, expand, background);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

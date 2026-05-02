@@ -78,7 +78,11 @@ Each lands in a single PR.
 - [x] ~~`extract_band`~~ (round 28) — pull N consecutive bands from offset.
 - [x] ~~`grid`~~ (round 30) — tall N×tile stack → 2D grid; trailing
   cells zero-filled.
-- [ ] `arrayjoin` / `join` / `insert` — remaining mosaicing helpers.
+- [x] ~~`arrayjoin` / `join` / `insert`~~ (round 37) — `Arrayjoin` lays
+  N inputs out into a grid; `Join` pastes two images side-by-side
+  with optional linear-blend seam; `Insert` pastes sub into base at
+  (x, y), with optional `expand` to grow the output to the union
+  bounding box.
 
 ### `convolution/`
 - [x] ~~`sharpen`~~ (round 31) — luminance-only unsharp with separate
