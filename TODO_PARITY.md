@@ -155,13 +155,17 @@ sRGB↔linear and a few RGB-space matrix manipulations.
   D65 white maps to (1, 0, 0).
 - [x] ~~sRGB ↔ HSV~~ (round 35) — libvips UChar packing
   (H ∈ [0, 255] for 0–360°).
-- [ ] XYZ ↔ CMYK (print colourspace).
+- [x] ~~XYZ ↔ CMYK~~ (round 36) — naïve no-profile transform via
+  sRGB-from-K. ICC-based path remains via `IccTransform`.
+- [x] ~~XYZ ↔ scRGB~~ (round 36) — standard sRGB-primary 3×3 matrix.
 - [ ] CICP2scRGB (BT.2100 / Rec.2020 / PQ / HLG transfer functions —
   HDR / wide-gamut interop).
 - [ ] uhdr2scRGB (Ultra HDR JPEG with gainmap).
 - [x] ~~dE76 / dE00~~ (round 33) — `DE76` Euclidean Lab and `DE2000`
   CIEDE2000 (Sharma reference vectors verified). Also exposed as
-  per-triplet `DE2000(L1, a1, b1, L2, a2, b2)`. `dECMC` still missing.
+  per-triplet `DE2000(L1, a1, b1, L2, a2, b2)`.
+- [x] ~~dECMC~~ (round 36) — CMC(l:c) acceptability/perceptibility ΔE
+  with reference-weighted SL/SC/SH; image + per-triplet APIs.
 - [x] ~~Lab ↔ XYZ~~ (round 33) — D65 white point.
 - [x] ~~Lab ↔ LCh~~ (round 33) — polar form.
 - [ ] Pipeline-aware ICC: profile attached to image metadata, transform

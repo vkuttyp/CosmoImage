@@ -1148,6 +1148,30 @@ public static partial class VipsImageOps
     /// <summary>HSV → sRGB UChar.</summary>
     public static VipsImage HSV2sRGB(VipsImage input) => Run(new VipsHSV2sRGB { In = input });
 
+    // From Operations/Color/VipsScRGBXYZ.cs
+    /// <summary>scRGB (linear, sRGB primaries, D65) → XYZ.</summary>
+    public static VipsImage ScRGB2XYZ(VipsImage input) => Run(new VipsScRGB2XYZ { In = input });
+
+    /// <summary>XYZ → scRGB (linear, sRGB primaries, D65).</summary>
+    public static VipsImage XYZ2scRGB(VipsImage input) => Run(new VipsXYZ2scRGB { In = input });
+
+    // From Operations/Color/VipsCMYK.cs
+    /// <summary>Naïve CMYK → XYZ (no ICC profile).</summary>
+    public static VipsImage CMYK2XYZ(VipsImage input) => Run(new VipsCMYK2XYZ { In = input });
+
+    /// <summary>Naïve XYZ → CMYK (no ICC profile).</summary>
+    public static VipsImage XYZ2CMYK(VipsImage input) => Run(new VipsXYZ2CMYK { In = input });
+
+    // From Operations/Color/VipsdECMC.cs
+    /// <summary>Per-pixel CMC(l:c) ΔE between two Lab images.</summary>
+    public static VipsImage DECMC(VipsImage left, VipsImage right, double l = 2, double c = 1)
+        => Run(new VipsdECMC { Left = left, Right = right, L = l, C = c });
+
+    /// <summary>CMC(l:c) ΔE between two Lab triplets (no image required).</summary>
+    public static double DECMC(double L1, double a1, double b1, double L2, double a2, double b2,
+        double l = 2, double c = 1)
+        => VipsdECMC.ComputeDECMC(L1, a1, b1, L2, a2, b2, l, c);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

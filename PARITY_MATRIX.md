@@ -134,12 +134,12 @@ We have only a few corners of it.
 | `LabQ2sRGB`, `LabQ2LabS`, `LabS2LabQ` | ❌ | |
 | `XYZ2Oklab`, `Oklab2XYZ`, `Oklab2Oklch`, `Oklch2Oklab` | ✅ | `XYZ2OkLab` / `OkLab2XYZ` / `OkLab2OkLCh` / `OkLCh2OkLab` (Ottosson 2020 — D65 white maps to (1, 0, 0)) |
 | `sRGB2HSV` / `HSV2sRGB` | ✅ | `SRGB2HSV` / `HSV2sRGB` — libvips' UChar packing (H ∈ [0, 255] for 0–360°) |
-| `XYZ2CMYK` / `CMYK2XYZ` | ❌ | Print colourspace |
-| `XYZ2scRGB` / `scRGB2XYZ` | ❌ | |
+| `XYZ2CMYK` / `CMYK2XYZ` | ✅ | Naïve no-profile transform via sRGB-from-K. ICC profile path remains via `IccTransform` |
+| `XYZ2scRGB` / `scRGB2XYZ` | ✅ | Standard sRGB-primary 3×3 matrix (D65); accepts negative / >1 values for HDR/wide-gamut |
 | `CICP2scRGB` (ITU-R BT.2100 / Rec.2020 + transfer) | ❌ | HDR / wide-gamut |
 | `uhdr2scRGB` (Ultra HDR JPEG gainmap → scRGB) | ❌ | Modern HDR-photo path |
 | `float2rad` / `rad2float` (Radiance RGBE ↔ Float) | 🟡 | Built into `VipsHdrLoader`/`Saver` directly, not a standalone op |
-| `dE76`, `dE00`, `dECMC` | 🟡 | `DE76(other)` and `DE2000(other)` ✅ (image + per-triplet APIs); `dECMC` still missing |
+| `dE76`, `dE00`, `dECMC` | ✅ | `DE76(other)` / `DE2000(other)` / `DECMC(other, l, c)` — all image + per-triplet APIs; CMC weights default to (2, 1) acceptability |
 | `icc_transform` | 🟡 | `IccTransform` via Magick.NET (one-shot, not pipeline-aware) |
 | `profile_load` (load named ICC profile) | ❌ | |
 | Custom "color" ops (matrix-driven RGB) | ✅ | `Saturate`, `Sepia`, `Hue`, `Brightness`, `Contrast`, `Lightness` |

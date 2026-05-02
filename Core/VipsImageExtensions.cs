@@ -488,6 +488,22 @@ public static class VipsImageExtensions
     /// <summary>HSV → sRGB UChar.</summary>
     public static VipsImage HSV2sRGB(this VipsImage image) => VipsImageOps.HSV2sRGB(image);
 
+    /// <summary>scRGB (linear, sRGB primaries, D65) → XYZ.</summary>
+    public static VipsImage ScRGB2XYZ(this VipsImage image) => VipsImageOps.ScRGB2XYZ(image);
+
+    /// <summary>XYZ → scRGB.</summary>
+    public static VipsImage XYZ2scRGB(this VipsImage image) => VipsImageOps.XYZ2scRGB(image);
+
+    /// <summary>Naïve CMYK → XYZ.</summary>
+    public static VipsImage CMYK2XYZ(this VipsImage image) => VipsImageOps.CMYK2XYZ(image);
+
+    /// <summary>Naïve XYZ → CMYK.</summary>
+    public static VipsImage XYZ2CMYK(this VipsImage image) => VipsImageOps.XYZ2CMYK(image);
+
+    /// <summary>Per-pixel CMC(l:c) ΔE against another Lab image.</summary>
+    public static VipsImage DECMC(this VipsImage image, VipsImage other, double l = 2, double c = 1)
+        => VipsImageOps.DECMC(image, other, l, c);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to
