@@ -1045,6 +1045,40 @@ public static partial class VipsImageOps
     public static VipsImage LabelRegions(VipsImage input)
         => Run(new VipsLabelRegions { In = input });
 
+    // From Operations/Convolution/VipsSpcor.cs
+    /// <summary>Normalised cross-correlation of <paramref name="reference"/> against <paramref name="input"/>; result mapped [-1, 1] → [0, 255].</summary>
+    public static VipsImage Spcor(VipsImage input, VipsImage reference)
+        => Run(new VipsSpcor { In = input, Reference = reference });
+
+    // From Operations/Analysis/VipsCountlines.cs
+    /// <summary>Average number of black/white transitions per row (or column).</summary>
+    public static double Countlines(VipsImage input, VipsDirection direction = VipsDirection.Horizontal)
+        => VipsCountlines.Compute(input, direction);
+
+    // From Operations/Convolution/VipsStdif.cs
+    /// <summary>Local-contrast renormalisation. Each pixel is scaled toward a target mean and stddev within a window.</summary>
+    public static VipsImage Stdif(VipsImage input, int windowWidth = 11, int windowHeight = 11,
+        double sigmaTarget = 50, double meanTarget = 128, double a = 0.5)
+        => Run(new VipsStdif {
+            In = input, WindowWidth = windowWidth, WindowHeight = windowHeight,
+            SigmaTarget = sigmaTarget, MeanTarget = meanTarget, A = a,
+        });
+
+    // From Operations/Analysis/VipsFreqmult.cs
+    /// <summary>FwFft → multiply by real Float <paramref name="mask"/> → InvFft, in one step.</summary>
+    public static VipsImage Freqmult(VipsImage input, VipsImage mask)
+        => Run(new VipsFreqmult { In = input, Mask = mask });
+
+    // From Operations/Misc/VipsSwitch.cs
+    /// <summary>Index of the first non-zero test image at each pixel; <paramref name="tests"/>.Length if none.</summary>
+    public static VipsImage Switch(params VipsImage[] tests)
+        => Run(new VipsSwitch { Tests = tests });
+
+    // From Operations/Misc/VipsCase.cs
+    /// <summary>Per-pixel select from N source images using a UChar index.</summary>
+    public static VipsImage Case(VipsImage index, params VipsImage[] cases)
+        => Run(new VipsCase { Index = index, Cases = cases });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

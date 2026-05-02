@@ -417,6 +417,23 @@ public static class VipsImageExtensions
     /// <summary>4-connected component labelling.</summary>
     public static VipsImage LabelRegions(this VipsImage image) => VipsImageOps.LabelRegions(image);
 
+    /// <summary>Normalised cross-correlation of <paramref name="reference"/> against this image.</summary>
+    public static VipsImage Spcor(this VipsImage image, VipsImage reference)
+        => VipsImageOps.Spcor(image, reference);
+
+    /// <summary>Average black/white transitions per row (or column).</summary>
+    public static double Countlines(this VipsImage image, VipsDirection direction = VipsDirection.Horizontal)
+        => VipsImageOps.Countlines(image, direction);
+
+    /// <summary>Local-contrast renormalisation against a target mean / sigma.</summary>
+    public static VipsImage Stdif(this VipsImage image, int windowWidth = 11, int windowHeight = 11,
+        double sigmaTarget = 50, double meanTarget = 128, double a = 0.5)
+        => VipsImageOps.Stdif(image, windowWidth, windowHeight, sigmaTarget, meanTarget, a);
+
+    /// <summary>FwFft → mask multiply → InvFft.</summary>
+    public static VipsImage Freqmult(this VipsImage image, VipsImage mask)
+        => VipsImageOps.Freqmult(image, mask);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

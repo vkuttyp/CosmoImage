@@ -105,7 +105,7 @@ flattening, premultiplication. **Major gap area.**
 | `scale` (linear stretch to 0..255) | ✅ | `Scale(log=false, exponent=0.25)` — linear or log-scale stretch to UChar; aggregate min/max via `VipsStats` |
 | `sequential` (force sequential read order) | ❌ | |
 | `subsample` | 🟡 | `Shrink` covers integer subsample |
-| `switch` (case-style multi-image select) | ❌ | |
+| `switch` (case-style multi-image select) | ✅ | `Switch(tests…)` — index of first non-zero test image, N if none |
 | `tilecache` (region cache) | ❌ | |
 | `transpose3d` | ❌ | |
 | `wrap` (toroidal shift) | ✅ | `Wrap(x, y)` — default offset centres the image; scanline-slab copy across the seam |
@@ -161,7 +161,7 @@ We have only a few corners of it.
 | `sobel` | ✅ | `Sobel()` — 3×3 Gx/Gy magnitude (UChar in/out) |
 | `canny` | ✅ | `Canny(sigma, low, high)` — full pipeline: blur, Sobel, NMS, double-threshold, hysteresis |
 | `compass` (compass-pattern edge) | ✅ | `Compass()` — 8 Kirsch rotations, max absolute response |
-| `correlation`, `fastcor`, `spcor` | ❌ | Template matching / cross-correlation |
+| `correlation`, `fastcor`, `spcor` | ✅ `spcor`, ❌ `fastcor` | `Spcor(reference)` — Pearson NCC (UChar 1-band), result mapped [-1, 1] → [0, 255]; FFT-accelerated `fastcor` still missing |
 | `edge` | ❌ | Generic edge detector wrapper |
 
 ---
@@ -253,7 +253,7 @@ Frequency-domain filtering.
 | `fwfft` | ✅ `FwFft` |
 | `invfft` | ✅ `InvFft` |
 | `spectrum` (log-magnitude visualisation) | ✅ `Spectrum` (FFT-shifted) |
-| `freqmult` (frequency-domain multiply with mask) | ❌ |
+| `freqmult` (frequency-domain multiply with mask) | ✅ | `Freqmult(mask)` — FwFft → real-mask multiply → InvFft preserving Float output |
 | `phasecor` (phase correlation — image registration) | ❌ |
 
 ---
@@ -270,9 +270,9 @@ Frequency-domain filtering.
 | `hist_match` (histogram matching against reference) | ✅ | `HistMatch(reference)` — per-band CDF remap. Computes both histograms and the matching LUT, applies in one pass |
 | `hist_plot` (visualise hist as image) | ❌ |
 | `hist_ismonotonic` | ❌ |
-| `case` (per-pixel select from band of LUTs) | ❌ |
+| `case` (per-pixel select from band of LUTs) | ✅ | `Case(index, cases…)` — picks <c>cases[index]</c> per pixel; out-of-range falls back to last source |
 | `percent` (find threshold for given percentage) | ✅ | `Percent(percent)` — bin at which percentile of aggregate histogram is reached |
-| `stdif` (statistical differencing — local-contrast enhancement) | ❌ |
+| `stdif` (statistical differencing — local-contrast enhancement) | ✅ | `Stdif(window, sigmaTarget, meanTarget, a)` — summed-area-table per-pixel renormalisation |
 
 ---
 
@@ -283,7 +283,7 @@ Frequency-domain filtering.
 | `morph` (dilate/erode dispatcher) | ✅ `Morph` with Float branch |
 | `rank` | ✅ `Rank`/`Median` |
 | `nearest` (distance to nearest non-zero pixel) | ✅ | `Nearest()` — exact Euclidean distance via Felzenszwalb-Huttenlocher separable EDT (UChar clamped) |
-| `countlines` (count black-white transitions per scanline) | ❌ |
+| `countlines` (count black-white transitions per scanline) | ✅ | `Countlines(direction)` — average transitions per row or column |
 | `labelregions` (connected-component labeling) | ✅ | `LabelRegions()` — 4-connected union-find, two-pass; UInt label image (1..K, 0 = background) |
 
 ---

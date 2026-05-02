@@ -66,7 +66,9 @@ Each lands in a single PR.
 - [x] ~~`falsecolour`~~ (round 28) — built-in jet ramp, 1-band UChar → RGB.
 - [x] ~~`ifthenelse`~~ (round 28) — per-pixel ternary; UChar condition
   broadcasts or selects per-band, UChar + Float then/else.
-- [ ] `switch` (case-style multi-image select).
+- [x] ~~`switch`~~ (round 32) — index of first non-zero test, N if none.
+- [x] ~~`case`~~ (round 32) — pick from N source images by UChar index;
+  out-of-range falls back to last source.
 - [x] ~~`wrap`~~ (round 29) — toroidal shift; default offset centres the
   image, scanline-slab copy across the seam.
 - [x] ~~`zoom`~~ (round 29) — integer scale-up by replication
@@ -86,7 +88,8 @@ Each lands in a single PR.
   non-max suppression, double-threshold, hysteresis.
 - [x] ~~`compass`~~ (round 31) — 8 Kirsch rotations, max absolute
   response.
-- [ ] `correlation` / `fastcor` / `spcor` (template matching).
+- [x] ~~`spcor`~~ (round 32) — Pearson NCC (UChar 1-band), result mapped
+  [-1, 1] → [0, 255]. FFT-accelerated `fastcor` still missing.
 - [ ] `conva` / `convasep` (approximate large-kernel via box-pass).
 
 ### `morphology/`
@@ -94,7 +97,8 @@ Each lands in a single PR.
   via Felzenszwalb-Huttenlocher 1D parabola-envelope (separable).
 - [x] ~~`labelregions`~~ (round 31) — 4-connected union-find,
   two-pass; UInt label image (1..K, 0 = background).
-- [ ] `countlines` (count black-white transitions per scanline).
+- [x] ~~`countlines`~~ (round 32) — average black/white transitions per
+  row (or column).
 
 ### `histogram/`
 - [x] ~~`hist_local`~~ (round 27) — CLAHE (Pizer/Zuiderveld 1994).
@@ -106,13 +110,13 @@ Each lands in a single PR.
   aggregate, in bits.
 - [x] ~~`percent`~~ (round 30) — threshold below which a given percentile
   of the aggregate histogram lies.
-- [ ] `stdif` (statistical differencing — local-contrast enhancement).
+- [x] ~~`stdif`~~ (round 32) — local-contrast renormalisation via
+  summed-area tables; targets a configurable mean and sigma.
 - [ ] `hist_plot` (visualise hist as image).
-- [ ] `case` (per-pixel select from band of LUTs).
 
 ### `freqfilt/`
-- [ ] `freqmult` (frequency-domain multiply with mask — apply a
-  designed filter).
+- [x] ~~`freqmult`~~ (round 32) — FwFft → real-mask multiply → InvFft;
+  preserves Float output.
 - [ ] `phasecor` (phase correlation — image registration / motion
   estimation).
 
