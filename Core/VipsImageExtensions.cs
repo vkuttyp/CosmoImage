@@ -327,6 +327,31 @@ public static class VipsImageExtensions
     public static VipsImage HistLocal(this VipsImage image, int tileGridSize = 8, double clipLimit = 3.0)
         => VipsImageOps.HistLocal(image, tileGridSize, clipLimit);
 
+    /// <summary>Pull <paramref name="n"/> consecutive bands starting at <paramref name="band"/>.</summary>
+    public static VipsImage ExtractBand(this VipsImage image, int band, int n = 1)
+        => VipsImageOps.ExtractBand(image, band, n);
+
+    /// <summary>Reduce across bands with a bitwise op (UChar only).</summary>
+    public static VipsImage Bandbool(this VipsImage image,
+        CosmoImage.Operations.Misc.VipsBooleanOperation op)
+        => VipsImageOps.Bandbool(image, op);
+
+    /// <summary>Average bands → single-band output.</summary>
+    public static VipsImage Bandmean(this VipsImage image)
+        => VipsImageOps.Bandmean(image);
+
+    /// <summary>Per-pixel ternary using this image as the condition mask.</summary>
+    public static VipsImage Ifthenelse(this VipsImage condition, VipsImage then, VipsImage @else)
+        => VipsImageOps.Ifthenelse(condition, then, @else);
+
+    /// <summary>Tile <paramref name="across"/>×<paramref name="down"/> copies of the input.</summary>
+    public static VipsImage Replicate(this VipsImage image, int across, int down)
+        => VipsImageOps.Replicate(image, across, down);
+
+    /// <summary>Map a 1-band UChar image to RGB via the built-in jet colour ramp.</summary>
+    public static VipsImage Falsecolor(this VipsImage image)
+        => VipsImageOps.Falsecolor(image);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

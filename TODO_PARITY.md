@@ -38,8 +38,10 @@ Each lands in a single PR.
 
 ### `conversion/`
 - [x] ~~`bandjoin`~~ (round 26) — `Bandjoin(other, …)` for N inputs.
-- [ ] `bandbool` / `bandfold` / `bandunfold` / `bandjoin_const` /
-  `bandmean` / `bandrank` — remaining band-axis ops.
+- [x] ~~`bandbool`~~ (round 28) — AND/OR/XOR fold across bands (UChar).
+- [x] ~~`bandmean`~~ (round 28) — average bands; UChar (rounded) + Float.
+- [ ] `bandfold` / `bandunfold` / `bandjoin_const` / `bandrank` —
+  remaining band-axis ops.
 - [x] ~~`addalpha`~~ (round 27) — synthesise constant-fill alpha plane and
   bandjoin. Pass-through if input already has alpha.
 - [x] ~~`flatten`~~ (round 27) — composes RGBA/GA over an opaque background
@@ -53,16 +55,18 @@ Each lands in a single PR.
 - [x] ~~`gravity`~~ (round 27) — `Pad(width, height, background, position)`
   with `VipsCompass` (Centre/N/E/S/W/NE/SE/SW/NW). Plus `BackgroundColor`
   for flatten-onto-fill while keeping alpha.
-- [ ] `replicate` (tile to bigger size).
+- [x] ~~`replicate`~~ (round 28) — tile across×down. Scanline-slab copy
+  across tile seams.
 - [ ] `rot45` (45-degree rotate by lookup).
 - [ ] `byteswap`.
-- [ ] `falsecolour` (per-band LUT for visualisation).
-- [ ] `ifthenelse` (per-pixel ternary).
+- [x] ~~`falsecolour`~~ (round 28) — built-in jet ramp, 1-band UChar → RGB.
+- [x] ~~`ifthenelse`~~ (round 28) — per-pixel ternary; UChar condition
+  broadcasts or selects per-band, UChar + Float then/else.
 - [ ] `switch` (case-style multi-image select).
 - [ ] `wrap` (toroidal shift).
 - [ ] `zoom` (integer scale-up by replication).
 - [ ] `scale` (linear stretch to 0..255 — different from `Resize`).
-- [ ] `extract_band`.
+- [x] ~~`extract_band`~~ (round 28) — pull N consecutive bands from offset.
 - [ ] `arrayjoin` / `join` / `grid` / `insert`.
 
 ### `convolution/`

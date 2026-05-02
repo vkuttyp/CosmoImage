@@ -912,6 +912,43 @@ public static partial class VipsImageOps
     public static VipsImage Bandjoin(params VipsImage[] inputs)
         => Run(new VipsBandjoin { Inputs = inputs });
 
+    // From Operations/Misc/VipsExtractBand.cs
+    /// <summary>Pull <paramref name="n"/> consecutive bands starting at <paramref name="band"/>.</summary>
+    public static VipsImage ExtractBand(VipsImage input, int band, int n = 1)
+        => Run(new VipsExtractBand { In = input, Band = band, N = n });
+
+    // From Operations/Misc/VipsBandbool.cs
+    /// <summary>Reduce across bands with a bitwise op (AND/OR/XOR). UChar only; output is single-band.</summary>
+    public static VipsImage Bandbool(VipsImage input, VipsBooleanOperation op)
+        => Run(new VipsBandbool { In = input, Op = op });
+
+    /// <summary>Average bands → single-band output of the same band format.</summary>
+    public static VipsImage Bandmean(VipsImage input)
+        => Run(new VipsBandmean { In = input });
+
+    // From Operations/Misc/VipsIfthenelse.cs
+    /// <summary>
+    /// Per-pixel ternary. Picks from <paramref name="then"/> where condition
+    /// is non-zero, from <paramref name="@else"/> otherwise. Condition must
+    /// be UChar with either 1 band or matching bands of <paramref name="then"/>.
+    /// </summary>
+    public static VipsImage Ifthenelse(VipsImage condition, VipsImage then, VipsImage @else)
+        => Run(new VipsIfthenelse { Condition = condition, Then = then, Else = @else });
+
+    // From Operations/Geometric/VipsReplicate.cs
+    /// <summary>Tile <paramref name="across"/>×<paramref name="down"/> copies of the input.</summary>
+    public static VipsImage Replicate(VipsImage input, int across, int down)
+        => Run(new VipsReplicate { In = input, Across = across, Down = down });
+
+    // From Operations/Color/VipsFalsecolor.cs
+    /// <summary>
+    /// Map a 1-band UChar image to RGB via a built-in 256-entry "jet"
+    /// colour ramp — useful for visualising depth maps, masks, and
+    /// histograms.
+    /// </summary>
+    public static VipsImage Falsecolor(VipsImage input)
+        => Run(new VipsFalsecolor { In = input });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

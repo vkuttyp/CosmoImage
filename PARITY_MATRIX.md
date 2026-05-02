@@ -75,7 +75,7 @@ flattening, premultiplication. **Major gap area.**
 | :--- | :---: | :--- |
 | `cast` (band-format conversion) | ✅ | `Cast`/`CastFloat`/`CastUChar` (UChar↔Float only) |
 | `copy` | 🟡 | Implicit via op pipeline; no explicit `Copy(image)` |
-| `extract_area` / `extract_band` | 🟡 | `ExtractArea` ✅; band extraction missing |
+| `extract_area` / `extract_band` | ✅ | `ExtractArea(left, top, w, h)` and `ExtractBand(band, n=1)` |
 | `embed` (place into larger canvas with extension mode) | ✅ | `Embed` with Black/White/Copy/Repeat/Mirror/Background modes; per-band background colour |
 | `gravity` (positional embed) | ✅ | `Pad(width, height, background, position)` with `VipsCompass` (Centre/N/E/S/W/NE/SE/SW/NW); `BackgroundColor(...)` flattens transparent pixels onto a fill colour while keeping alpha |
 | `flip` | ✅ | |
@@ -87,21 +87,21 @@ flattening, premultiplication. **Major gap area.**
 | `flatten` (alpha-flatten against background) | ✅ | `Flatten(r, g, b)` — composes RGBA/GA over an opaque background, drops alpha. UChar + Float branches |
 | `premultiply` / `unpremultiply` | ✅ | `Premultiply` / `Unpremultiply` — UChar normalizes alpha by 255; Float treats alpha as nominal [0,1]. Pass-through on band counts without alpha |
 | `addalpha` | ✅ | `AddAlpha(alpha=255)` — synthesise constant alpha plane and bandjoin. Pass-through if input already has alpha |
-| `bandbool` (and/or/xor across bands) | ❌ | |
+| `bandbool` (and/or/xor across bands) | ✅ | `Bandbool(op)` reduces input bands with AND/OR/XOR → single-band UChar |
 | `bandfold` / `bandunfold` (W↔W*bands rearrange) | ❌ | |
 | `bandjoin` | ✅ | `Bandjoin(other, …)` — concatenate bands across N images. `bandjoin_const` (fold constants in) still missing |
-| `bandmean` (average all bands) | ❌ | |
+| `bandmean` (average all bands) | ✅ | `Bandmean()` — UChar (with rounding) and Float branches |
 | `bandrank` (rank-statistic across bands) | ❌ | |
 | `byteswap` | ❌ | |
 | `cache` (operation result cache) | 🟡 | Internal `VipsCache` only |
-| `falsecolour` | ❌ | Per-band LUT for visualisation |
+| `falsecolour` | ✅ | `Falsecolor()` — built-in jet colour ramp; 1-band UChar → RGB |
 | `grid` (lay tiles into grid) | ❌ | |
-| `ifthenelse` (per-pixel ternary) | ❌ | Conditional pixel selection |
+| `ifthenelse` (per-pixel ternary) | ✅ | `Ifthenelse(then, else)` — UChar condition broadcasts (1-band) or selects per-band (N-band). UChar + Float then/else |
 | `insert` (paste image at point) | 🟡 | `Composite` covers the common case |
 | `join` (join two images side-by-side) | ❌ | |
 | `arrayjoin` (join N images in a grid) | ❌ | |
 | `msb` (most-significant-byte extraction) | ❌ | |
-| `replicate` (tile to bigger size) | ❌ | |
+| `replicate` (tile to bigger size) | ✅ | `Replicate(across, down)` — scanline-slab copy across tile seams |
 | `scale` (linear stretch to 0..255) | ❌ | Different from `Resize` — value-range scaling |
 | `sequential` (force sequential read order) | ❌ | |
 | `subsample` | 🟡 | `Shrink` covers integer subsample |
