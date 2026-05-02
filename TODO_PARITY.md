@@ -76,8 +76,18 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
 - [x] ~~**BokehBlur**~~. Hexagonal-aperture kernel composed with the existing
   `VipsConv`. `image.BokehBlur(radius)`.
 - [x] ~~**TIFF pyramidal write**~~. `SaveTiffAsync(image, writer, pyramid:true)`
-  emits Magick's `Ptif`. OME-TIFF and Tiled-TIFF (with explicit tile geometry
-  control) still pending — those are deeper libtiff knobs.
+  emits Magick's `Ptif`. Tiled-TIFF (with explicit tile geometry control)
+  still pending — that's a deeper libtiff knob.
+
+- [x] ~~**OME-TIFF**~~ shipped at the metadata-round-trip level. TIFF
+  ImageDescription (tag 270) is now a generic round-trippable field via
+  `Metadata["tiff:image-description"]`; OME-shaped XML is also surfaced
+  as `Metadata["ome:xml"]` and parsed by `VipsOmeTiff` for typed access
+  to `<Pixels>` PhysicalSize and `<Channel>` records. The TIFF loader
+  auto-populates `XRes`/`YRes` from PhysicalSizeX/Y with unit conversion
+  (µm/mm/cm/m/nm/Å). N-D layout (Z, C, T) is intentionally out of scope
+  — `VipsImage` is 2D / multi-page only; callers needing full N-D
+  semantics work with the raw XML.
 - [x] ~~**`dzsave` (Deep Zoom)**~~ shipped. `VipsDzSaver.SaveAsync(image, basePath, …)`
   emits the Microsoft DZI 2008 layout (`{basePath}.dzi` + `{basePath}_files/`).
   Supports JPEG and PNG tiles, configurable tile size and overlap.

@@ -101,6 +101,18 @@ public static class VipsTiffSaver
                 collection[0].SetProfile(new ImageProfile("xmp", xmp));
             if (image.MetadataBlobs.TryGetValue("icc", out var icc))
                 collection[0].SetProfile(new ColorProfile(icc));
+
+            // ImageDescription (TIFF tag 270). OME-TIFF callers set
+            // Metadata["ome:xml"]; generic TIFF callers set
+            // Metadata["tiff:image-description"]. ome:xml wins when both
+            // are present so the OME schema authoritatively round-trips.
+            string? description = null;
+            if (image.Metadata.TryGetValue("ome:xml", out var ome) && !string.IsNullOrEmpty(ome))
+                description = ome;
+            else if (image.Metadata.TryGetValue("tiff:image-description", out var generic) && !string.IsNullOrEmpty(generic))
+                description = generic;
+            if (description != null)
+                collection[0].SetAttribute("comment", description);
         }
 
         // Pyramid only applies to single-page output. Multi-page + pyramid is

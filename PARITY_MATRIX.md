@@ -30,7 +30,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | JPEG | ✅ | ✅ | n/a | EXIF + XMP raw blobs, orientation int |
 | PNG | ✅ | ✅ | n/a | EXIF (eXIf), ICC (iCCP, deflated), XMP (iTXt) |
 | WebP | ✅ | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
-| TIFF | ✅ | ✅ | ✅ multi-page | EXIF/XMP/ICC + orientation |
+| TIFF | ✅ | ✅ | ✅ multi-page | EXIF/XMP/ICC + orientation + ImageDescription (incl. OME-XML) |
 | BMP | ✅ | ✅ | n/a | — |
 | GIF | ✅ | ✅ | ✅ animated (per-frame delays) | EXIF/XMP/ICC + Comment via Magick |
 | HEIF / AVIF | ✅ | ✅ | ❌ sequences | EXIF/XMP/ICC via Magick |
@@ -55,14 +55,14 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | JPEG | ✅ | n/a | EXIF + XMP via APP1; ICC via multi-segment APP2 |
 | PNG | ✅ (full + palette PNG-8) | n/a | eXIf, iCCP (deflated), iTXt for XMP |
 | WebP | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
-| TIFF | ✅ | ✅ multi-page; pyramidal (Ptif) on `pyramid:true` | EXIF/XMP/ICC native |
+| TIFF | ✅ | ✅ multi-page; pyramidal (Ptif) on `pyramid:true` | EXIF/XMP/ICC + ImageDescription (writes back `ome:xml` or `tiff:image-description`) |
 | HEIF / AVIF | ✅ | ❌ sequences | EXIF/XMP/ICC via Magick |
 | GIF | ✅ | ✅ animated | profiles + Comment on first frame |
 | APNG | ✅ | ✅ animated | profiles + Comment on first frame |
 | TGA / QOI / PBM-PAM | ✅ | n/a | EXIF/XMP/ICC via Magick (where supported) |
 | Pyramidal TIFF (Ptif) | ✅ via `SaveTiffAsync(pyramid:true)` | — | — |
 | dzsave (Deep Zoom / DZI) | ✅ | n/a | Microsoft DZI 2008 schema; OpenSeadragon-compatible |
-| OME-TIFF | ❌ | — | — |
+| OME-TIFF | ✅ | n/a | OME-XML round-trips through TIFF ImageDescription; `VipsOmeTiff` parses PhysicalSize/Channels into typed accessors. N-D layout (Z/C/T) intentionally not modelled — image is 2D / multi-page only |
 
 ---
 
@@ -208,4 +208,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 158 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 167 tests pass.*

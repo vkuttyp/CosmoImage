@@ -208,10 +208,32 @@ public static class VipsTiffLoader
             int orient = (int)probe.Orientation;
             if (orient >= 1 && orient <= 8)
                 image.Metadata["orientation"] = orient.ToString();
+
+            // ImageDescription (TIFF tag 270). Magick exposes it under the
+            // "comment" attribute. Used for free-form notes by most authoring
+            // tools and as the carrier for OME-XML in microscopy / pathology
+            // (OME-TIFF) — see VipsOmeTiff for typed accessors.
+            CapturImageDescription(probe, image);
         }
         catch { /* metadata extraction is best-effort; load shouldn't fail on it */ }
 
         return image;
+    }
+
+    private static void CapturImageDescription(IMagickImage<byte> probe, VipsImage image)
+    {
+        var imageDescription = probe.GetAttribute("comment");
+        if (string.IsNullOrEmpty(imageDescription)) return;
+
+        image.Metadata["tiff:image-description"] = imageDescription;
+
+        // OME-TIFF carries OME-XML in this same tag. Surface the XML under a
+        // dedicated key and try to populate XRes/YRes from PhysicalSizeX/Y.
+        if (CosmoImage.Core.VipsOmeTiff.LooksLikeOmeXml(imageDescription))
+        {
+            image.Metadata["ome:xml"] = imageDescription;
+            CosmoImage.Core.VipsOmeTiff.PopulatePhysicalSize(image);
+        }
     }
 
     /// <summary>
@@ -302,6 +324,7 @@ public static class VipsTiffLoader
             if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
             int orient = (int)first.Orientation;
             if (orient >= 1 && orient <= 8) image.Metadata["orientation"] = orient.ToString();
+            CapturImageDescription(first, image);
 
             return image;
         }
