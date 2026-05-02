@@ -82,19 +82,33 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
 
 Each is significant work; defer until a concrete use case demands it.
 
-- 🟡 **Float-format ops throughout** — partial. Infrastructure shipped:
-    - `VipsCast` (UChar↔Float, no auto-normalization, identity pass-through)
-    - `VipsLinear` Float code path (no clamp, full-precision a·x+b)
-    - `VipsConv1D` Float code path (gives `GaussBlur` Float for free)
-    - Fluent `image.CastFloat()` / `image.CastUChar()`
+- 🟡 **Float-format ops throughout** — partial.
 
-  **Remaining**: each existing op (Invert, Recomb, Resize, Resize1D, Affine,
-  Conv 2D, Composite, Morph, Rank, Maplut, Linearize/Delinearize, Math suite,
-  HistFind, FwFft/InvFft, Glow/Vignette/Effects) needs its own Float branch
-  added following the dispatch pattern in `VipsLinear.Generate` /
-  `VipsConv1D.Generate`. Each op is a small, independent change; the work
-  is breadth-first not depth-first. Estimate: a few days per ~5 ops once
-  the pattern is internalised.
+  **Shipped**:
+    - Keystone: `VipsCast` (UChar↔Float, libvips no-auto-normalize convention)
+    - Pointwise: `VipsInvert`, `VipsLinear`, `VipsRecomb` (drives
+      Saturate/Sepia/Hue/Greyscale), `VipsMath` (Abs/Sin/Cos/Tan/Log/Log10/
+      Exp/Exp10/Sqrt/Pow with mathematical-radian semantics on Float)
+    - Window: `VipsConv1D` (drives `GaussBlur`), `VipsConv` (2D mask),
+      `VipsMorph` (Dilate/Erode with -∞/+∞ seeding)
+    - Color management: `VipsLinearize`/`VipsDelinearize` with full
+      per-pixel sRGB transfer in double precision (much higher precision
+      than the UChar 256-entry LUT)
+
+  **Remaining** — each follows the same dispatch pattern; geometric ops
+  are the biggest remaining chunk:
+    - Geometric: `VipsResize` / `VipsResize1D` / `VipsAffine` / `VipsShrink`
+      / `VipsRotate`. Kernel sampling reads bytes per band — needs reworking
+      for arbitrary pel sizes
+    - Drawing/Composite: `VipsComposite`, `VipsDrawLine`, `VipsDrawRect`
+    - Effects: `VipsGlow`, `VipsVignette`, `VipsPixelate`, `VipsArtisticEffects`
+    - Analysis: `VipsHistFind` (needs binning strategy beyond 256 bins),
+      `VipsStats`, `VipsFwFft`/`VipsInvFft` Float-input path
+    - Misc: `VipsRank` (quickselect on floats), `VipsGamma`, `VipsMaplut`
+      (Float input would need fractional LUT interpolation; UChar-input
+      is the canonical use)
+    - Boolean suite (`And`/`Or`/`Xor`/`LShift`/`RShift`) is intentionally
+      UChar-only — bitwise on Float is not meaningful
 
 - [ ] **Proper PCS-based ICC color management**. Needs a Color Management
   Module (LittleCMS) native binding. Current `IccTransform` is a one-shot

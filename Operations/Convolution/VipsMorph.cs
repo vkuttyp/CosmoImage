@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Convolution;
@@ -71,6 +72,10 @@ public class VipsMorph : VipsOperation
         if (inRegion.Prepare(clipped) != 0) return -1;
 
         int bands = @in.Bands;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, @in, mask, method, r, mw, mh, ox, oy, bands);
+
         int pelSize = @in.SizeOfPel;
 
         for (int y = 0; y < r.Height; y++)
@@ -81,7 +86,7 @@ public class VipsMorph : VipsOperation
                 for (int bnd = 0; bnd < bands; bnd++)
                 {
                     byte extreme = method == VipsMorphMethod.Dilate ? (byte)0 : (byte)255;
-                    
+
                     for (int my = 0; mh > my; my++)
                     {
                         for (int mx = 0; mw > mx; mx++)
@@ -106,6 +111,47 @@ public class VipsMorph : VipsOperation
             }
         }
 
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsImage @in, double[,] mask, VipsMorphMethod method, VipsRect r, int mw, int mh, int ox, int oy, int bands)
+    {
+        // Float morphology uses the actual numerical extrema with no [0,255]
+        // bracket. Seed Dilate with -∞, Erode with +∞ so the first valid
+        // sample replaces the seed regardless of its sign.
+        for (int y = 0; y < r.Height; y++)
+        {
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    float extreme = method == VipsMorphMethod.Dilate ? float.NegativeInfinity : float.PositiveInfinity;
+                    bool any = false;
+                    for (int my = 0; my < mh; my++)
+                    {
+                        for (int mx = 0; mx < mw; mx++)
+                        {
+                            if (mask[my, mx] == 0) continue;
+                            int ix = r.Left + x + mx - ox;
+                            int iy = r.Top + y + my - oy;
+                            if (ix >= 0 && ix < @in.Width && iy >= 0 && iy < @in.Height)
+                            {
+                                var inPel = inRegion.GetAddress(ix, iy);
+                                float val = BinaryPrimitives.ReadSingleLittleEndian(inPel.Slice(bnd * 4, 4));
+                                extreme = method == VipsMorphMethod.Dilate
+                                    ? MathF.Max(extreme, val)
+                                    : MathF.Min(extreme, val);
+                                any = true;
+                            }
+                        }
+                    }
+                    // No valid samples (full out-of-bounds + non-zero mask) → 0.
+                    if (!any) extreme = 0;
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice((x * bands + bnd) * 4, 4), extreme);
+                }
+            }
+        }
         return 0;
     }
 }

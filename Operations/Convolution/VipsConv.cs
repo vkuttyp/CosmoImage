@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Convolution;
@@ -64,6 +65,10 @@ public class VipsConv : VipsOperation
         if (inRegion.Prepare(clipped) != 0) return -1;
 
         int bands = @in.Bands;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, @in, mask, r, mw, mh, ox, oy, bands);
+
         int pelSize = @in.SizeOfPel;
 
         for (int y = 0; y < r.Height; y++)
@@ -92,6 +97,37 @@ public class VipsConv : VipsOperation
             }
         }
 
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsImage @in, double[,] mask, VipsRect r, int mw, int mh, int ox, int oy, int bands)
+    {
+        for (int y = 0; y < r.Height; y++)
+        {
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    double sum = 0;
+                    for (int my = 0; my < mh; my++)
+                    {
+                        for (int mx = 0; mx < mw; mx++)
+                        {
+                            int ix = r.Left + x + mx - ox;
+                            int iy = r.Top + y + my - oy;
+                            if (ix >= 0 && ix < @in.Width && iy >= 0 && iy < @in.Height)
+                            {
+                                var inPel = inRegion.GetAddress(ix, iy);
+                                float v = BinaryPrimitives.ReadSingleLittleEndian(inPel.Slice(bnd * 4, 4));
+                                sum += v * mask[my, mx];
+                            }
+                        }
+                    }
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice((x * bands + bnd) * 4, 4), (float)sum);
+                }
+            }
+        }
         return 0;
     }
 }

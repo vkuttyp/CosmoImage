@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Color;
@@ -11,10 +12,13 @@ namespace CosmoImage.Operations.Color;
 /// at sharp edges, dark fringes around alpha edges). Pair with
 /// <see cref="VipsDelinearize"/> at the end of the pipeline.
 ///
-/// Output remains UChar so existing UChar-only ops still work; precision
-/// loss in the lower range is the price paid for that compatibility.
-/// True high-precision linear-light processing wants Float band format,
-/// which most ops in this port don't yet handle.
+/// <para>For UChar input, the LUT path is used (256-entry table; precision
+/// loss in the lower range is the cost of UChar compatibility). For Float
+/// input — the high-precision path — the transfer function is computed
+/// per-pixel in double precision with no LUT quantisation. Float input is
+/// expected to be normalized to the nominal sRGB <c>[0,1]</c> range; the
+/// op does not divide by 255. Callers casting from UChar should normalize
+/// first: <c>image.CastFloat().Linear(1.0/255, 0).Linearize()</c>.</para>
 /// </summary>
 public class VipsLinearize : VipsOperation
 {
@@ -72,11 +76,15 @@ public class VipsLinearize : VipsOperation
         VipsRect r = outRegion.Valid;
         if (inRegion.Prepare(r) != 0) return -1;
 
-        var lut = SrgbToLinearLut();
         int bands = @in.Bands;
-        int pelSize = @in.SizeOfPel;
         bool hasAlpha = bands == 2 || bands == 4;
         int colorBands = hasAlpha ? bands - 1 : bands;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, r, bands, colorBands, hasAlpha);
+
+        var lut = SrgbToLinearLut();
+        int pelSize = @in.SizeOfPel;
 
         for (int y = 0; y < r.Height; y++)
         {
@@ -88,6 +96,34 @@ public class VipsLinearize : VipsOperation
                 for (int i = 0; i < colorBands; i++)
                     outAddr[o + i] = lut[inAddr[o + i]];
                 if (hasAlpha) outAddr[o + colorBands] = inAddr[o + colorBands];
+            }
+        }
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsRect r, int bands, int colorBands, bool hasAlpha)
+    {
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                int baseIdx = x * bands * 4;
+                for (int i = 0; i < colorBands; i++)
+                {
+                    int off = baseIdx + i * 4;
+                    double u = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                    // IEC 61966-2-1 inverse sRGB transfer. No clamp — preserves
+                    // out-of-gamut values that downstream ops may reduce back.
+                    double linear = u <= 0.04045 ? u / 12.92 : Math.Pow((u + 0.055) / 1.055, 2.4);
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)linear);
+                }
+                if (hasAlpha)
+                {
+                    inAddr.Slice(baseIdx + colorBands * 4, 4)
+                          .CopyTo(outAddr.Slice(baseIdx + colorBands * 4, 4));
+                }
             }
         }
         return 0;
@@ -156,11 +192,15 @@ public class VipsDelinearize : VipsOperation
         VipsRect r = outRegion.Valid;
         if (inRegion.Prepare(r) != 0) return -1;
 
-        var lut = LinearToSrgbLut();
         int bands = @in.Bands;
-        int pelSize = @in.SizeOfPel;
         bool hasAlpha = bands == 2 || bands == 4;
         int colorBands = hasAlpha ? bands - 1 : bands;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, r, bands, colorBands, hasAlpha);
+
+        var lut = LinearToSrgbLut();
+        int pelSize = @in.SizeOfPel;
 
         for (int y = 0; y < r.Height; y++)
         {
@@ -172,6 +212,33 @@ public class VipsDelinearize : VipsOperation
                 for (int i = 0; i < colorBands; i++)
                     outAddr[o + i] = lut[inAddr[o + i]];
                 if (hasAlpha) outAddr[o + colorBands] = inAddr[o + colorBands];
+            }
+        }
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsRect r, int bands, int colorBands, bool hasAlpha)
+    {
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                int baseIdx = x * bands * 4;
+                for (int i = 0; i < colorBands; i++)
+                {
+                    int off = baseIdx + i * 4;
+                    double linear = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                    // IEC 61966-2-1 forward sRGB transfer. No clamp.
+                    double u = linear <= 0.0031308 ? linear * 12.92 : 1.055 * Math.Pow(linear, 1.0 / 2.4) - 0.055;
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)u);
+                }
+                if (hasAlpha)
+                {
+                    inAddr.Slice(baseIdx + colorBands * 4, 4)
+                          .CopyTo(outAddr.Slice(baseIdx + colorBands * 4, 4));
+                }
             }
         }
         return 0;

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Color;
@@ -66,7 +67,6 @@ public class VipsRecomb : VipsOperation
 
         int colorBands = M.GetLength(0);
         int totalBands = @in.Bands;
-        int pelSize = @in.SizeOfPel;
         bool hasAlpha = totalBands > colorBands;
 
         // Flatten matrix for tighter inner loop indexing.
@@ -75,6 +75,10 @@ public class VipsRecomb : VipsOperation
             for (int i = 0; i < colorBands; i++)
                 Mflat[o * colorBands + i] = M[o, i];
 
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, r, totalBands, colorBands, hasAlpha, Mflat);
+
+        int pelSize = @in.SizeOfPel;
         for (int y = 0; y < r.Height; y++)
         {
             var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
@@ -93,6 +97,40 @@ public class VipsRecomb : VipsOperation
                 }
                 if (hasAlpha)
                     outAddr[baseIdx + colorBands] = inAddr[baseIdx + colorBands];
+            }
+        }
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsRect r, int totalBands, int colorBands, bool hasAlpha, double[] Mflat)
+    {
+        // Hoist the per-pixel scratch out of the loop — same buffer is reused
+        // for every pixel in this Generate call.
+        Span<float> input = stackalloc float[16]; // bands ≤ 16 in any plausible case
+
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                int baseIdx = x * totalBands * 4;
+                for (int i = 0; i < colorBands; i++)
+                    input[i] = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(baseIdx + i * 4, 4));
+
+                for (int o = 0; o < colorBands; o++)
+                {
+                    double sum = 0;
+                    int rowBase = o * colorBands;
+                    for (int i = 0; i < colorBands; i++)
+                        sum += Mflat[rowBase + i] * input[i];
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(baseIdx + o * 4, 4), (float)sum);
+                }
+                if (hasAlpha)
+                {
+                    var alphaSrc = inAddr.Slice(baseIdx + colorBands * 4, 4);
+                    alphaSrc.CopyTo(outAddr.Slice(baseIdx + colorBands * 4, 4));
+                }
             }
         }
         return 0;

@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Misc;
@@ -74,6 +75,9 @@ public class VipsMath : VipsOperation
 
         if (inRegion.Prepare(r) != 0) return -1;
 
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, @in, op, operand, r);
+
         int totalBytes = r.Width * @in.Bands;
         // Build per-byte LUT once per Generate call. UChar input has only 256
         // distinct values, so we get exact pointwise results without paying
@@ -112,6 +116,44 @@ public class VipsMath : VipsOperation
                 outAddr[i] = lut[inAddr[i]];
         }
 
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsImage @in, VipsMathOperation op, double operand, VipsRect r)
+    {
+        // Float input is treated as a raw mathematical value: trig functions
+        // take the input as radians directly (not the UChar wrap-into-[0,2π]
+        // convention); log/exp/pow apply with their natural semantics; no
+        // clamp on output. Matches libvips vips_math.
+        int bands = @in.Bands;
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    int off = (x * bands + bnd) * 4;
+                    double v = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                    double y2 = op switch
+                    {
+                        VipsMathOperation.Abs => Math.Abs(v),
+                        VipsMathOperation.Sin => Math.Sin(v),
+                        VipsMathOperation.Cos => Math.Cos(v),
+                        VipsMathOperation.Tan => Math.Tan(v),
+                        VipsMathOperation.Log => Math.Log(v),
+                        VipsMathOperation.Log10 => Math.Log10(v),
+                        VipsMathOperation.Exp => Math.Exp(v),
+                        VipsMathOperation.Exp10 => Math.Pow(10, v),
+                        VipsMathOperation.Sqrt => Math.Sqrt(v),
+                        VipsMathOperation.Pow => Math.Pow(v, operand),
+                        _ => v
+                    };
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)y2);
+                }
+            }
+        }
         return 0;
     }
 }

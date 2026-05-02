@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Core;
@@ -89,6 +90,29 @@ public class VipsInvert : VipsOperation
         VipsRect r = outRegion.Valid;
 
         if (inRegion.Prepare(r) != 0) return -1;
+
+        // Float path: libvips convention for signed/float types is plain
+        // negation (`out = -x`), not 255-x. Users who want UChar-style invert
+        // on a Float image cast back to UChar first.
+        if (@in.BandFormat == VipsBandFormat.Float)
+        {
+            int bands = @in.Bands;
+            for (int y = 0; y < r.Height; y++)
+            {
+                var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+                var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+                for (int x = 0; x < r.Width; x++)
+                {
+                    for (int bnd = 0; bnd < bands; bnd++)
+                    {
+                        int off = (x * bands + bnd) * 4;
+                        float v = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                        BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), -v);
+                    }
+                }
+            }
+            return 0;
+        }
 
         int totalBytes = r.Width * @in.Bands;
         int vectorSize = System.Numerics.Vector<byte>.Count;
