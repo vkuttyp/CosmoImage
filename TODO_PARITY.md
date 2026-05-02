@@ -43,7 +43,8 @@ Each lands in a single PR.
 - [x] ~~`bandfold` / `bandunfold`~~ (round 29) — pure metadata reshape;
   default factor folds the whole row.
 - [x] ~~`bandjoin_const`~~ (round 29) — append per-band constants.
-- [ ] `bandrank` — rank-statistic across bands.
+- [x] ~~`bandrank`~~ (round 30) — rank-statistic across N inputs;
+  default index = N/2 (median).
 - [x] ~~`addalpha`~~ (round 27) — synthesise constant-fill alpha plane and
   bandjoin. Pass-through if input already has alpha.
 - [x] ~~`flatten`~~ (round 27) — composes RGBA/GA over an opaque background
@@ -60,7 +61,8 @@ Each lands in a single PR.
 - [x] ~~`replicate`~~ (round 28) — tile across×down. Scanline-slab copy
   across tile seams.
 - [ ] `rot45` (45-degree rotate by lookup).
-- [ ] `byteswap`.
+- [x] ~~`byteswap`~~ (round 30) — reverse multi-byte sample bytes;
+  UChar pass-through.
 - [x] ~~`falsecolour`~~ (round 28) — built-in jet ramp, 1-band UChar → RGB.
 - [x] ~~`ifthenelse`~~ (round 28) — per-pixel ternary; UChar condition
   broadcasts or selects per-band, UChar + Float then/else.
@@ -72,7 +74,9 @@ Each lands in a single PR.
 - [x] ~~`scale`~~ (round 29) — linear or log-scale stretch to UChar
   0..255; aggregate min/max via `VipsStats`.
 - [x] ~~`extract_band`~~ (round 28) — pull N consecutive bands from offset.
-- [ ] `arrayjoin` / `join` / `grid` / `insert`.
+- [x] ~~`grid`~~ (round 30) — tall N×tile stack → 2D grid; trailing
+  cells zero-filled.
+- [ ] `arrayjoin` / `join` / `insert` — remaining mosaicing helpers.
 
 ### `convolution/`
 - [ ] `sharpen` — distinct from `UnsharpMask`; libvips' version does
@@ -92,9 +96,12 @@ Each lands in a single PR.
 - [x] ~~`hist_local`~~ (round 27) — CLAHE (Pizer/Zuiderveld 1994).
   Per-tile clipped+redistributed CDF, bilinear blend across 4
   surrounding tile-CDFs at each pixel. UChar only, per-band.
-- [ ] `hist_match` (histogram matching against reference).
-- [ ] `hist_entropy`.
-- [ ] `percent` (find threshold for given percentage).
+- [x] ~~`hist_match`~~ (round 30) — per-band CDF remap; computes both
+  histograms, builds the matching LUT, applies in one pass.
+- [x] ~~`hist_entropy`~~ (round 30) — per-band Shannon entropy +
+  aggregate, in bits.
+- [x] ~~`percent`~~ (round 30) — threshold below which a given percentile
+  of the aggregate histogram lies.
 - [ ] `stdif` (statistical differencing — local-contrast enhancement).
 - [ ] `hist_plot` (visualise hist as image).
 - [ ] `case` (per-pixel select from band of LUTs).

@@ -376,6 +376,26 @@ public static class VipsImageExtensions
     public static VipsImage Scale(this VipsImage image, bool log = false, double exponent = 0.25)
         => VipsImageOps.Scale(image, log, exponent);
 
+    /// <summary>Histogram-match this image's CDF to <paramref name="reference"/>.</summary>
+    public static VipsImage HistMatch(this VipsImage image, VipsImage reference)
+        => VipsImageOps.HistMatch(image, reference);
+
+    /// <summary>Per-band Shannon entropy plus aggregate (bits).</summary>
+    public static double[] HistEntropy(this VipsImage image)
+        => VipsImageOps.HistEntropy(image);
+
+    /// <summary>Threshold below which <paramref name="percent"/>% of the histogram lies.</summary>
+    public static int Percent(this VipsImage image, double percent)
+        => VipsImageOps.Percent(image, percent);
+
+    /// <summary>Reverse byte order of every multi-byte sample (UChar pass-through).</summary>
+    public static VipsImage Byteswap(this VipsImage image)
+        => VipsImageOps.Byteswap(image);
+
+    /// <summary>Lay a tall stack of tiles into a 2D grid.</summary>
+    public static VipsImage Grid(this VipsImage image, int tileHeight, int across, int down)
+        => VipsImageOps.Grid(image, tileHeight, across, down);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

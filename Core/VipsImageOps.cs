@@ -978,6 +978,42 @@ public static partial class VipsImageOps
     public static VipsImage Scale(VipsImage input, bool log = false, double exponent = 0.25)
         => Run(new VipsScale { In = input, Log = log, Exponent = exponent });
 
+    // From Operations/Analysis/VipsHistMatch.cs
+    /// <summary>Remap <paramref name="input"/> so its CDF approximates that of <paramref name="reference"/>.</summary>
+    public static VipsImage HistMatch(VipsImage input, VipsImage reference)
+        => Run(new VipsHistMatch { In = input, Reference = reference });
+
+    // From Operations/Analysis/VipsHistEntropy.cs
+    /// <summary>Shannon entropy per band (bits) plus aggregate at index <c>Bands</c>.</summary>
+    public static double[] HistEntropy(VipsImage input)
+        => VipsHistEntropy.Compute(input);
+
+    // From Operations/Analysis/VipsPercent.cs
+    /// <summary>Pixel value below which <paramref name="percent"/>% of the (aggregate) histogram lies.</summary>
+    public static int Percent(VipsImage input, double percent)
+        => VipsPercent.Compute(input, percent);
+
+    // From Operations/Misc/VipsBandrank.cs
+    /// <summary>
+    /// Per-pixel rank-statistic across N inputs. <paramref name="index"/> = -1
+    /// picks the median; 0 picks the dimmest; N-1 picks the brightest.
+    /// </summary>
+    public static VipsImage Bandrank(VipsImage[] inputs, int index = -1)
+        => Run(new VipsBandrank { Inputs = inputs, Index = index });
+
+    // From Operations/Misc/VipsByteswap.cs
+    /// <summary>Reverse byte order of every multi-byte sample. UChar pass-through.</summary>
+    public static VipsImage Byteswap(VipsImage input)
+        => Run(new VipsByteswap { In = input });
+
+    // From Operations/Geometric/VipsGrid.cs
+    /// <summary>
+    /// Lay a tall <paramref name="input"/> (height = N×<paramref name="tileHeight"/>) into a
+    /// <paramref name="across"/>×<paramref name="down"/> grid.
+    /// </summary>
+    public static VipsImage Grid(VipsImage input, int tileHeight, int across, int down)
+        => Run(new VipsGrid { In = input, TileHeight = tileHeight, Across = across, Down = down });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

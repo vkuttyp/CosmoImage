@@ -91,11 +91,11 @@ flattening, premultiplication. **Major gap area.**
 | `bandfold` / `bandunfold` (W↔W*bands rearrange) | ✅ | `Bandfold(factor)` / `Bandunfold(factor)` — pure metadata reshape, default factor folds the whole row |
 | `bandjoin` / `bandjoin_const` | ✅ | `Bandjoin(other, …)` and `BandjoinConst(c …)` — append constant bands without a synthetic source |
 | `bandmean` (average all bands) | ✅ | `Bandmean()` — UChar (with rounding) and Float branches |
-| `bandrank` (rank-statistic across bands) | ❌ | |
-| `byteswap` | ❌ | |
+| `bandrank` (rank-statistic across bands) | ✅ | `Bandrank(inputs, index=-1)` — N inputs → per-pixel rank-statistic. Default median; UChar (insertion-sort) + Float branches |
+| `byteswap` | ✅ | `Byteswap()` — reverses every multi-byte sample. UChar pass-through |
 | `cache` (operation result cache) | 🟡 | Internal `VipsCache` only |
 | `falsecolour` | ✅ | `Falsecolor()` — built-in jet colour ramp; 1-band UChar → RGB |
-| `grid` (lay tiles into grid) | ❌ | |
+| `grid` (lay tiles into grid) | ✅ | `Grid(tileHeight, across, down)` — tall N×tile stack → 2D grid. Trailing cells zero-filled |
 | `ifthenelse` (per-pixel ternary) | ✅ | `Ifthenelse(then, else)` — UChar condition broadcasts (1-band) or selects per-band (N-band). UChar + Float then/else |
 | `insert` (paste image at point) | 🟡 | `Composite` covers the common case |
 | `join` (join two images side-by-side) | ❌ | |
@@ -264,13 +264,13 @@ Frequency-domain filtering.
 | `hist_find` | ✅ |
 | `hist_cum`, `hist_norm`, `hist_equal` | ✅ |
 | `maplut` | ✅ |
-| `hist_entropy` | ❌ |
+| `hist_entropy` | ✅ | `HistEntropy()` returns per-band Shannon entropy plus aggregate (bits) |
 | `hist_local` (CLAHE — contrast-limited adaptive histogram equalization) | ✅ | `HistLocal(tileGridSize=8, clipLimit=3.0)` — Pizer/Zuiderveld 1994. Per-tile clipped+redistributed CDF, bilinear blend across 4 surrounding tile-CDFs at each pixel. UChar only. Per-band (no Lab conversion) |
-| `hist_match` (histogram matching against reference) | ❌ |
+| `hist_match` (histogram matching against reference) | ✅ | `HistMatch(reference)` — per-band CDF remap. Computes both histograms and the matching LUT, applies in one pass |
 | `hist_plot` (visualise hist as image) | ❌ |
 | `hist_ismonotonic` | ❌ |
 | `case` (per-pixel select from band of LUTs) | ❌ |
-| `percent` (find threshold for given percentage) | ❌ |
+| `percent` (find threshold for given percentage) | ✅ | `Percent(percent)` — bin at which percentile of aggregate histogram is reached |
 | `stdif` (statistical differencing — local-contrast enhancement) | ❌ |
 
 ---
