@@ -920,4 +920,13 @@ public static partial class VipsImageOps
     /// </summary>
     public static Task SaveBmpAsync(VipsImage image, PipeWriter writer)
         => VipsBmpSaver.SaveAsync(image, writer);
+
+    // From Savers/VipsNiftiSaver.cs
+    /// <summary>
+    /// Save as single-file NIfTI-1 (<c>.nii</c>). UChar → datatype 2 (uint8);
+    /// Float → datatype 16 (float32). 1-band saves as 2D, multi-band as 3D
+    /// with planes mapped to the third dimension.
+    /// </summary>
+    public static Task SaveNiftiAsync(VipsImage image, PipeWriter writer)
+        => VipsNiftiSaver.SaveAsync(image, writer);
 }

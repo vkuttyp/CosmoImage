@@ -375,4 +375,8 @@ public static class VipsImageExtensions
     /// <summary>Save as BMP. 24/32 bpp BI_RGB; 1-band gray replicated to 24bpp.</summary>
     public static Task SaveBmpAsync(this VipsImage image, PipeWriter writer)
         => VipsImageOps.SaveBmpAsync(image, writer);
+
+    /// <summary>Save as single-file NIfTI-1 (.nii). UChar → datatype 2; Float → datatype 16.</summary>
+    public static Task SaveNiftiAsync(this VipsImage image, PipeWriter writer)
+        => VipsImageOps.SaveNiftiAsync(image, writer);
 }

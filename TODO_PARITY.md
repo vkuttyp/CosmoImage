@@ -77,10 +77,18 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
   OBSERVER / etc. survive load → save via `Metadata["fits:*"]`. NAXIS≥4
   data cubes and additional HDUs (binary tables) intentionally out of scope.
 
-- [ ] **NIfTI**. Neuroimaging format. Similar shape to FITS (header +
-  raw pixel data) but the header is binary-fixed rather than ASCII cards,
-  and the data layout is more complex (4D volumes, slope/intercept,
-  qform/sform spatial transforms). Defer until a concrete use case shows up.
+- [x] ~~**NIfTI-1 (2D / 3D, single-file `.nii`)**~~ shipped. Pure-C# loader
+  with auto-endian detection (the canonical `dim[0] ∈ 1..7` rule), datatype
+  dispatch (uint8 → UChar, float32/float64 → Float), `scl_slope`/`scl_inter`
+  linear value transform, and `pixdim` → libvips `XRes`/`YRes` with mm
+  units. Saver emits the `n+1` single-file form with native little-endian.
+  3-band and 4-band images map to the third dimension as image planes.
+  Header descrip / datatype / scl fields round-trip via `Metadata["nifti:*"]`.
+
+  **Remaining**: 4D+ time-series (fMRI volumes — needs N-D semantics that
+  `VipsImage` doesn't model), paired `.hdr/.img` form, signed-integer
+  datatypes (int16/int32 are common in raw scanner output), full qform/
+  sform quaternion-based spatial transforms.
 - [x] ~~**Animated AVIF / HEIC sequences (load)**~~ shipped. `VipsHeifLoader`
   enumerates frames via `MagickImageCollection`, stacks into a tall buffer
   with `n-pages` / `page-height` / `animation-delays` metadata (same
