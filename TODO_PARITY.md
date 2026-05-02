@@ -227,11 +227,18 @@ Each is significant work; defer until a concrete use case demands it.
     BITFIELDS-masked, and V4/V5 variants fall through to Magick — the
     fast path covers the modern common case while preserving full
     coverage for edge files.
+  - **TGA** (round 19) — types 2 (uncompressed RGB), 3 (uncompressed
+    grayscale), 10 (RLE RGB), 11 (RLE grayscale); depths 24/32 (RGB)
+    and 8 (grayscale). Both top-to-bottom and bottom-to-top row order
+    handled. Saver always emits uncompressed top-to-bottom — the
+    layout viewers expect from a modern encoder. Paletted (types 1/9)
+    and 16bpp RGB555 still fall through to Magick.
 
-  Other formats still on Magick: WebP / HEIF / AVIF / TIFF / SVG / GIF /
-  TGA. Each is a separate decoder port; expect days-to-weeks per format.
-  TGA is probably the next cheapest win — fixed-layout 18-byte header
-  with optional RLE.
+  Other formats still on Magick: WebP / HEIF / AVIF / TIFF / SVG / GIF.
+  Each is a separate decoder port; expect days-to-weeks per format.
+  GIF (LZW) and TIFF (vast variant matrix, libtiff is huge) are the
+  largest remaining; SVG is the only one we can't realistically port
+  (SVG rendering is a full vector toolkit, not a codec).
 
 ---
 

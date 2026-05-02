@@ -42,7 +42,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | FITS | ✅ | ✅ | n/a | All header cards round-trip via `Metadata["fits:*"]`; BSCALE/BZERO interpreted on load |
 | OpenEXR / NIfTI | ❌ | ❌ | n/a | — |
 | CSV / Matrix / Matlab | ❌ | ❌ | n/a | — |
-| TGA | ✅ | ✅ | n/a | EXIF/XMP/ICC via Magick |
+| TGA | ✅ pure-C# fast path (types 2/3/10/11) + Magick fallback | ✅ pure-C# (uncompressed types 2/3) | n/a | paletted (types 1/9) and 16bpp still go through Magick |
 | QOI | ✅ pure-C# | ✅ pure-C# | n/a | second format dropped from Magick — full QOI v1.0 spec |
 | PBM / PGM / PPM | ✅ pure-C# | ✅ pure-C# | n/a | first format dropped from Magick.NET dependency |
 | PAM | ✅ via Magick | ✅ via Magick | n/a | — |
@@ -210,4 +210,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 207 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 213 tests pass.*
