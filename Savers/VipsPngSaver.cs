@@ -64,6 +64,10 @@ public static class VipsPngSaver
         {
             await WriteChunkAsync(stream, "eXIf", exifBlob, cancellationToken);
         }
+        if (image.MetadataBlobs.TryGetValue("xmp", out var xmpBlob))
+        {
+            await WriteChunkAsync(stream, "iTXt", BuildXmpItxtData(xmpBlob), cancellationToken);
+        }
 
         // 3. IDAT (Compressed pixels)
         // Pixel preparation runs in parallel across strip-shaped tiles via VipsSink;
@@ -185,6 +189,27 @@ public static class VipsPngSaver
         {
             zlib.Write(iccProfile, 0, iccProfile.Length);
         }
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Build an iTXt chunk payload for an XMP packet. Layout:
+    /// "XML:com.adobe.xmp" + 0x00 + compression flag (0 = uncompressed) +
+    /// compression method (0) + empty language tag + 0x00 + empty translated
+    /// keyword + 0x00 + UTF-8 XMP text. Uncompressed is the convention every
+    /// XMP-aware reader recognizes.
+    /// </summary>
+    private static byte[] BuildXmpItxtData(byte[] xmp)
+    {
+        var keyword = System.Text.Encoding.Latin1.GetBytes("XML:com.adobe.xmp");
+        using var ms = new MemoryStream();
+        ms.Write(keyword, 0, keyword.Length);
+        ms.WriteByte(0);  // null terminator after keyword
+        ms.WriteByte(0);  // compression flag (uncompressed)
+        ms.WriteByte(0);  // compression method
+        ms.WriteByte(0);  // empty language tag + null
+        ms.WriteByte(0);  // empty translated keyword + null
+        ms.Write(xmp, 0, xmp.Length);
         return ms.ToArray();
     }
 

@@ -103,6 +103,8 @@ public static class VipsGifSaver
                 collection[0].SetProfile(new ImageProfile("xmp", xmp));
             if (image.MetadataBlobs.TryGetValue("icc", out var icc))
                 collection[0].SetProfile(new ColorProfile(icc));
+            if (image.Metadata.TryGetValue("comment", out var comment) && !string.IsNullOrEmpty(comment))
+                collection[0].SetAttribute("comment", comment);
         }
 
         // Magick.NET's Write isn't truly async; buffer to memory then forward.

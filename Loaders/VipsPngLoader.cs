@@ -115,6 +115,17 @@ public static class VipsPngLoader
                     image.MetadataBlobs["exif"] = data;
                 await SkipAsync(source, 4, cancellationToken); // CRC
             }
+            else if (type == 0x69545874 && image != null) // "iTXt" — internationalized text; XMP rides here
+            {
+                var data = new byte[length];
+                int read = await source.ReadAsync(data, cancellationToken);
+                if (read == (int)length)
+                {
+                    var xmp = TryExtractXmpFromITxt(data);
+                    if (xmp != null) image.MetadataBlobs["xmp"] = xmp;
+                }
+                await SkipAsync(source, 4, cancellationToken); // CRC
+            }
             else if (type == 0x69434350 && image != null) // "iCCP" — name + 0 + compression(0) + deflate(profile)
             {
                 var data = new byte[length];
@@ -171,6 +182,53 @@ public static class VipsPngLoader
         });
 
         return image;
+    }
+
+    /// <summary>
+    /// Parse the PNG iTXt chunk payload and return the embedded text bytes if
+    /// the keyword identifies an XMP packet. iTXt layout (PNG spec 11.3.4.5):
+    /// keyword (1-79 latin-1) + 0x00 + compression flag (1) + compression
+    /// method (1) + language tag + 0x00 + translated keyword + 0x00 +
+    /// text (UTF-8, deflate-compressed iff flag=1). We accept the canonical
+    /// Adobe XMP keyword "XML:com.adobe.xmp".
+    /// </summary>
+    private static byte[]? TryExtractXmpFromITxt(byte[] data)
+    {
+        try
+        {
+            int kEnd = Array.IndexOf(data, (byte)0);
+            if (kEnd <= 0 || kEnd + 4 >= data.Length) return null;
+            string keyword = System.Text.Encoding.Latin1.GetString(data, 0, kEnd);
+            if (keyword != "XML:com.adobe.xmp") return null;
+
+            int p = kEnd + 1;
+            byte compFlag = data[p++];
+            p++; // compression method (always 0)
+            int langEnd = Array.IndexOf(data, (byte)0, p);
+            if (langEnd < 0) return null;
+            int trEnd = Array.IndexOf(data, (byte)0, langEnd + 1);
+            if (trEnd < 0) return null;
+
+            int textStart = trEnd + 1;
+            int textLen = data.Length - textStart;
+            if (textLen <= 0) return null;
+
+            if (compFlag == 0)
+            {
+                var raw = new byte[textLen];
+                Buffer.BlockCopy(data, textStart, raw, 0, textLen);
+                return raw;
+            }
+            using var compressed = new MemoryStream(data, textStart, textLen);
+            using var inflate = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionMode.Decompress);
+            using var output = new MemoryStream();
+            inflate.CopyTo(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static async Task SkipAsync(IVipsSource source, long length, CancellationToken cancellationToken)

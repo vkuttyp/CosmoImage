@@ -18,39 +18,29 @@ items that real production pipelines might still hit.
   a new image, not a mutated buffer. **Cost: weeks. Value: ergonomic for app
   authors who write loops over pixels; production code is fine without it.**
 
-- [ ] **PNG XMP via `iTXt` chunk**. The iTXt format is "keyword + null + flags
-  + lang tag + null + translated keyword + null + UTF-8 text". We already
-  read/write `eXIf` and `iCCP`; XMP is the missing third leg.
-  **Cost: ~50 lines reader, ~50 lines writer. Value: completes PNG metadata round-trip.**
+- [x] ~~**PNG XMP via `iTXt` chunk**~~. Read+write landed; canonical
+  `XML:com.adobe.xmp` keyword, uncompressed UTF-8 payload.
 
-- [ ] **GIF / APNG metadata round-trip**. Magick.NET supports GIF/PNG comments
-  and APNG ancillary chunks. Not a typical workflow concern but unblocks
-  edge cases (license attribution embedded in animated GIFs).
+- [x] ~~**GIF / APNG metadata round-trip**~~. EXIF/XMP/ICC profiles plus the
+  free-form `Metadata["comment"]` attribute round-trip via Magick.NET.
 
 ---
 
 ## Tier 2 — quality-of-life
 
-Useful additions that don't block anything but improve the library.
+All Tier-2 items shipped in this pass.
 
-- [ ] **Math suite**: `abs`, `sin`, `cos`, `log`, `exp`, `pow`, `sqrt` as
-  pointwise ops. ~50 lines. libvips has these as `vips_math`.
-
-- [ ] **Boolean / Relational suite**: `and`, `or`, `xor`, `lt`, `le`, `gt`,
-  `ge`, `eq`, `neq`. Useful for masking workflows.
-
-- [ ] **Stats ops**: `avg`, `min`, `max`, `deviate`, `stats`. Analysis-side;
-  often needed in scientific or auto-grading workflows.
-
-- [ ] **Inverse FFT + spectrum**. Forward exists; inverse and magnitude/phase
-  decomposition close out the frequency-domain story.
-
-- [ ] **Open / Close / Rank morphology**. Dilate + Erode are present; their
-  compositions and rank filters (median is rank 50%) are missing.
-
-- [ ] **`Mutate(action)` block scoping API**. Pure ergonomic — wraps the
-  existing fluent extensions in an action delegate. ImageSharp users who
-  prefer that style would land softer.
+- [x] ~~**Math suite**~~ — `Abs/Sin/Cos/Tan/Log/Log10/Exp/Exp10/Sqrt/Pow`,
+  LUT-driven on UChar.
+- [x] ~~**Boolean / Relational suite**~~ — const-vs-image and image-vs-image
+  variants for `And/Or/Xor/LShift/RShift` and `Equal/NotEqual/Less/LessEq/More/MoreEq`.
+- [x] ~~**Stats ops**~~ — `Stats(image)` returns per-band + aggregate
+  `Min/Max/Avg/Deviate`; convenience `Avg/Min/Max/Deviate(image)` shortcuts.
+- [x] ~~**Inverse FFT + spectrum**~~ — `InvFft` reconstructs spatial UChar from
+  DPComplex; `Spectrum` returns FFT-shifted, normalized log-magnitude.
+- [x] ~~**Open / Close / Rank morphology**~~ — Open/Close as Erode↔Dilate
+  compositions; `Rank(w, h, k)` with quickselect; `Median(window)` shortcut.
+- [x] ~~**`Mutate(action)` block scoping API**~~ — `image.Mutate(im => im.Resize(...).Sepia())`.
 
 ---
 
@@ -126,8 +116,8 @@ Each is significant work; defer until a concrete use case demands it.
 
 | Tier | Items remaining | Median effort |
 | :--- | :---: | :--- |
-| 1 (production) | 3 | small to large |
-| 2 (quality-of-life) | 6 | small each |
+| 1 (production) | 1 | architectural (Image<TPixel>) |
+| 2 (quality-of-life) | 0 | — |
 | 3 (niche) | ~12 | small to medium |
 | 4 (architectural) | 6 | weeks to months each |
 

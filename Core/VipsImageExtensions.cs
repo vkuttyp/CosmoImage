@@ -1,5 +1,9 @@
+using System;
 using System.IO.Pipelines;
 using System.Threading.Tasks;
+using CosmoImage.Operations.Analysis;
+using CosmoImage.Operations.Convolution;
+using CosmoImage.Operations.Misc;
 
 namespace CosmoImage.Core;
 
@@ -161,6 +165,22 @@ public static class VipsImageExtensions
     public static VipsImage Erode(this VipsImage image, double[,] mask)
         => VipsImageOps.Erode(image, mask);
 
+    /// <summary>Morphological opening: erode then dilate. Removes small specks.</summary>
+    public static VipsImage Open(this VipsImage image, double[,] mask)
+        => VipsImageOps.Open(image, mask);
+
+    /// <summary>Morphological closing: dilate then erode. Fills small gaps.</summary>
+    public static VipsImage Close(this VipsImage image, double[,] mask)
+        => VipsImageOps.Close(image, mask);
+
+    /// <summary>Rank (order-statistic) filter over a windowWidth×windowHeight window.</summary>
+    public static VipsImage Rank(this VipsImage image, int windowWidth, int windowHeight, int index)
+        => VipsImageOps.Rank(image, windowWidth, windowHeight, index);
+
+    /// <summary>Median filter (Rank with index at window center).</summary>
+    public static VipsImage Median(this VipsImage image, int windowSize = 3)
+        => VipsImageOps.Median(image, windowSize);
+
     // --- Color ---
 
     public static VipsImage Colourspace(this VipsImage image, VipsInterpretation space)
@@ -196,6 +216,54 @@ public static class VipsImageExtensions
 
     public static VipsImage FwFft(this VipsImage image)
         => VipsImageOps.FwFft(image);
+
+    /// <summary>Inverse 2D FFT — DPComplex spectrum back to UChar spatial image.</summary>
+    public static VipsImage InvFft(this VipsImage image) => VipsImageOps.InvFft(image);
+
+    /// <summary>Centered log-magnitude spectrum of a DPComplex image.</summary>
+    public static VipsImage Spectrum(this VipsImage image) => VipsImageOps.Spectrum(image);
+
+    /// <summary>Per-band + aggregate min/max/avg/deviate over the whole image.</summary>
+    public static VipsStatsResult Stats(this VipsImage image) => VipsImageOps.Stats(image);
+    public static double Avg(this VipsImage image) => VipsImageOps.Avg(image);
+    public static double Min(this VipsImage image) => VipsImageOps.Min(image);
+    public static double Max(this VipsImage image) => VipsImageOps.Max(image);
+    public static double Deviate(this VipsImage image) => VipsImageOps.Deviate(image);
+
+    // --- Math / Boolean / Relational ---
+
+    public static VipsImage Abs(this VipsImage image) => VipsImageOps.Abs(image);
+    public static VipsImage Sin(this VipsImage image) => VipsImageOps.Sin(image);
+    public static VipsImage Cos(this VipsImage image) => VipsImageOps.Cos(image);
+    public static VipsImage Tan(this VipsImage image) => VipsImageOps.Tan(image);
+    public static VipsImage Log(this VipsImage image) => VipsImageOps.Log(image);
+    public static VipsImage Log10(this VipsImage image) => VipsImageOps.Log10(image);
+    public static VipsImage Exp(this VipsImage image) => VipsImageOps.Exp(image);
+    public static VipsImage Exp10(this VipsImage image) => VipsImageOps.Exp10(image);
+    public static VipsImage Sqrt(this VipsImage image) => VipsImageOps.Sqrt(image);
+    public static VipsImage Pow(this VipsImage image, double exponent) => VipsImageOps.Pow(image, exponent);
+
+    public static VipsImage AndConst(this VipsImage image, params double[] c) => VipsImageOps.AndConst(image, c);
+    public static VipsImage OrConst(this VipsImage image, params double[] c) => VipsImageOps.OrConst(image, c);
+    public static VipsImage XorConst(this VipsImage image, params double[] c) => VipsImageOps.XorConst(image, c);
+    public static VipsImage And(this VipsImage left, VipsImage right) => VipsImageOps.And(left, right);
+    public static VipsImage Or(this VipsImage left, VipsImage right) => VipsImageOps.Or(left, right);
+    public static VipsImage Xor(this VipsImage left, VipsImage right) => VipsImageOps.Xor(left, right);
+
+    public static VipsImage EqualConst(this VipsImage image, params double[] c) => VipsImageOps.EqualConst(image, c);
+    public static VipsImage NotEqualConst(this VipsImage image, params double[] c) => VipsImageOps.NotEqualConst(image, c);
+    public static VipsImage LessConst(this VipsImage image, params double[] c) => VipsImageOps.LessConst(image, c);
+    public static VipsImage LessEqConst(this VipsImage image, params double[] c) => VipsImageOps.LessEqConst(image, c);
+    public static VipsImage MoreConst(this VipsImage image, params double[] c) => VipsImageOps.MoreConst(image, c);
+    public static VipsImage MoreEqConst(this VipsImage image, params double[] c) => VipsImageOps.MoreEqConst(image, c);
+
+    /// <summary>
+    /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
+    /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to
+    /// <c>image.Resize(0.5).Sepia()</c>.
+    /// </summary>
+    public static VipsImage Mutate(this VipsImage image, Func<VipsImage, VipsImage> action)
+        => VipsImageOps.Mutate(image, action);
 
     // --- Savers ---
 

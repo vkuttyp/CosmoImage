@@ -531,6 +531,31 @@ public static partial class VipsImageOps
     public static VipsImage Dilate(VipsImage input, double[,] mask) => Morph(input, mask, VipsMorphMethod.Dilate);
     public static VipsImage Erode(VipsImage input, double[,] mask) => Morph(input, mask, VipsMorphMethod.Erode);
 
+    /// <summary>
+    /// Morphological opening: erode then dilate. Removes small bright specks
+    /// while preserving overall shape. Composition of existing ops.
+    /// </summary>
+    public static VipsImage Open(VipsImage input, double[,] mask) => Dilate(Erode(input, mask), mask);
+
+    /// <summary>
+    /// Morphological closing: dilate then erode. Fills small dark gaps inside
+    /// bright shapes. Composition of existing ops.
+    /// </summary>
+    public static VipsImage Close(VipsImage input, double[,] mask) => Erode(Dilate(input, mask), mask);
+
+    // From Operations/Convolution/VipsRank.cs
+    /// <summary>
+    /// Rank (order-statistic) filter over a <paramref name="windowWidth"/>×
+    /// <paramref name="windowHeight"/> window. <paramref name="index"/> is
+    /// 0-based. <see cref="Median"/> wraps this with index = window center.
+    /// </summary>
+    public static VipsImage Rank(VipsImage input, int windowWidth, int windowHeight, int index)
+        => Run(new VipsRank { In = input, WindowWidth = windowWidth, WindowHeight = windowHeight, Index = index });
+
+    /// <summary>Median filter — Rank with index at the window's median position.</summary>
+    public static VipsImage Median(VipsImage input, int windowSize = 3)
+        => Rank(input, windowSize, windowSize, (windowSize * windowSize) / 2);
+
     // ===== Drawing =====
     // From Operations/Drawing/VipsText.cs
     public static VipsImage Text(string text, string font = "Arial", int fontSize = 72)
@@ -700,11 +725,77 @@ public static partial class VipsImageOps
         return Run(new VipsFwFft { In = input });
     }
 
+    // From Operations/Analysis/VipsInvFft.cs
+    public static VipsImage InvFft(VipsImage input) => Run(new VipsInvFft { In = input });
+    public static VipsImage Spectrum(VipsImage input) => Run(new VipsSpectrum { In = input });
+
+    // From Operations/Analysis/VipsStats.cs
+    public static VipsStatsResult Stats(VipsImage input) => VipsStats.Compute(input);
+    public static double Avg(VipsImage input) => VipsStats.Compute(input).Avg[input.Bands];
+    public static double Min(VipsImage input) => VipsStats.Compute(input).Min[input.Bands];
+    public static double Max(VipsImage input) => VipsStats.Compute(input).Max[input.Bands];
+    public static double Deviate(VipsImage input) => VipsStats.Compute(input).Deviate[input.Bands];
+
     // ===== Misc =====
     // From Operations/Misc/VipsMaplut.cs
     public static VipsImage Maplut(VipsImage input, VipsImage lut)
     {
         return Run(new VipsMaplut { In = input, Lut = lut });
+    }
+
+    // From Operations/Misc/VipsMath.cs
+    /// <summary>
+    /// Pointwise math op. Treats UChar input as <c>x = byte/255</c>; trig
+    /// variants use <c>x = (byte/255)·2π</c>. Output is UChar, scaled+clamped.
+    /// </summary>
+    public static VipsImage MathOp(VipsImage input, VipsMathOperation op, double operand = 0)
+        => Run(new VipsMath { In = input, Op = op, Operand = operand });
+
+    public static VipsImage Abs(VipsImage input) => MathOp(input, VipsMathOperation.Abs);
+    public static VipsImage Sin(VipsImage input) => MathOp(input, VipsMathOperation.Sin);
+    public static VipsImage Cos(VipsImage input) => MathOp(input, VipsMathOperation.Cos);
+    public static VipsImage Tan(VipsImage input) => MathOp(input, VipsMathOperation.Tan);
+    public static VipsImage Log(VipsImage input) => MathOp(input, VipsMathOperation.Log);
+    public static VipsImage Log10(VipsImage input) => MathOp(input, VipsMathOperation.Log10);
+    public static VipsImage Exp(VipsImage input) => MathOp(input, VipsMathOperation.Exp);
+    public static VipsImage Exp10(VipsImage input) => MathOp(input, VipsMathOperation.Exp10);
+    public static VipsImage Sqrt(VipsImage input) => MathOp(input, VipsMathOperation.Sqrt);
+    public static VipsImage Pow(VipsImage input, double exponent) => MathOp(input, VipsMathOperation.Pow, exponent);
+
+    // From Operations/Misc/VipsBoolean.cs
+    public static VipsImage BooleanConst(VipsImage input, VipsBooleanOperation op, params double[] c)
+        => Run(new VipsBooleanConst { In = input, Op = op, C = c });
+    public static VipsImage Boolean(VipsImage left, VipsImage right, VipsBooleanOperation op)
+        => Run(new VipsBoolean2 { Left = left, Right = right, Op = op });
+
+    public static VipsImage AndConst(VipsImage input, params double[] c) => BooleanConst(input, VipsBooleanOperation.And, c);
+    public static VipsImage OrConst(VipsImage input, params double[] c) => BooleanConst(input, VipsBooleanOperation.Or, c);
+    public static VipsImage XorConst(VipsImage input, params double[] c) => BooleanConst(input, VipsBooleanOperation.Xor, c);
+    public static VipsImage And(VipsImage left, VipsImage right) => Boolean(left, right, VipsBooleanOperation.And);
+    public static VipsImage Or(VipsImage left, VipsImage right) => Boolean(left, right, VipsBooleanOperation.Or);
+    public static VipsImage Xor(VipsImage left, VipsImage right) => Boolean(left, right, VipsBooleanOperation.Xor);
+
+    public static VipsImage RelationalConst(VipsImage input, VipsRelationalOperation op, params double[] c)
+        => Run(new VipsRelationalConst { In = input, Op = op, C = c });
+    public static VipsImage Relational(VipsImage left, VipsImage right, VipsRelationalOperation op)
+        => Run(new VipsRelational2 { Left = left, Right = right, Op = op });
+
+    public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
+    public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
+    public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
+    public static VipsImage LessEqConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.LessEq, c);
+    public static VipsImage MoreConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.More, c);
+    public static VipsImage MoreEqConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.MoreEq, c);
+
+    /// <summary>
+    /// Block-scoped fluent wrapper. <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>
+    /// is equivalent to <c>image.Resize(0.5).Sepia()</c>. Pure ergonomics —
+    /// the underlying pipeline is still immutable. ImageSharp users land softer.
+    /// </summary>
+    public static VipsImage Mutate(VipsImage input, Func<VipsImage, VipsImage> action)
+    {
+        if (action == null) throw new ArgumentNullException(nameof(action));
+        return action(input);
     }
 
     // From Operations/Misc/VipsQuantize.cs

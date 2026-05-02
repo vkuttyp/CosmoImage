@@ -46,6 +46,8 @@ public static class VipsGifLoader
         // the multi-frame structure on output.
         int width, pageHeight, nPages;
         string? animationDelays = null;
+        byte[]? exifBlob = null, xmpBlob = null, iccBlob = null;
+        string? comment = null;
         try
         {
             using var probe = new MagickImageCollection(imageBytes);
@@ -61,6 +63,15 @@ public static class VipsGifLoader
                 delays.Append(probe[i].AnimationDelay);
             }
             animationDelays = delays.ToString();
+
+            // Profile + comment metadata attaches to the first frame in
+            // typical GIF authoring tools.
+            var first = probe[0];
+            exifBlob = first.GetProfile("exif")?.ToByteArray();
+            xmpBlob = first.GetProfile("xmp")?.ToByteArray();
+            iccBlob = first.GetProfile("icc")?.ToByteArray();
+            var commentAttr = first.GetAttribute("comment");
+            if (!string.IsNullOrEmpty(commentAttr)) comment = commentAttr;
         }
         catch
         {
@@ -109,6 +120,10 @@ public static class VipsGifLoader
         image.Metadata["page-height"] = pageHeight.ToString();
         if (animationDelays != null)
             image.Metadata["animation-delays"] = animationDelays;
+        if (exifBlob != null) image.MetadataBlobs["exif"] = exifBlob;
+        if (xmpBlob != null) image.MetadataBlobs["xmp"] = xmpBlob;
+        if (iccBlob != null) image.MetadataBlobs["icc"] = iccBlob;
+        if (comment != null) image.Metadata["comment"] = comment;
 
         return image;
     }

@@ -28,11 +28,11 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | Format | Header | Pixel decode | Animated/multi-page | Metadata extraction |
 | :--- | :---: | :---: | :---: | :--- |
 | JPEG | ✅ | ✅ | n/a | EXIF + XMP raw blobs, orientation int |
-| PNG | ✅ | ✅ | n/a | EXIF (eXIf chunk), ICC (iCCP, deflated) |
+| PNG | ✅ | ✅ | n/a | EXIF (eXIf), ICC (iCCP, deflated), XMP (iTXt) |
 | WebP | ✅ | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
 | TIFF | ✅ | ✅ | ✅ multi-page | EXIF/XMP/ICC + orientation |
 | BMP | ✅ | ✅ | n/a | — |
-| GIF | ✅ | ✅ | ✅ animated (per-frame delays) | — |
+| GIF | ✅ | ✅ | ✅ animated (per-frame delays) | EXIF/XMP/ICC + Comment via Magick |
 | HEIF / AVIF | ✅ | ✅ | ❌ sequences | EXIF/XMP/ICC via Magick |
 | PDF | ✅ | ✅ | ✅ multi-page render | `pdf-n-pages` count |
 | SVG | ✅ | ✅ rasterize | n/a | — |
@@ -49,12 +49,12 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | Format | Single-frame | Animated/multi-page | Metadata write |
 | :--- | :---: | :---: | :--- |
 | JPEG | ✅ | n/a | EXIF + XMP via APP1; ICC via multi-segment APP2 |
-| PNG | ✅ (full + palette PNG-8) | n/a | eXIf, iCCP (deflated), iTXt for XMP ❌ |
+| PNG | ✅ (full + palette PNG-8) | n/a | eXIf, iCCP (deflated), iTXt for XMP |
 | WebP | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
 | TIFF | ✅ | ✅ multi-page | EXIF/XMP/ICC native |
 | HEIF / AVIF | ✅ | ❌ sequences | EXIF/XMP/ICC via Magick |
-| GIF | ✅ | ✅ animated | profiles on first frame |
-| APNG | ✅ | ✅ animated | profiles on first frame |
+| GIF | ✅ | ✅ animated | profiles + Comment on first frame |
+| APNG | ✅ | ✅ animated | profiles + Comment on first frame |
 | TIFF Pyramids / Tiled TIFF / OME-TIFF / dzsave | ❌ | — | — |
 
 ---
@@ -95,9 +95,9 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | Maplut | ✅ | LUT image input |
 | Linearize / Delinearize | ✅ | IEC 61966-2-1 piecewise sRGB transfer |
 | Quantize (Wu/median-cut) | ✅ | Magick.NET-backed |
-| Math suite (abs, sin, cos, log, exp, pow, sqrt) | ❌ | |
-| Boolean / Relational suite (and, or, lt, gt, eq) | ❌ | |
-| Stats (avg, min, max, deviate) | ❌ | |
+| Math suite (abs, sin, cos, tan, log, log10, exp, exp10, sqrt, pow) | ✅ | LUT-based pointwise on UChar |
+| Boolean / Relational suite (and, or, xor, lshift, rshift / eq, ne, lt, le, gt, ge) | ✅ | Const-vs-image and image-vs-image variants |
+| Stats (avg, min, max, deviate) | ✅ | Per-band + aggregate via materializing scan |
 
 ### Convolution / morphology
 
@@ -109,7 +109,8 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | UnsharpMask | ✅ | SIMD pointwise on input + GaussBlur |
 | Dilate / Erode | ✅ | |
 | Morph (general) | ✅ | |
-| Open / Close / Rank | ❌ | |
+| Open / Close | ✅ | Compositions of Erode/Dilate |
+| Rank / Median | ✅ | Quickselect over k×k window |
 
 ### Composition / drawing
 
@@ -137,8 +138,9 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | :--- | :---: | :--- |
 | HistFind | ✅ | Per-band 256-bin histogram |
 | HistCum / HistNorm / HistEqual | ✅ | |
-| Forward FFT (`FwFft`) | ✅ | Via MathNet.Numerics |
-| Inverse FFT / spectrum | ❌ | |
+| Forward FFT (`FwFft`) | ✅ | MathNet, row+column 1D passes |
+| Inverse FFT (`InvFft`) | ✅ | Magnitude back to UChar |
+| Spectrum (log magnitude) | ✅ | FFT-shifted, normalized per band |
 
 ---
 
@@ -147,15 +149,15 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | Format | EXIF | XMP | ICC |
 | :--- | :---: | :---: | :---: |
 | JPEG | ✅ | ✅ | ✅ multi-segment APP2 |
-| PNG | ✅ eXIf | ❌ iTXt unread | ✅ iCCP |
+| PNG | ✅ eXIf | ✅ iTXt | ✅ iCCP |
 | WebP | ✅ | ✅ | ✅ |
 | TIFF | ✅ | ✅ | ✅ |
 | HEIF / AVIF | ✅ | ✅ | ✅ |
-| GIF / APNG | ❌ | ❌ | ❌ |
+| GIF / APNG | ✅ | ✅ | ✅ |
 
 Cross-format conversion (e.g. JPEG → AVIF) preserves all three blob types.
-The PNG XMP gap is small (iTXt encoding wrapper). GIF/APNG generally don't
-carry these in the wild.
+GIF and APNG also carry a free-form `Metadata["comment"]` round-trip via
+Magick.NET's Comment attribute.
 
 ---
 
@@ -166,7 +168,7 @@ Items where ImageSharp differs and we don't currently match:
 | Item | Status | Comment |
 | :--- | :---: | :--- |
 | `Image<TPixel>` strongly-typed pixel access | ❌ | We use `byte[] Pixels` + `BandFormat` enum; pixel safety is runtime, not compile-time |
-| `Mutate(action)` block-scoped op chaining | ❌ | Ergonomic only; our fluent extensions (`image.Resize().Saturate()`) cover the same use case |
+| `Mutate(action)` block-scoped op chaining | ✅ | `image.Mutate(im => im.Resize(0.5).Sepia())` — wraps the fluent extensions |
 | Float-format pixel ops throughout | ❌ | Most ops are UChar-only; would require every op to gain a Float code path |
 | `MemoryAllocator` (caller-supplied buffer pool) | ❌ | Default `byte[]` allocations; high-throughput services that need pool control would notice |
 | TGA / QOI / PBM formats | ❌ | Niche; rarely needed |
@@ -199,4 +201,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the 50-file source
 tree under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 54 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 68 tests pass.*

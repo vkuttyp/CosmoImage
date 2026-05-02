@@ -66,8 +66,10 @@ public class VipsFwFft : VipsOperation
                 }
             }
 
-            // 2D FFT
-            Fourier.Forward2D(data, height, width);
+            // 2D FFT as two 1D passes. The managed MathNet provider implements
+            // Forward(row) reliably; Forward2D throws NotSupported in some
+            // builds, so we drive it ourselves: rows first, then columns.
+            Forward2DAsRowsCols(data, height, width);
 
             // Write back to outRegion (if requested region matches)
             // Note: This implementation assumes outRegion is the full image for now
@@ -86,5 +88,41 @@ public class VipsFwFft : VipsOperation
         }
 
         return 0;
+    }
+
+    internal static void Forward2DAsRowsCols(Complex[] data, int rows, int cols)
+    {
+        var rowBuf = new Complex[cols];
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < cols; x++) rowBuf[x] = data[y * cols + x];
+            Fourier.Forward(rowBuf, FourierOptions.Default);
+            for (int x = 0; x < cols; x++) data[y * cols + x] = rowBuf[x];
+        }
+        var colBuf = new Complex[rows];
+        for (int x = 0; x < cols; x++)
+        {
+            for (int y = 0; y < rows; y++) colBuf[y] = data[y * cols + x];
+            Fourier.Forward(colBuf, FourierOptions.Default);
+            for (int y = 0; y < rows; y++) data[y * cols + x] = colBuf[y];
+        }
+    }
+
+    internal static void Inverse2DAsRowsCols(Complex[] data, int rows, int cols)
+    {
+        var rowBuf = new Complex[cols];
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < cols; x++) rowBuf[x] = data[y * cols + x];
+            Fourier.Inverse(rowBuf, FourierOptions.Default);
+            for (int x = 0; x < cols; x++) data[y * cols + x] = rowBuf[x];
+        }
+        var colBuf = new Complex[rows];
+        for (int x = 0; x < cols; x++)
+        {
+            for (int y = 0; y < rows; y++) colBuf[y] = data[y * cols + x];
+            Fourier.Inverse(colBuf, FourierOptions.Default);
+            for (int y = 0; y < rows; y++) data[y * cols + x] = colBuf[y];
+        }
     }
 }
