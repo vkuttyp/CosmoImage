@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 
 namespace CosmoImage.Operations.Analysis;
@@ -52,6 +53,8 @@ public static class VipsStats
         var sumSq = new double[bands + 1];
         for (int i = 0; i <= bands; i++) { min[i] = double.PositiveInfinity; max[i] = double.NegativeInfinity; }
 
+        bool isFloat = input.BandFormat == VipsBandFormat.Float;
+
         for (int y = 0; y < H; y++)
         {
             int rowBase = y * W * pelSize;
@@ -60,7 +63,9 @@ public static class VipsStats
                 int pelBase = rowBase + x * pelSize;
                 for (int bnd = 0; bnd < bands; bnd++)
                 {
-                    double v = pixels[pelBase + bnd];
+                    double v = isFloat
+                        ? BinaryPrimitives.ReadSingleLittleEndian(pixels.AsSpan(pelBase + bnd * 4, 4))
+                        : pixels[pelBase + bnd];
                     if (v < min[bnd]) min[bnd] = v;
                     if (v > max[bnd]) max[bnd] = v;
                     sum[bnd] += v;

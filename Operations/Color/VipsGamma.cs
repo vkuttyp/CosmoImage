@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Color;
@@ -49,8 +50,12 @@ public class VipsGamma : VipsOperation
 
         if (inRegion.Prepare(r) != 0) return -1;
 
-        int pelSize = @in.SizeOfPel;
         int bands = @in.Bands;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, exponent, r, bands);
+
+        int pelSize = @in.SizeOfPel;
 
         // Precompute LUT for performance
         byte[] lut = new byte[256];
@@ -70,6 +75,33 @@ public class VipsGamma : VipsOperation
             }
         }
 
+        return 0;
+    }
+
+    /// <summary>
+    /// Float gamma. Applies <c>pow(v, 1/exponent)</c> directly — input is
+    /// treated as nominal <c>[0,1]</c> per the libvips Float convention
+    /// (consistent with Linearize/Delinearize). Negative inputs produce NaN
+    /// and pass through unchanged; that matches the mathematical extension
+    /// of pow to non-positive bases.
+    /// </summary>
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, double exponent, VipsRect r, int bands)
+    {
+        double invExp = 1.0 / exponent;
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    int off = (x * bands + bnd) * 4;
+                    double v = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)Math.Pow(v, invExp));
+                }
+            }
+        }
         return 0;
     }
 }

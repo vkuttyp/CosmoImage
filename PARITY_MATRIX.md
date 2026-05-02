@@ -174,7 +174,7 @@ Items where ImageSharp differs and we don't currently match:
 | :--- | :---: | :--- |
 | `Image<TPixel>` strongly-typed pixel access | 🟡 | `TypedImage<TPixel>` wraps a materialized `byte[]` for typed reads/writes (`L8`/`La16`/`Rgb24`/`Rgba32`); ops still flow through untyped `VipsImage`. `RowSpan(y)` reinterprets via `MemoryMarshal.Cast` for zero-copy tight loops. Float pixel structs land with Tier-4 Float-throughout |
 | `Mutate(action)` block-scoped op chaining | ✅ | `image.Mutate(im => im.Resize(0.5).Sepia())` — wraps the fluent extensions |
-| Float-format pixel ops throughout | 🟡 | Full Float code paths in: `VipsCast`, `VipsInvert`, `VipsLinear`, `VipsConv1D`/`GaussBlur`, `VipsConv` (2D), `VipsMorph` (Dilate/Erode), `VipsRecomb` (drives Saturate/Sepia/Hue/Greyscale), `VipsLinearize`/`VipsDelinearize`, `VipsMath` (full transcendental suite), `VipsShrink`, `VipsResize1D` (X+Y), `VipsAffine` (drives `VipsResize`, `VipsRotate`). Remaining UChar-only: Composite, DrawLine/Rect, Effects (Glow/Vignette/Pixelate/Artistic), HistFind, Stats, FFT family, Rank, Gamma, Maplut, Boolean (bitwise nonsensical on Float) |
+| Float-format pixel ops throughout | 🟢 | Float code paths cover the entire mainline pipeline: pointwise (`Cast`/`Invert`/`Linear`/`Recomb`/`Math`/`Gamma`), window (`Conv1D`/`Conv` 2D/`Morph`/`Rank`), color management (`Linearize`/`Delinearize`), geometric (`Shrink`/`Resize1D`/`Affine` → `Resize`/`Rotate`/`Thumbnail`), composition (`Composite`), effects (`Vignette`/`Glow`/`Pixelate` via composition), and analysis (`Stats`). UChar-only: artistic effects (Magick.NET-backed; can't be made Float without replacing the codec), DrawLine/Rect (niche; ink param is `byte[]`), HistFind (needs Float-range binning policy), FFT family (already in DPComplex internally), Maplut (UChar-input by design), Boolean suite (bitwise nonsensical on Float) |
 | `MemoryAllocator` (caller-supplied buffer pool) | 🟡 | `IVipsAllocator` plumbed through `VipsRegion` and `OrderedStripSink`; default `ArrayPoolAllocator` wraps `ArrayPool<byte>.Shared`. Long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) intentionally bypass the pool — pool ownership across an image lifetime is harder to reason about |
 | TGA / QOI / PBM formats | ❌ | Niche; rarely needed |
 
@@ -195,7 +195,7 @@ Items where we match or exceed ImageSharp:
 
 | Item | Effort | Why deferred |
 | :--- | :--- | :--- |
-| Float-precision ops throughout | Multi-week (per-op work) | Three sweeps shipped: keystone+canonical (`Cast`/`Linear`/`Conv1D`), pointwise+window (`Invert`/`Recomb`/`Conv` 2D/`Morph`/sRGB transfer/`Math`), and geometric (`Shrink`/`Resize1D` → `Resize`, `Affine` → `Rotate`/`Thumbnail`). Remaining: Composite, Drawing, Effects, Analysis (HistFind/Stats/FFT), Rank, Gamma. None block the typical color-correct linear-light resize workflow, which now runs end-to-end in Float |
+| Float-precision ops throughout | Mostly shipped | Mainline pipeline (resize/blur/composite/effects/color management/stats) is Float end-to-end. Remaining UChar-only ops are by-design (Magick-backed artistic effects, bitwise Boolean) or genuinely UChar-input-shaped (HistFind 256-bin LUT, Maplut, drawing ink params); none block typical workflows |
 | Proper CMM-based ICC color management | Significant | Needs a LittleCMS native binding; current `IccTransform` uses Magick.NET as a one-shot transform |
 | `MemoryAllocator` for lazy materializers | Moderate | Transient buffers (`VipsRegion`, `OrderedStripSink`) now pool through `IVipsAllocator`. Extending to `MemorySink.Pixels` and loader `PixelsLazy` requires explicit ownership/disposal semantics on `VipsImage` — design discussion before code |
 | Generic op signatures (`Resize<TPixel>`, etc.) | Significant | The `TypedImage<TPixel>` access layer is shipped; making *every* op generic over pixel type is the remaining piece. Doesn't translate cleanly to the lazy-pipeline model where ops produce new images, so likely better delivered as a typed parallel API rather than replacing the existing one |
@@ -206,4 +206,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 124 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 134 tests pass.*

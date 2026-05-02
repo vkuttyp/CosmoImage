@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Drawing;
@@ -60,43 +61,81 @@ public class VipsComposite : VipsOperation
         VipsRect overlayRect = new VipsRect(ox, oy, overlay.Width, overlay.Height);
         VipsRect overlap = VipsRect.Intersect(r, overlayRect);
 
-        // Copy base pixels to output first
+        bool isFloat = @base.BandFormat == VipsBandFormat.Float;
+
+        // Copy base pixels to output first — works for any pel size.
         int pelSize = @base.SizeOfPel;
         for (int y = 0; y < r.Height; y++)
         {
             baseRegion.GetAddress(r.Left, r.Top + y).Slice(0, r.Width * pelSize).CopyTo(outRegion.GetAddress(r.Left, r.Top + y));
         }
 
-        if (!overlap.IsEmpty)
+        if (overlap.IsEmpty) return 0;
+
+        VipsRect overlayRequest = new VipsRect(overlap.Left - ox, overlap.Top - oy, overlap.Width, overlap.Height);
+        if (overlayRegion.Prepare(overlayRequest) != 0) return -1;
+
+        bool hasAlpha = overlay.Bands == 2 || overlay.Bands == 4;
+        int overlayBands = overlay.Bands;
+        int alphaIdx = overlayBands - 1;
+        int blendBands = Math.Min(@base.Bands, overlay.Bands - (hasAlpha ? 1 : 0));
+
+        if (isFloat)
+            return BlendFloat(outRegion, overlayRegion, overlap, overlayRequest, pelSize, overlayBands, hasAlpha, alphaIdx, blendBands);
+
+        for (int y = 0; y < overlap.Height; y++)
         {
-            // Request local coordinates from overlay
-            VipsRect overlayRequest = new VipsRect(overlap.Left - ox, overlap.Top - oy, overlap.Width, overlap.Height);
-            if (overlayRegion.Prepare(overlayRequest) != 0) return -1;
+            var srcAddr = overlayRegion.GetAddress(overlayRequest.Left, overlayRequest.Top + y);
+            var destAddr = outRegion.GetAddress(overlap.Left, overlap.Top + y);
 
-            bool hasAlpha = overlay.Bands == 2 || overlay.Bands == 4;
-            int overlayBands = overlay.Bands;
-            int alphaIdx = overlayBands - 1;
-
-            for (int y = 0; y < overlap.Height; y++)
+            for (int x = 0; x < overlap.Width; x++)
             {
-                var srcAddr = overlayRegion.GetAddress(overlayRequest.Left, overlayRequest.Top + y);
-                var destAddr = outRegion.GetAddress(overlap.Left, overlap.Top + y);
+                float alpha = hasAlpha ? srcAddr[x * overlayBands + alphaIdx] / 255.0f : 1.0f;
+                if (alpha == 0) continue;
 
-                for (int x = 0; x < overlap.Width; x++)
+                for (int i = 0; i < blendBands; i++)
                 {
-                    float alpha = hasAlpha ? srcAddr[x * overlayBands + alphaIdx] / 255.0f : 1.0f;
-                    if (alpha == 0) continue;
-
-                    for (int i = 0; i < Math.Min(@base.Bands, overlay.Bands - (hasAlpha ? 1 : 0)); i++)
-                    {
-                        int baseIdx = x * pelSize + i;
-                        int overIdx = x * overlayBands + i;
-                        destAddr[baseIdx] = (byte)(destAddr[baseIdx] * (1 - alpha) + srcAddr[overIdx] * alpha);
-                    }
+                    int baseIdx = x * pelSize + i;
+                    int overIdx = x * overlayBands + i;
+                    destAddr[baseIdx] = (byte)(destAddr[baseIdx] * (1 - alpha) + srcAddr[overIdx] * alpha);
                 }
             }
         }
 
+        return 0;
+    }
+
+    /// <summary>
+    /// Float alpha-over blend. Alpha is treated as nominal <c>[0,1]</c> per
+    /// the libvips Float convention (consistent with Linearize/Delinearize),
+    /// not the UChar 0..255 range. Out-of-[0,1] alpha values just produce
+    /// the corresponding extrapolated mix — no clamp.
+    /// </summary>
+    private static int BlendFloat(VipsRegion outRegion, VipsRegion overlayRegion, VipsRect overlap, VipsRect overlayRequest, int pelSize, int overlayBands, bool hasAlpha, int alphaIdx, int blendBands)
+    {
+        for (int y = 0; y < overlap.Height; y++)
+        {
+            var srcAddr = overlayRegion.GetAddress(overlayRequest.Left, overlayRequest.Top + y);
+            var destAddr = outRegion.GetAddress(overlap.Left, overlap.Top + y);
+
+            for (int x = 0; x < overlap.Width; x++)
+            {
+                double alpha = hasAlpha
+                    ? BinaryPrimitives.ReadSingleLittleEndian(srcAddr.Slice((x * overlayBands + alphaIdx) * 4, 4))
+                    : 1.0;
+                if (alpha == 0) continue;
+
+                for (int i = 0; i < blendBands; i++)
+                {
+                    int baseOff = x * pelSize + i * 4;
+                    int overOff = (x * overlayBands + i) * 4;
+                    float baseVal = BinaryPrimitives.ReadSingleLittleEndian(destAddr.Slice(baseOff, 4));
+                    float overVal = BinaryPrimitives.ReadSingleLittleEndian(srcAddr.Slice(overOff, 4));
+                    BinaryPrimitives.WriteSingleLittleEndian(destAddr.Slice(baseOff, 4),
+                        (float)(baseVal * (1 - alpha) + overVal * alpha));
+                }
+            }
+        }
         return 0;
     }
 }

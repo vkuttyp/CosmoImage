@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Numerics;
 
@@ -64,6 +65,9 @@ public class VipsGlow : VipsOperation
         if (inRegion.Prepare(r) != 0) return -1;
         if (blurRegion.Prepare(r) != 0) return -1;
 
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return BlendFloat(inRegion, blurRegion, outRegion, r, strength, @in.Bands);
+
         int totalBytes = r.Width * @in.Bands;
         int vSize = Vector<float>.Count;
         var vStrength = new Vector<float>((float)strength);
@@ -96,6 +100,29 @@ public class VipsGlow : VipsOperation
             {
                 double res = inAddr[i] + strength * blurAddr[i];
                 outAddr[i] = (byte)Math.Clamp(res, 0, 255);
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Float blend step. <c>out = in + strength * blurred</c>, no clamp —
+    /// values can exceed nominal [0,1]. Pair with Delinearize (or a Cast
+    /// back to UChar) at the pipeline tail when an in-gamut output is needed.
+    /// </summary>
+    private static int BlendFloat(VipsRegion inRegion, VipsRegion blurRegion, VipsRegion outRegion, VipsRect r, double strength, int bands)
+    {
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+            var blurAddr = blurRegion.GetAddress(r.Left, r.Top + y);
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            int rowBytes = r.Width * bands * 4;
+            for (int off = 0; off < rowBytes; off += 4)
+            {
+                float a = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                float c = BinaryPrimitives.ReadSingleLittleEndian(blurAddr.Slice(off, 4));
+                BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)(a + strength * c));
             }
         }
         return 0;

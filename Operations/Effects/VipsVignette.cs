@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Effects;
@@ -60,9 +61,13 @@ public class VipsVignette : VipsOperation
         if (inRegion.Prepare(r) != 0) return -1;
 
         int bands = @in.Bands;
-        int pelSize = @in.SizeOfPel;
         bool hasAlpha = bands == 2 || bands == 4;
         int colorBands = hasAlpha ? bands - 1 : bands;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, r, strength, cx, cy, invR2, bands, colorBands, hasAlpha);
+
+        int pelSize = @in.SizeOfPel;
 
         for (int y = 0; y < r.Height; y++)
         {
@@ -85,6 +90,43 @@ public class VipsVignette : VipsOperation
                 for (int i = 0; i < colorBands; i++)
                     outAddr[o + i] = (byte)Math.Clamp(inAddr[o + i] * factor, 0, 255);
                 if (hasAlpha) outAddr[o + colorBands] = inAddr[o + colorBands];
+            }
+        }
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsRect r,
+        double strength, double cx, double cy, double invR2, int bands, int colorBands, bool hasAlpha)
+    {
+        for (int y = 0; y < r.Height; y++)
+        {
+            int gy = r.Top + y;
+            double dy = gy - cy;
+            double dy2 = dy * dy;
+
+            var inAddr = inRegion.GetAddress(r.Left, gy);
+            var outAddr = outRegion.GetAddress(r.Left, gy);
+
+            for (int x = 0; x < r.Width; x++)
+            {
+                int gx = r.Left + x;
+                double dx = gx - cx;
+                double r2norm = (dx * dx + dy2) * invR2;
+                if (r2norm > 1.0) r2norm = 1.0;
+                double factor = 1.0 - strength * r2norm;
+
+                int baseIdx = x * bands * 4;
+                for (int i = 0; i < colorBands; i++)
+                {
+                    int off = baseIdx + i * 4;
+                    float v = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)(v * factor));
+                }
+                if (hasAlpha)
+                {
+                    inAddr.Slice(baseIdx + colorBands * 4, 4)
+                          .CopyTo(outAddr.Slice(baseIdx + colorBands * 4, 4));
+                }
             }
         }
         return 0;

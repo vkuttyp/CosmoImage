@@ -82,34 +82,45 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
 
 Each is significant work; defer until a concrete use case demands it.
 
-- 🟡 **Float-format ops throughout** — partial.
+- 🟢 **Float-format ops throughout** — mainline shipped.
 
   **Shipped**:
     - Keystone: `VipsCast` (UChar↔Float, libvips no-auto-normalize convention)
     - Pointwise: `VipsInvert`, `VipsLinear`, `VipsRecomb` (drives
-      Saturate/Sepia/Hue/Greyscale), `VipsMath` (full transcendental suite
-      with mathematical-radian semantics on Float)
+      Saturate/Sepia/Hue/Greyscale), `VipsMath`, `VipsGamma`
     - Window: `VipsConv1D` (drives `GaussBlur`), `VipsConv` (2D mask),
-      `VipsMorph` (Dilate/Erode with -∞/+∞ seeding)
+      `VipsMorph` (Dilate/Erode with -∞/+∞ seeding), `VipsRank` (quickselect
+      on floats; drives `Median`)
     - Color management: `VipsLinearize`/`VipsDelinearize` with full
-      per-pixel sRGB transfer in double precision (much higher precision
-      than the UChar 256-entry LUT)
-    - Geometric: `VipsShrink`, `VipsResize1D` (X+Y), `VipsAffine`. These
-      drive `VipsResize` (Shrink + Resize1D) and `VipsRotate` (Affine), so
-      the canonical color-correct linear-light resize chain
-      (`Linearize → Resize → Delinearize`) now runs end-to-end in Float.
+      per-pixel sRGB transfer in double precision (measurably more precise
+      than the UChar 256-entry LUT — covered by `LinearizePrecision_Float_BeatsUCharLut`)
+    - Geometric: `VipsShrink`, `VipsResize1D` (X+Y), `VipsAffine`, driving
+      `VipsResize`, `VipsRotate`, `VipsThumbnail` end-to-end
+    - Composition/Effects: `VipsComposite` (alpha-over with Float alpha as
+      nominal [0,1]), `VipsVignette`, `VipsGlow` (no clamp on the additive
+      blend), `VipsPixelate` (inherits via Shrink + Resize composition)
+    - Analysis: `VipsStats` (per-band Min/Max/Avg/Deviate over Float pixels)
 
-  **Remaining** — each follows the same dispatch pattern; none block the
-  typical resize/blur/composite workflow:
-    - Drawing/Composite: `VipsComposite`, `VipsDrawLine`, `VipsDrawRect`
-    - Effects: `VipsGlow`, `VipsVignette`, `VipsPixelate`, `VipsArtisticEffects`
-    - Analysis: `VipsHistFind` (needs binning strategy beyond 256 bins),
-      `VipsStats`, `VipsFwFft`/`VipsInvFft` Float-input path
-    - Misc: `VipsRank` (quickselect on floats), `VipsGamma`, `VipsMaplut`
-      (Float input would need fractional LUT interpolation; UChar-input
-      is the canonical use)
-    - Boolean suite (`And`/`Or`/`Xor`/`LShift`/`RShift`) is intentionally
-      UChar-only — bitwise on Float is not meaningful
+  The mainline color-correct linear-light pipeline (Linearize → Resize →
+  Composite → Glow → Vignette → Delinearize) runs end-to-end in Float
+  with no UChar quantization.
+
+  **Remaining UChar-only — by design or out of scope**:
+    - Artistic effects (`VipsOilPaint`/`VipsCharcoal`/`VipsSketch`/`VipsPolaroid`):
+      Magick.NET-backed; the underlying codec is UChar internally, so a
+      Float branch would have to round-trip through Magick anyway. Wait
+      until the broader "drop more Magick.NET" Tier-4 item lands.
+    - `VipsDrawLine`/`VipsDrawRect`: niche; ink colour is a `byte[]` parameter.
+      Adding a Float ink overload would touch the public API.
+    - `VipsHistFind`: 256-bin LUT shape is fundamentally UChar-input. A Float
+      version would need a binning policy (range + bin count); separate design call.
+    - `VipsFwFft`/`VipsInvFft`: already work in DPComplex internally; the
+      Float-input path would just save one Cast at the boundary.
+    - `VipsMaplut`: UChar-input by design — the LUT is indexed by byte value.
+      A Float-input variant would need fractional LUT interpolation, which
+      changes the op's semantics rather than its precision.
+    - Boolean suite (`And`/`Or`/`Xor`/`LShift`/`RShift`): bitwise on Float
+      is not meaningful; intentionally UChar-only.
 
 - [ ] **Proper PCS-based ICC color management**. Needs a Color Management
   Module (LittleCMS) native binding. Current `IccTransform` is a one-shot

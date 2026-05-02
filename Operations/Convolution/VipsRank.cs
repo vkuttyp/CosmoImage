@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Convolution;
@@ -66,6 +67,10 @@ public class VipsRank : VipsOperation
         if (inRegion.Prepare(clipped) != 0) return -1;
 
         int bands = @in.Bands;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, @in, mw, mh, idx, ox, oy, r, bands);
+
         int pelSize = @in.SizeOfPel;
         Span<byte> window = stackalloc byte[mw * mh];
 
@@ -99,6 +104,71 @@ public class VipsRank : VipsOperation
             }
         }
         return 0;
+    }
+
+    /// <summary>
+    /// Float-input quickselect. Mirrors the UChar branch but reads/writes
+    /// 4 bytes per band and works in <c>Span&lt;float&gt;</c>.
+    /// </summary>
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsImage @in, int mw, int mh, int idx, int ox, int oy, VipsRect r, int bands)
+    {
+        Span<float> window = stackalloc float[mw * mh];
+        for (int y = 0; y < r.Height; y++)
+        {
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    int n = 0;
+                    for (int my = 0; my < mh; my++)
+                    {
+                        for (int mx = 0; mx < mw; mx++)
+                        {
+                            int ix = r.Left + x + mx - ox;
+                            int iy = r.Top + y + my - oy;
+                            if (ix < 0 || ix >= @in.Width || iy < 0 || iy >= @in.Height) continue;
+                            var pel = inRegion.GetAddress(ix, iy);
+                            window[n++] = BinaryPrimitives.ReadSingleLittleEndian(pel.Slice(bnd * 4, 4));
+                        }
+                    }
+                    int outOff = (x * bands + bnd) * 4;
+                    if (n == 0)
+                    {
+                        BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(outOff, 4), 0f);
+                        continue;
+                    }
+                    var slice = window.Slice(0, n);
+                    int useIdx = Math.Min(idx, n - 1);
+                    SelectKFloat(slice, useIdx);
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(outOff, 4), slice[useIdx]);
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static void SelectKFloat(Span<float> data, int k)
+    {
+        int lo = 0, hi = data.Length - 1;
+        while (lo < hi)
+        {
+            float pivot = data[(lo + hi) / 2];
+            int i = lo, j = hi;
+            while (i <= j)
+            {
+                while (data[i] < pivot) i++;
+                while (data[j] > pivot) j--;
+                if (i <= j)
+                {
+                    (data[i], data[j]) = (data[j], data[i]);
+                    i++; j--;
+                }
+            }
+            if (k <= j) hi = j;
+            else if (k >= i) lo = i;
+            else return;
+        }
     }
 
     /// <summary>
