@@ -48,6 +48,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | PBM / PGM / PPM | ✅ pure-C# | ✅ pure-C# | n/a | first format dropped from Magick.NET dependency |
 | PAM | ✅ via Magick | ✅ via Magick | n/a | — |
 | CSV / Matrix (numeric text) | ✅ | ✅ | n/a | — |
+| Matlab `.mat` v5 numeric arrays | ✅ pure-C# | ❌ | n/a | first top-level miMATRIX; numeric classes only; v7.3 (HDF5) deferred |
 
 ---
 
@@ -211,4 +212,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 223 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 230 tests pass.*

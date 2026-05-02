@@ -131,8 +131,19 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
   than a `PipeWriter`, so the entry point takes a base path string.
 - [x] ~~**CSV / Matrix data loaders**~~. `VipsCsvLoader` and `VipsMatrixLoader`
   parse whitespace/comma-separated numeric grids; comments + header rows
-  supported. Matlab `.mat` parsing still pending (binary format, separate
-  effort).
+  supported.
+
+- [x] ~~**Matlab `.mat` v5 numeric reader**~~ shipped. Pure-C# parser
+  (`VipsMatLoader`) for the v5 tagged-binary format: 128-byte header with
+  endianness auto-detect, top-level data elements with 8-byte alignment,
+  miCOMPRESSED zlib-inflate, miMATRIX sub-element walk (Array Flags /
+  Dimensions / Name / Real Part). Numeric classes only — uint8 stays
+  UChar, everything else widens to Float. 2D and 3D with the third
+  dimension ∈ {1, 3, 4} mapping to image planes; column-major storage
+  is transposed to row-major. Cell / struct / sparse / char / object
+  classes, complex (imaginary) parts, ndim ≥ 4, and v7.3 (HDF5-based —
+  completely different format) all out of scope. Writing deferred —
+  read covers the typical "load this image saved by scipy/Octave" case.
 
 ---
 
