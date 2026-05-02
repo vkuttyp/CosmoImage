@@ -15,6 +15,75 @@ namespace CosmoImage.Loaders;
 /// </summary>
 internal static class VipsMagickWrapLoader
 {
+    /// <summary>
+    /// Streaming variant of <see cref="LoadAsync"/>: feeds the source directly
+    /// to Magick.NET via <see cref="VipsSourceStream"/>, decodes pixels
+    /// eagerly, and drops the encoded bytes. Forfeits lazy materialization
+    /// in exchange for not holding the encoded buffer alongside the decoded
+    /// pixel buffer. Use when memory matters more than deferring decode.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken, MagickFormat? formatHint = null)
+    {
+        // No await needed yet — kept async for API symmetry with LoadAsync
+        // and so future Magick.NET async APIs slot in cleanly.
+        await Task.Yield();
+        var readSettings = formatHint.HasValue ? new MagickReadSettings { Format = formatHint.Value } : null;
+
+        try
+        {
+            using var stream = source.AsStream();
+            using var img = readSettings != null ? new MagickImage(stream, readSettings) : new MagickImage(stream);
+
+            int width = (int)img.Width;
+            int height = (int)img.Height;
+            int colorBands = img.ColorSpace == ColorSpace.Gray ? 1 : 3;
+            int bands = colorBands + (img.HasAlpha ? 1 : 0);
+            byte[]? exif = img.GetProfile("exif")?.ToByteArray();
+            byte[]? xmp = img.GetProfile("xmp")?.ToByteArray();
+            byte[]? icc = img.GetProfile("icc")?.ToByteArray();
+
+            // Decode pixels into a fresh buffer right now.
+            int stride = width * bands;
+            var buf = new byte[stride * height];
+            if (bands == 1) img.ColorSpace = ColorSpace.Gray;
+            else if (bands == 3 && img.HasAlpha) img.Alpha(AlphaOption.Off);
+            else if (bands == 4 && !img.HasAlpha) img.Alpha(AlphaOption.On);
+            using (var pixels = img.GetPixels())
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var row = pixels.GetArea(0, y, (uint)width, 1)
+                        ?? throw new InvalidOperationException($"Magick streaming load: pixel row {y} returned null");
+                    Array.Copy(row, 0, buf, y * stride, stride);
+                }
+            }
+
+            var image = new VipsImage
+            {
+                Width = width,
+                Height = height,
+                Bands = bands,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = bands <= 2 ? VipsInterpretation.BW : VipsInterpretation.RGB,
+                Coding = VipsCoding.None,
+                XRes = 1.0,
+                YRes = 1.0,
+                // Buffer is already materialized; PixelsLazy hands it out
+                // verbatim instead of re-decoding.
+                PixelsLazy = new Lazy<byte[]>(() => buf),
+            };
+
+            if (exif != null) image.MetadataBlobs["exif"] = exif;
+            if (xmp != null) image.MetadataBlobs["xmp"] = xmp;
+            if (icc != null) image.MetadataBlobs["icc"] = icc;
+            return image;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken cancellationToken, MagickFormat? formatHint = null)
     {
         var ms = new MemoryStream();

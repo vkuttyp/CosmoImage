@@ -25,4 +25,11 @@ public static class VipsPnmLoader
         if (!await IsPnmAsync(source, cancellationToken)) return null;
         return await VipsMagickWrapLoader.LoadAsync(source, cancellationToken);
     }
+
+    /// <summary>Streaming variant: eager decode, no encoded-buffer retention.</summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsPnmAsync(source, cancellationToken)) return null;
+        return await VipsMagickWrapLoader.LoadStreamingAsync(source, cancellationToken);
+    }
 }

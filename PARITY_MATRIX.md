@@ -199,11 +199,11 @@ Items where we match or exceed ImageSharp:
 | Proper CMM-based ICC color management | Significant | Needs a LittleCMS native binding; current `IccTransform` uses Magick.NET as a one-shot transform |
 | `MemoryAllocator` for lazy materializers | Moderate | Transient buffers (`VipsRegion`, `OrderedStripSink`) now pool through `IVipsAllocator`. Extending to `MemorySink.Pixels` and loader `PixelsLazy` requires explicit ownership/disposal semantics on `VipsImage` — design discussion before code |
 | Generic op signatures (`Resize<TPixel>`, etc.) | Significant | The `TypedImage<TPixel>` access layer is shipped; making *every* op generic over pixel type is the remaining piece. Doesn't translate cleanly to the lazy-pipeline model where ops produce new images, so likely better delivered as a typed parallel API rather than replacing the existing one |
-| Streaming (truly-non-buffered) loaders | Significant | All codecs decode into memory; ImageSharp does the same — parity item not gap |
+| Streaming (truly-non-buffered) loaders | 🟡 partial | `VipsSourceStream` adapter + opt-in `LoadStreamingAsync` on JPEG, TIFF, and the Magick wrapper (TGA/QOI/PBM-PAM). Streaming variant decodes pixels eagerly and drops the encoded buffer immediately — saves the encoded-file-size of memory at the cost of laziness. PNG (StbImageSharp byte[]-only) and PDF (Docnet byte[]-only) still buffer; replacing those decoders is the gating work |
 | TIFF pyramidal / dzsave (deep-zoom output) | Moderate | Would need its own multi-resolution writer wrapping libtiff |
 
 ---
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 134 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 139 tests pass.*

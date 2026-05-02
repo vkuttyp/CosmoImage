@@ -214,6 +214,103 @@ public static class VipsTiffLoader
         return image;
     }
 
+    /// <summary>
+    /// Streaming TIFF load: feeds the source directly to Magick.NET via
+    /// <see cref="VipsSourceStream"/>, decodes all pages eagerly, and drops
+    /// the encoded buffer. TIFFs are typically large (often tens of MB) so
+    /// the savings here are meaningful — a 50 MB TIFF that decodes to 200 MB
+    /// of pixels keeps just the 200 MB instead of 250 MB.
+    ///
+    /// Forfeits the laziness of <see cref="LoadAsync"/>; use when memory
+    /// matters more than deferring decode (typical CDN-thumbnail workflows
+    /// always materialize anyway).
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsTiffAsync(source, cancellationToken)) return null;
+        await Task.Yield();
+
+        try
+        {
+            using var stream = source.AsStream();
+            using var pages = new MagickImageCollection(stream);
+            if (pages.Count == 0) return null;
+
+            int width = (int)pages[0].Width;
+            int pageHeight = (int)pages[0].Height;
+            int colorBands = pages[0].ColorSpace == ColorSpace.Gray ? 1 : 3;
+            int bands = colorBands + (pages[0].HasAlpha ? 1 : 0);
+
+            bool uniform = true;
+            for (int i = 1; i < pages.Count; i++)
+            {
+                if ((int)pages[i].Width != width || (int)pages[i].Height != pageHeight)
+                {
+                    uniform = false;
+                    break;
+                }
+            }
+            int nPages = uniform ? pages.Count : 1;
+            int totalHeight = pageHeight * nPages;
+            int stride = width * bands;
+            var buf = new byte[stride * totalHeight];
+
+            for (int p = 0; p < nPages; p++)
+            {
+                var frame = pages[p];
+                if (bands == 1) frame.ColorSpace = ColorSpace.Gray;
+                else if (bands == 3 && frame.HasAlpha) frame.Alpha(AlphaOption.Off);
+                else if (bands == 4 && !frame.HasAlpha) frame.Alpha(AlphaOption.On);
+
+                using var pixels = frame.GetPixels();
+                int pageBase = p * pageHeight * stride;
+                for (int y = 0; y < pageHeight; y++)
+                {
+                    var row = pixels.GetArea(0, y, (uint)width, 1)
+                        ?? throw new InvalidOperationException($"TIFF streaming: page {p} row {y} returned null");
+                    Array.Copy(row, 0, buf, pageBase + y * stride, stride);
+                }
+            }
+
+            var image = new VipsImage
+            {
+                Width = width,
+                Height = totalHeight,
+                Bands = bands,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = bands <= 2 ? VipsInterpretation.BW : VipsInterpretation.RGB,
+                Coding = VipsCoding.None,
+                XRes = 1.0,
+                YRes = 1.0,
+                PixelsLazy = new Lazy<byte[]>(() => buf),
+            };
+
+            if (nPages > 1)
+            {
+                image.Metadata["n-pages"] = nPages.ToString();
+                image.Metadata["page-height"] = pageHeight.ToString();
+            }
+
+            // Profile + orientation metadata from the first page (already
+            // decoded; same source object).
+            var first = pages[0];
+            var exifProfile = first.GetProfile("exif");
+            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
+            var xmpProfile = first.GetProfile("xmp");
+            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
+            var iccProfile = first.GetColorProfile();
+            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
+            int orient = (int)first.Orientation;
+            if (orient >= 1 && orient <= 8) image.Metadata["orientation"] = orient.ToString();
+
+            return image;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static ushort ReadU16(byte[] buf, int offset, bool le) =>
         le ? (ushort)(buf[offset] | (buf[offset + 1] << 8))
            : (ushort)((buf[offset] << 8) | buf[offset + 1]);

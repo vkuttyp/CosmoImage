@@ -233,6 +233,96 @@ public static class VipsJpegLoader
         return await LoadAsync(source, cancellationToken);
     }
 
+    /// <summary>
+    /// Streaming JPEG load. Reads the source into a single buffer, decodes
+    /// pixels eagerly, and drops the encoded buffer immediately. Trades the
+    /// laziness of <see cref="LoadAsync"/> for not holding the encoded JPEG
+    /// alongside the decoded pixel buffer (a 5 MB JPEG that decodes to 50 MB
+    /// of pixels: keeps 50 MB instead of 55 MB).
+    ///
+    /// JpegLibrary's <c>SetInput</c> takes <c>ReadOnlyMemory&lt;byte&gt;</c>
+    /// so a single in-memory buffer is still required during the decode; it
+    /// simply doesn't outlive the call.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsJpegAsync(source, cancellationToken))
+            return null;
+
+        var ms = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            int read = await source.ReadAsync(buffer, cancellationToken);
+            if (read == 0) break;
+            ms.Write(buffer, 0, read);
+        }
+        var jpegBytes = ms.ToArray();
+
+        var decoder = new JpegDecoder();
+        decoder.SetInput(jpegBytes);
+        decoder.Identify();
+        int width = decoder.Width;
+        int height = decoder.Height;
+        int bands = decoder.NumberOfComponents;
+
+        // Decode now into a fresh buffer so we can drop jpegBytes after.
+        var pixels = new byte[width * bands * height];
+        decoder.SetOutputWriter(new SimpleOutputWriter(width, height, bands, pixels));
+        decoder.Decode();
+
+        var image = new VipsImage
+        {
+            Width = width,
+            Height = height,
+            Bands = bands,
+            BandFormat = VipsBandFormat.UChar,
+            Coding = VipsCoding.None,
+            Interpretation = bands == 1 ? VipsInterpretation.BW : VipsInterpretation.RGB,
+            XRes = 1.0,
+            YRes = 1.0,
+            // Pixels are already materialized; PixelsLazy hands them out.
+            PixelsLazy = new Lazy<byte[]>(() => pixels),
+        };
+
+        // Metadata extraction uses the encoded bytes — do this *before* we
+        // let them go out of scope. Same scanning logic as the byte-buffered
+        // path; the only difference is jpegBytes won't outlive this method.
+        var exifBlob = ExtractApp1Segment(jpegBytes, ExifIdentifier);
+        if (exifBlob != null) image.MetadataBlobs["exif"] = exifBlob;
+        var xmpBlob = ExtractApp1Segment(jpegBytes, XmpIdentifier);
+        if (xmpBlob != null) image.MetadataBlobs["xmp"] = xmpBlob;
+        var iccBlob = ExtractIccProfile(jpegBytes);
+        if (iccBlob != null) image.MetadataBlobs["icc"] = iccBlob;
+
+        try
+        {
+            var directories = MetadataExtractor.ImageMetadataReader.ReadMetadata(new MemoryStream(jpegBytes));
+            foreach (var directory in directories)
+            {
+                foreach (var tag in directory.Tags)
+                {
+                    image.Metadata[$"{directory.Name}:{tag.Name}"] = tag.Description ?? "";
+                }
+            }
+            var ifd0 = directories
+                .OfType<MetadataExtractor.Formats.Exif.ExifIfd0Directory>()
+                .FirstOrDefault();
+            if (ifd0 != null)
+            {
+                var raw = ifd0.GetObject(MetadataExtractor.Formats.Exif.ExifDirectoryBase.TagOrientation);
+                if (raw != null)
+                {
+                    try { image.Metadata["orientation"] = Convert.ToInt32(raw).ToString(); }
+                    catch { }
+                }
+            }
+        }
+        catch { }
+
+        return image;
+    }
+
     private class SimpleOutputWriter : JpegBlockOutputWriter
     {
         private readonly byte[] _buffer;

@@ -22,4 +22,11 @@ public static class VipsQoiLoader
         if (!await IsQoiAsync(source, cancellationToken)) return null;
         return await VipsMagickWrapLoader.LoadAsync(source, cancellationToken);
     }
+
+    /// <summary>Streaming variant: eager decode, no encoded-buffer retention.</summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsQoiAsync(source, cancellationToken)) return null;
+        return await VipsMagickWrapLoader.LoadStreamingAsync(source, cancellationToken);
+    }
 }
