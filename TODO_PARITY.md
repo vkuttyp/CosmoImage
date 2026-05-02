@@ -12,11 +12,14 @@ current coverage.
 The mainline image-service workload is covered. These are the only Tier-1
 items that real production pipelines might still hit.
 
-- [ ] **`Image<TPixel>` strongly-typed pixel access**. Architectural surgery —
-  every public op signature would need to become generic in pixel format.
-  Doesn't translate cleanly to the lazy-pipeline model where each op produces
-  a new image, not a mutated buffer. **Cost: weeks. Value: ergonomic for app
-  authors who write loops over pixels; production code is fine without it.**
+- [x] ~~**`Image<TPixel>` typed pixel access**~~ — `TypedImage<TPixel>` ships
+  with `L8` / `La16` / `Rgb24` / `Rgba32` pixel structs and zero-copy
+  `RowSpan(y)`. Construct from a `VipsImage` (materializes once) or fresh
+  `(width, height)` and call `AsVipsImage()` to feed back into the lazy op
+  pipeline. **Remaining**: making every existing op signature generic in
+  `TPixel` — that piece is still architectural and likely better as a
+  parallel typed API rather than replacing the untyped one. Float-pixel
+  variants land with Tier-4 Float-throughout.
 
 - [x] ~~**PNG XMP via `iTXt` chunk**~~. Read+write landed; canonical
   `XML:com.adobe.xmp` keyword, uncompressed UTF-8 payload.
@@ -125,7 +128,7 @@ Each is significant work; defer until a concrete use case demands it.
 
 | Tier | Items remaining | Median effort |
 | :--- | :---: | :--- |
-| 1 (production) | 1 | architectural (Image<TPixel>) |
+| 1 (production) | 0 | typed access shipped; generic ops deferred |
 | 2 (quality-of-life) | 0 | — |
 | 3 (niche) | 7 | mostly format-codec heavy |
 | 4 (architectural) | 4 | weeks to months each |

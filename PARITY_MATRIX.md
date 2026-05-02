@@ -172,7 +172,7 @@ Items where ImageSharp differs and we don't currently match:
 
 | Item | Status | Comment |
 | :--- | :---: | :--- |
-| `Image<TPixel>` strongly-typed pixel access | ❌ | We use `byte[] Pixels` + `BandFormat` enum; pixel safety is runtime, not compile-time |
+| `Image<TPixel>` strongly-typed pixel access | 🟡 | `TypedImage<TPixel>` wraps a materialized `byte[]` for typed reads/writes (`L8`/`La16`/`Rgb24`/`Rgba32`); ops still flow through untyped `VipsImage`. `RowSpan(y)` reinterprets via `MemoryMarshal.Cast` for zero-copy tight loops. Float pixel structs land with Tier-4 Float-throughout |
 | `Mutate(action)` block-scoped op chaining | ✅ | `image.Mutate(im => im.Resize(0.5).Sepia())` — wraps the fluent extensions |
 | Float-format pixel ops throughout | ❌ | Most ops are UChar-only; would require every op to gain a Float code path |
 | `MemoryAllocator` (caller-supplied buffer pool) | 🟡 | `IVipsAllocator` plumbed through `VipsRegion` and `OrderedStripSink`; default `ArrayPoolAllocator` wraps `ArrayPool<byte>.Shared`. Long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) intentionally bypass the pool — pool ownership across an image lifetime is harder to reason about |
@@ -198,7 +198,7 @@ Items where we match or exceed ImageSharp:
 | Float-precision ops throughout | Months | Every op (Resize/Conv/Linear/Affine/etc.) needs a parallel Float code path; current Linearize/Delinearize covers the 90% case via UChar LUT |
 | Proper CMM-based ICC color management | Significant | Needs a LittleCMS native binding; current `IccTransform` uses Magick.NET as a one-shot transform |
 | `MemoryAllocator` for lazy materializers | Moderate | Transient buffers (`VipsRegion`, `OrderedStripSink`) now pool through `IVipsAllocator`. Extending to `MemorySink.Pixels` and loader `PixelsLazy` requires explicit ownership/disposal semantics on `VipsImage` — design discussion before code |
-| `Image<TPixel>` strong typing | Significant | Would touch every public op signature; doesn't translate cleanly to lazy-pipeline model where ops produce new images |
+| Generic op signatures (`Resize<TPixel>`, etc.) | Significant | The `TypedImage<TPixel>` access layer is shipped; making *every* op generic over pixel type is the remaining piece. Doesn't translate cleanly to the lazy-pipeline model where ops produce new images, so likely better delivered as a typed parallel API rather than replacing the existing one |
 | Streaming (truly-non-buffered) loaders | Significant | All codecs decode into memory; ImageSharp does the same — parity item not gap |
 | TIFF pyramidal / dzsave (deep-zoom output) | Moderate | Would need its own multi-resolution writer wrapping libtiff |
 
@@ -206,4 +206,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 84 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 96 tests pass.*

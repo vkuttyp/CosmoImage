@@ -269,6 +269,29 @@ public static class VipsImageExtensions
     public static VipsImage Mutate(this VipsImage image, Func<VipsImage, VipsImage> action)
         => VipsImageOps.Mutate(image, action);
 
+    // --- Typed pixel access ---
+
+    /// <summary>
+    /// Materialize this image into a strongly-typed <see cref="TypedImage{TPixel}"/>
+    /// for direct pixel reads/writes. The lazy pipeline runs once via
+    /// <see cref="MemorySink"/>; subsequent indexer/RowSpan calls are pure
+    /// memory access. Throws when <typeparamref name="TPixel"/>'s band/format
+    /// doesn't match this image.
+    /// </summary>
+    public static TypedImage<TPixel> ToTypedImage<TPixel>(this VipsImage image)
+        where TPixel : struct, IPixel<TPixel>
+        => new TypedImage<TPixel>(image);
+
+    /// <summary>
+    /// Convenience single-pixel read. Materializes the whole image — fine for
+    /// a one-shot probe, but for tight loops use
+    /// <see cref="ToTypedImage{TPixel}"/> + <see cref="TypedImage{TPixel}.RowSpan"/>
+    /// so the materialization happens once.
+    /// </summary>
+    public static TPixel GetPixel<TPixel>(this VipsImage image, int x, int y)
+        where TPixel : struct, IPixel<TPixel>
+        => image.ToTypedImage<TPixel>()[x, y];
+
     // --- Savers ---
 
     public static Task SaveJpegAsync(this VipsImage image, PipeWriter writer, int quality = 75)
