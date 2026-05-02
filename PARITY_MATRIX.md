@@ -1,215 +1,368 @@
-# Parity Matrix (CosmoImage)
+# Parity Matrix (CosmoImage vs upstream libvips)
 
-Snapshot of where this library stands vs **libvips** (the C reference it ports
-from) and **ImageSharp** + **SkiaSharp** (the .NET libraries it competes with).
+Snapshot of where this library stands against the **upstream
+libvips** C reference (~300 ops across 12 subsystems, 450 .c files).
+Earlier versions of this matrix understated the gap by an order of
+magnitude — this rewrite mirrors libvips' actual subsystem layout
+(`arithmetic/`, `colour/`, `conversion/`, `convolution/`, `create/`,
+`draw/`, `foreign/`, `freqfilt/`, `histogram/`, `iofuncs/`,
+`morphology/`, `mosaicing/`, `resample/`).
 
 Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 
 ---
 
-## Architecture (vs libvips IO model)
+## Architecture (`iofuncs/`)
+
+The libvips engine itself — demand-driven regions, sink-driven
+threadpool, source/target abstractions. ~41 source files; we have
+ports of the core ones plus a few CosmoImage-specific extensions
+(typed pixel access, ArrayPool integration).
 
 | Capability | Status | Notes |
 | :--- | :--- | :--- |
-| Demand-driven lazy regions | ✅ | `VipsRegion.Prepare` + `GenerateFn`; chained ops compute only what the sink consumes |
-| Sink-driven threadpool | ✅ | `VipsSink` + bounded `Channel<VipsRect>` + N workers; matches `vips_threadpool_run` |
-| Per-worker `seq` (`StartFn`/`StopFn`) | ✅ | `VipsSeq.StartOne` / `StartMany` mirror `vips_start_one` / `vips_start_many` |
-| Demand hints with min-propagation | ✅ | `VipsDemandStyle` + `SetPipeline`; SmallTile/FatStrip/ThinStrip/Any |
-| Memory-image dtype | ✅ | `VipsImage.PixelsLazy`; `Prepare` aliases the buffer (zero-copy reads, libvips SETBUF/MMAPIN equivalent) |
-| `MemorySink` for tile-shape-aware materialization | ✅ | Honors DemandHint; SmallTile pipelines get 128×128 tiles |
-| Bounds-asserting `GetAddress` | ✅ | `Debug.Assert` instead of silent clamping (matches `VIPS_REGION_ADDR`) |
-| Operation cache | 🟡 | Simple count-based; libvips has LRU + resource-aware. Functional but not production-tuned |
-| SIMD on hot paths | 🟡 | `VipsLinear`, `VipsInvert`, `VipsGlow` use `Vector<T>` pointwise; not pervasive |
+| Demand-driven lazy regions (`region.c`, `generate.c`) | ✅ | `VipsRegion.Prepare` + `GenerateFn` |
+| Sink-driven threadpool (`threadpool.c`, `sink.c`, `sinkmemory.c`) | ✅ | `VipsSink` + bounded `Channel<VipsRect>` + N workers |
+| Per-worker `seq` (`vips_start_one`, `vips_start_many`) | ✅ | `VipsSeq.StartOne` / `StartMany` |
+| Demand hints (`SmallTile`/`FatStrip`/`ThinStrip`/`Any`) | ✅ | `VipsDemandStyle` + `SetPipeline` min-propagation |
+| Memory-image dtype (`SETBUF`/`MMAPIN`) | ✅ | `VipsImage.PixelsLazy`; `Prepare` aliases the buffer |
+| Source abstraction (`source.c`, `connection.c`, `sbuf.c`) | 🟡 | `IVipsSource` + `PipeVipsSource` + `VipsSourceStream` adapter; libvips has fancier features (custom callbacks, mmap, signals) we don't expose |
+| Target abstraction (`target.c`, `targetcustom.c`) | ❌ | We only have `PipeWriter`-based saver entry points; no symmetric `IVipsTarget` interface |
+| Operation cache (`cache.c`) | 🟡 | Simple count-based; libvips has LRU + resource-aware eviction |
+| Op profiling / gating (`gate.c`) | ❌ | Built-in profiler for finding slow stages |
+| Op-tree reordering (`reorder.c`) | ❌ | Memory-locality-aware op ordering |
+| Disc-backed sink (`sinkdisc.c`) | ❌ | Tiled output for huge images that don't fit in memory |
+| Live preview sink (`sinkscreen.c`) | ❌ | Background recompute for GUI viewports — niche, used by libvips' own GUI |
+| SIMD scaffolding (`vector.cpp`) | 🟡 | A few hot paths use `Vector<T>` (Linear / Invert / Glow); libvips has a runtime IR that compiles SIMD per op |
+| `vips_image_get_*` typed accessors | ✅ | `VipsFields` (round 2) + typed pixel access via `TypedImage<TPixel>` (round 4) |
 
 ---
 
-## Loaders
+## `arithmetic/` (~50 files in libvips)
 
-| Format | Header | Pixel decode | Animated/multi-page | Metadata extraction |
-| :--- | :---: | :---: | :---: | :--- |
-| JPEG | ✅ | ✅ | n/a | EXIF + XMP raw blobs, orientation int |
-| PNG | ✅ | ✅ | n/a | EXIF (eXIf), ICC (iCCP, deflated), XMP (iTXt) |
-| WebP | ✅ | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
-| TIFF | ✅ | ✅ | ✅ multi-page | EXIF/XMP/ICC + orientation + ImageDescription (incl. OME-XML) |
-| BMP | ✅ pure-C# fast path (24/32 bpp BI_RGB) + Magick fallback | ✅ pure-C# (24/32 bpp) | n/a | paletted/RLE/BITFIELDS still go through Magick |
-| GIF | ✅ | ✅ | ✅ animated (per-frame delays) | EXIF/XMP/ICC + Comment via Magick |
-| HEIF / AVIF | ✅ | ✅ | ✅ sequences (animated AVIF, animated HEIC) | EXIF/XMP/ICC via Magick |
-| PDF | ✅ | ✅ | ✅ multi-page render | `pdf-n-pages` count |
-| SVG | ✅ | ✅ rasterize | n/a | — |
-| JPEG XL | 🟡 header stub | ❌ | n/a | — (decoder unavailable in managed) |
-| JPEG 2000 | 🟡 header only | ❌ | n/a | — |
-| Radiance HDR (`.hdr`) | ✅ | ✅ | n/a | header lines surfaced as `hdr:*` metadata |
-| FITS | ✅ | ✅ | n/a | All header cards round-trip via `Metadata["fits:*"]`; BSCALE/BZERO interpreted on load |
-| NIfTI-1 (single-file `.nii` + paired `.hdr/.img`) | ✅ | ✅ single-file | n/a | datatypes 2/16/64; 2D and 3D; scl_slope/scl_inter applied; pixdim → XRes/YRes; `LoadPairedAsync(hdr, img)` for the two-file form |
-| OpenEXR | ❌ | ❌ | n/a | — |
-| CSV / Matrix / Matlab | ❌ | ❌ | n/a | — |
-| TGA | ✅ pure-C# fast path (types 2/3/10/11) + Magick fallback | ✅ pure-C# (uncompressed types 2/3) | n/a | paletted (types 1/9) and 16bpp still go through Magick |
-| QOI | ✅ pure-C# | ✅ pure-C# | n/a | second format dropped from Magick — full QOI v1.0 spec |
-| PBM / PGM / PPM | ✅ pure-C# | ✅ pure-C# | n/a | first format dropped from Magick.NET dependency |
-| PAM | ✅ via Magick | ✅ via Magick | n/a | — |
-| CSV / Matrix (numeric text) | ✅ | ✅ | n/a | — |
-| Matlab `.mat` v5 numeric arrays | ✅ pure-C# | ❌ | n/a | first top-level miMATRIX; numeric classes only; v7.3 (HDF5) deferred |
+Pointwise arithmetic, statistics, hough transform, measurement.
+
+| libvips op | Status | Our equivalent |
+| :--- | :---: | :--- |
+| `abs`, `sin`, `cos`, `tan`, `atan`, `log`, `log10`, `exp`, `exp10`, `sqrt`, `sign`, `round`/`floor`/`ceil`/`rint` (math, math2, sign, round, unary) | 🟡 | `Math` suite covers abs/sin/cos/tan/log/log10/exp/exp10/sqrt/pow. Missing: atan/atan2, sign, floor/ceil/rint variants |
+| `pow`, `wop` (math2 — y = x^a) | ✅ | `Pow(image, exp)` |
+| `add`, `subtract`, `multiply`, `divide`, `remainder` (binary) | ❌ | No image-image arithmetic ops |
+| `linear` (a·x + b per band) | ✅ | `Linear` with SIMD same-coefficient path |
+| `invert` | ✅ | SIMD pointwise; libvips Float convention (`-x`) on Float input |
+| `boolean`, `boolean_const` (and/or/xor/lshift/rshift) | ✅ | `Boolean2`, `BooleanConst` |
+| `relational`, `relational_const` (eq/ne/lt/le/gt/ge) | ✅ | `Relational2`, `RelationalConst` |
+| `complex`, `complex2`, `complexform`, `complexget` | ❌ | No complex-number ops on DPComplex images |
+| `min`, `max`, `sum` (reductions) | ✅ via `Stats` | Per-band + aggregate min/max/sum/avg/deviate in one pass |
+| `avg`, `deviate`, `stats` | ✅ | `Stats(image)` returns full result; `Avg`/`Min`/`Max`/`Deviate` shortcuts |
+| `maxpair`, `minpair` (per-pixel max/min of two images) | ❌ | |
+| `getpoint` (extract single pixel as values) | ❌ | Equivalent: `image.GetPixel<TPixel>(x, y)` |
+| `find_trim` (auto-find non-background bbox) | ❌ | |
+| `measure` (extract patch averages from grid) | ❌ | Color-chart calibration helper |
+| `profile` (column/row first/last non-zero) | ❌ | |
+| `project` (sum-along-axis, both axes) | ❌ | |
+| `hist_find`, `hist_find_indexed`, `hist_find_ndim` | 🟡 | `HistFind` (per-band UChar). N-dim variants missing. |
+| `hough_circle`, `hough_line` | ❌ | Feature detection — niche |
+| `clamp` | ❌ | Per-band clamp to range |
 
 ---
 
-## Savers
+## `conversion/` (~40 files in libvips)
 
-| Format | Single-frame | Animated/multi-page | Metadata write |
-| :--- | :---: | :---: | :--- |
-| JPEG | ✅ | n/a | EXIF + XMP via APP1; ICC via multi-segment APP2 |
-| PNG | ✅ (full + palette PNG-8) | n/a | eXIf, iCCP (deflated), iTXt for XMP |
-| WebP | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
-| TIFF | ✅ | ✅ multi-page; pyramidal (Ptif) on `pyramid:true` | EXIF/XMP/ICC + ImageDescription (writes back `ome:xml` or `tiff:image-description`) |
-| HEIF / AVIF | ✅ | ❌ sequences | EXIF/XMP/ICC via Magick |
-| GIF | ✅ | ✅ animated | profiles + Comment on first frame |
-| APNG | ✅ | ✅ animated | profiles + Comment on first frame |
-| TGA / QOI / PBM-PAM | ✅ | n/a | EXIF/XMP/ICC via Magick (where supported) |
-| Pyramidal TIFF (Ptif) | ✅ via `SaveTiffAsync(pyramid:true)` | — | — |
-| dzsave (Deep Zoom / DZI) | ✅ | n/a | Microsoft DZI 2008 schema; OpenSeadragon-compatible |
-| OME-TIFF | ✅ | n/a | OME-XML round-trips through TIFF ImageDescription; `VipsOmeTiff` parses PhysicalSize/Channels into typed accessors. N-D layout (Z/C/T) intentionally not modelled — image is 2D / multi-page only |
+Format and layout conversions — band manipulation, embedding,
+flattening, premultiplication. **Major gap area.**
+
+| libvips op | Status | Our equivalent |
+| :--- | :---: | :--- |
+| `cast` (band-format conversion) | ✅ | `Cast`/`CastFloat`/`CastUChar` (UChar↔Float only) |
+| `copy` | 🟡 | Implicit via op pipeline; no explicit `Copy(image)` |
+| `extract_area` / `extract_band` | 🟡 | `ExtractArea` ✅; band extraction missing |
+| `embed` (place into larger canvas with extension mode) | ❌ | |
+| `gravity` (positional embed) | ❌ | |
+| `flip` | ✅ | |
+| `rot` (orthogonal) / `rot45` | 🟡 | `Rotate(VipsAngle)` ✅; rot45 missing |
+| `autorot` (EXIF-based) | ✅ | `AutoOrient` |
+| `composite`, `composite2` | 🟡 | `Composite` (over-blend only); libvips has 19 PorterDuff modes |
+| `recomb` | ✅ | |
+| `gamma` | ✅ | |
+| `flatten` (alpha-flatten against background) | ❌ | |
+| `premultiply` / `unpremultiply` | ❌ | |
+| `addalpha` | ❌ | |
+| `bandbool` (and/or/xor across bands) | ❌ | |
+| `bandfold` / `bandunfold` (W↔W*bands rearrange) | ❌ | |
+| `bandjoin` / `bandjoin_const` | ❌ | Concatenate bands across images |
+| `bandmean` (average all bands) | ❌ | |
+| `bandrank` (rank-statistic across bands) | ❌ | |
+| `byteswap` | ❌ | |
+| `cache` (operation result cache) | 🟡 | Internal `VipsCache` only |
+| `falsecolour` | ❌ | Per-band LUT for visualisation |
+| `grid` (lay tiles into grid) | ❌ | |
+| `ifthenelse` (per-pixel ternary) | ❌ | Conditional pixel selection |
+| `insert` (paste image at point) | 🟡 | `Composite` covers the common case |
+| `join` (join two images side-by-side) | ❌ | |
+| `arrayjoin` (join N images in a grid) | ❌ | |
+| `msb` (most-significant-byte extraction) | ❌ | |
+| `replicate` (tile to bigger size) | ❌ | |
+| `scale` (linear stretch to 0..255) | ❌ | Different from `Resize` — value-range scaling |
+| `sequential` (force sequential read order) | ❌ | |
+| `subsample` | 🟡 | `Shrink` covers integer subsample |
+| `switch` (case-style multi-image select) | ❌ | |
+| `tilecache` (region cache) | ❌ | |
+| `transpose3d` | ❌ | |
+| `wrap` (toroidal shift) | ❌ | |
+| `zoom` (integer scale-up by replication) | ❌ | |
+| `smartcrop` | ✅ | `EntropyCrop` |
 
 ---
 
-## Operations (by category)
+## `colour/` (~40 files in libvips)
 
-### Geometric
+The colour-management graph. **Severe gap.** libvips supports a full
+colour graph between sRGB / scRGB / Lab / LabQ / LabS / LCh / UCS /
+Oklab / Oklch / XYZ / Yxy / HSV / CMYK / CICP / uhdr / rad
+colourspaces, plus dE76/dE00/dECMC colour-difference metrics.
+We have only a few corners of it.
 
-| Op | Status | Notes |
+| libvips op | Status | Our equivalent |
 | :--- | :---: | :--- |
-| Resize (kernel-based, separable) | ✅ | 10 kernels: Nearest, Linear, Cubic, Mitchell, Lanczos2/3/5, Hermite, BicubicSharper/Smoother |
-| Affine (kernel-based) | ✅ | Same kernel suite; arbitrary 2x2 + offset; `OutWidth`/`OutHeight` |
-| Rotate (orthogonal) | ✅ | D0/D90/D180/D270, no resampling |
-| Rotate (arbitrary angle) | ✅ | Wrapper over Affine, computes bounding box |
-| Flip | ✅ | Horizontal/vertical |
-| Shrink (integer box-average) | ✅ | Used as fast-path before Resize |
-| ExtractArea / Crop | ✅ | |
-| EntropyCrop / SmartCrop | ✅ | Greedy entropy-driven trim |
-| Thumbnail | ✅ | Composes Resize + AutoOrient + Crop |
-| AutoOrient (EXIF orientation) | ✅ | Flip+Rotate combo + EXIF blob orientation patch |
-| Reduce (non-integer downscale) | ✅ via Resize | libvips' `vips_reduce` integrated into Resize |
-
-### Color / pointwise
-
-| Op | Status | Notes |
-| :--- | :---: | :--- |
-| Invert | ✅ | SIMD pointwise |
-| Linear (a·x + b per band) | ✅ | SIMD when same-coefficient |
-| Gamma | ✅ | LUT-based |
-| Brightness | ✅ | Linear with alpha-preserve |
-| Contrast | ✅ | Linear around midpoint with alpha-preserve |
-| Lightness (HSL L-axis) | ✅ | Per-pixel HSL conversion |
-| Saturate | ✅ | 3×3 luma-mix matrix via Recomb |
-| Hue rotation | ✅ | RGB rotation matrix around (1,1,1) gray axis |
-| Greyscale | ✅ | Saturate(0); preserves band count |
-| Sepia | ✅ | Standard 3×3 sepia matrix |
-| Recomb (NxN band matrix) | ✅ | Alpha pass-through |
-| Maplut | ✅ | LUT image input |
-| Linearize / Delinearize | ✅ | IEC 61966-2-1 piecewise sRGB transfer |
-| Quantize (Wu/median-cut) | ✅ | Magick.NET-backed |
-| Math suite (abs, sin, cos, tan, log, log10, exp, exp10, sqrt, pow) | ✅ | LUT-based pointwise on UChar |
-| Boolean / Relational suite (and, or, xor, lshift, rshift / eq, ne, lt, le, gt, ge) | ✅ | Const-vs-image and image-vs-image variants |
-| Stats (avg, min, max, deviate) | ✅ | Per-band + aggregate via materializing scan |
-
-### Convolution / morphology
-
-| Op | Status | Notes |
-| :--- | :---: | :--- |
-| Conv (2D mask) | ✅ | |
-| Conv1D | ✅ | Building block for separable kernels |
-| GaussBlur | ✅ | Two-pass separable Conv1D |
-| UnsharpMask | ✅ | SIMD pointwise on input + GaussBlur |
-| Dilate / Erode | ✅ | |
-| Morph (general) | ✅ | |
-| Open / Close | ✅ | Compositions of Erode/Dilate |
-| Rank / Median | ✅ | Quickselect over k×k window |
-
-### Composition / drawing
-
-| Op | Status | Notes |
-| :--- | :---: | :--- |
-| Composite (alpha-over) | ✅ | Sub-pixel positioning via Affine pre-shift |
-| DrawLine | ✅ | Xiaolin Wu antialiased; axis-aligned fast path full-coverage |
-| DrawRect (outline + fill) | ✅ | |
-| Text (glyph rendering) | 🟡 | Rudimentary — no proper shaping/kerning |
-| Paths / polygons / gradients / brushes | ❌ | Out of scope (Skia territory) |
-
-### Effects
-
-| Op | Status | Notes |
-| :--- | :---: | :--- |
-| Vignette | ✅ | Quadratic radial darkening |
-| Pixelate | ✅ | Shrink + Nearest upscale |
-| Glow | ✅ | Bloom (input + sigma·blur) |
-| OilPaint / Charcoal / Sketch / Polaroid | ✅ | Magick.NET wrappers |
-| BokehBlur | ✅ | Hexagonal-aperture kernel via `Conv` |
-
-### Analysis / frequency
-
-| Op | Status | Notes |
-| :--- | :---: | :--- |
-| HistFind | ✅ | Per-band 256-bin histogram |
-| HistCum / HistNorm / HistEqual | ✅ | |
-| Forward FFT (`FwFft`) | ✅ | MathNet, row+column 1D passes |
-| Inverse FFT (`InvFft`) | ✅ | Magnitude back to UChar |
-| Spectrum (log magnitude) | ✅ | FFT-shifted, normalized per band |
+| `colourspace` (graph dispatcher) | 🟡 | `Colourspace` covers a subset of target spaces |
+| `sRGB2scRGB` / `scRGB2sRGB` (IEC 61966-2-1 transfer) | ✅ | `Linearize` / `Delinearize` (Float and UChar paths) |
+| `scRGB2BW` | 🟡 | `Greyscale` (RGB-space, not scRGB) |
+| `XYZ2Lab`, `Lab2XYZ`, `XYZ2Yxy`, `Yxy2XYZ` | ❌ | |
+| `Lab2LCh`, `LCh2Lab`, `LCh2UCS`, `UCS2LCh` | ❌ | |
+| `Lab2LabQ` / `LabQ2Lab` (8-bit packed Lab) | ❌ | |
+| `Lab2LabS` / `LabS2Lab` (16-bit Lab) | ❌ | |
+| `LabQ2sRGB`, `LabQ2LabS`, `LabS2LabQ` | ❌ | |
+| `XYZ2Oklab`, `Oklab2XYZ`, `Oklab2Oklch`, `Oklch2Oklab` | ❌ | OkLab perceptual space |
+| `sRGB2HSV` / `HSV2sRGB` | 🟡 | Internal use only inside `Lightness` |
+| `XYZ2CMYK` / `CMYK2XYZ` | ❌ | Print colourspace |
+| `XYZ2scRGB` / `scRGB2XYZ` | ❌ | |
+| `CICP2scRGB` (ITU-R BT.2100 / Rec.2020 + transfer) | ❌ | HDR / wide-gamut |
+| `uhdr2scRGB` (Ultra HDR JPEG gainmap → scRGB) | ❌ | Modern HDR-photo path |
+| `float2rad` / `rad2float` (Radiance RGBE ↔ Float) | 🟡 | Built into `VipsHdrLoader`/`Saver` directly, not a standalone op |
+| `dE76`, `dE00`, `dECMC` | ❌ | Colour-difference metrics |
+| `icc_transform` | 🟡 | `IccTransform` via Magick.NET (one-shot, not pipeline-aware) |
+| `profile_load` (load named ICC profile) | ❌ | |
+| Custom "color" ops (matrix-driven RGB) | ✅ | `Saturate`, `Sepia`, `Hue`, `Brightness`, `Contrast`, `Lightness` |
 
 ---
 
-## Metadata round-trip across formats
+## `convolution/` (~14 files in libvips)
 
-| Format | EXIF | XMP | ICC |
-| :--- | :---: | :---: | :---: |
-| JPEG | ✅ | ✅ | ✅ multi-segment APP2 |
-| PNG | ✅ eXIf | ✅ iTXt | ✅ iCCP |
-| WebP | ✅ | ✅ | ✅ |
-| TIFF | ✅ | ✅ | ✅ |
-| HEIF / AVIF | ✅ | ✅ | ✅ |
-| GIF / APNG | ✅ | ✅ | ✅ |
-
-Cross-format conversion (e.g. JPEG → AVIF) preserves all three blob types.
-GIF and APNG also carry a free-form `Metadata["comment"]` round-trip via
-Magick.NET's Comment attribute.
+| libvips op | Status | Our equivalent |
+| :--- | :---: | :--- |
+| `conv` (general 2D mask) | ✅ | `Conv` with Float branch |
+| `convf` (float-only fast path) | ✅ via dispatch | Single Conv with Float dispatch |
+| `convi` (int-only fast path) | ✅ via dispatch | Same |
+| `convsep` (separable mask) | ✅ | `Conv1D` (X+Y composed by `GaussBlur`) |
+| `conva` (approximate) | ❌ | `vips_conva` — approximate large-kernel via box-pass |
+| `convasep` (approximate separable) | ❌ | |
+| `gaussblur` | ✅ | Two-pass `Conv1D` |
+| `sharpen` | 🟡 | `UnsharpMask` covers sigma+amount; libvips' `sharpen` does Lab-space with thresholds |
+| `canny` | ❌ | Canny edge detector |
+| `compass` (compass-pattern edge) | ❌ | |
+| `correlation`, `fastcor`, `spcor` | ❌ | Template matching / cross-correlation |
+| `edge` | ❌ | Generic edge detector wrapper |
 
 ---
 
-## vs ImageSharp specifically
+## `create/` (~30 files in libvips)
 
-Items where ImageSharp differs and we don't currently match:
+Generators. **Whole subsystem missing** apart from `text`.
 
-| Item | Status | Comment |
-| :--- | :---: | :--- |
-| `Image<TPixel>` strongly-typed pixel access | 🟡 | `TypedImage<TPixel>` wraps a materialized `byte[]` for typed reads/writes (`L8`/`La16`/`Rgb24`/`Rgba32`); ops still flow through untyped `VipsImage`. `RowSpan(y)` reinterprets via `MemoryMarshal.Cast` for zero-copy tight loops. Float pixel structs land with Tier-4 Float-throughout |
-| `Mutate(action)` block-scoped op chaining | ✅ | `image.Mutate(im => im.Resize(0.5).Sepia())` — wraps the fluent extensions |
-| Float-format pixel ops throughout | 🟢 | Float code paths cover the entire mainline pipeline: pointwise (`Cast`/`Invert`/`Linear`/`Recomb`/`Math`/`Gamma`), window (`Conv1D`/`Conv` 2D/`Morph`/`Rank`), color management (`Linearize`/`Delinearize`), geometric (`Shrink`/`Resize1D`/`Affine` → `Resize`/`Rotate`/`Thumbnail`), composition (`Composite`), effects (`Vignette`/`Glow`/`Pixelate` via composition), and analysis (`Stats`). UChar-only: artistic effects (Magick.NET-backed; can't be made Float without replacing the codec), DrawLine/Rect (niche; ink param is `byte[]`), HistFind (needs Float-range binning policy), FFT family (already in DPComplex internally), Maplut (UChar-input by design), Boolean suite (bitwise nonsensical on Float) |
-| `MemoryAllocator` (caller-supplied buffer pool) | 🟡 | `IVipsAllocator` plumbed through `VipsRegion` and `OrderedStripSink`; default `ArrayPoolAllocator` wraps `ArrayPool<byte>.Shared`. Long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) intentionally bypass the pool — pool ownership across an image lifetime is harder to reason about |
-| TGA / QOI / PBM formats | ❌ | Niche; rarely needed |
-
-Items where we match or exceed ImageSharp:
-
-| Item | Status | Comment |
-| :--- | :---: | :--- |
-| Lazy demand-driven pipeline | ✅ | ImageSharp materializes per-op; we don't until the sink consumes |
-| Multi-stage parallelism | ✅ | One threadpool drains the whole chain (sink-side); ImageSharp parallelizes per-op |
-| HEIF/AVIF native (no extension package needed) | ✅ | Magick.NET ships the codecs |
-| Permissive licensing only | ✅ | No Six Labors split-license dependency |
-| Multi-page PDF render | ✅ | Docnet-backed |
-| Cross-format metadata blob round-trip | ✅ | EXIF/XMP/ICC traverse format boundaries |
+| libvips op | Status |
+| :--- | :---: |
+| `black` (constant 0 image) | ❌ |
+| `xyz` (per-pixel x/y coordinate image — useful for mapim) | ❌ |
+| `eye`, `grey`, `zone` (test-pattern generators) | ❌ |
+| `gaussmat`, `logmat`, `gaussnoise` (filter mask generators) | ❌ |
+| `mask_butterworth`, `mask_butterworth_band`, `mask_butterworth_ring` | ❌ |
+| `mask_gaussian`, `mask_gaussian_band`, `mask_gaussian_ring` | ❌ |
+| `mask_ideal`, `mask_ideal_band`, `mask_ideal_ring` | ❌ |
+| `mask_fractal` | ❌ |
+| `fractsurf` (fractal surface) | ❌ |
+| `perlin`, `worley`, `sines` | ❌ | Procedural texture |
+| `point` (sample image at point) | ❌ |
+| `sdf` (signed distance field generator) | ❌ |
+| `tonelut`, `buildlut`, `invertlut` (LUT builders) | ❌ |
+| `identity` (identity LUT) | ❌ |
+| `text` (glyph rendering) | 🟡 `Text` (rudimentary, no proper shaping) |
 
 ---
 
-## Architectural lifts deliberately deferred
+## `draw/` (~7 ops in libvips)
 
-| Item | Effort | Why deferred |
+In-place pixel drawing onto a memory-backed image.
+
+| libvips op | Status |
+| :--- | :---: |
+| `draw_line` | ✅ `DrawLine` (Xiaolin Wu antialiased) |
+| `draw_rect` | ✅ `DrawRect` (outline + fill) |
+| `draw_circle` | ❌ |
+| `draw_flood` (flood fill) | ❌ |
+| `draw_image` (paste image at point) | 🟡 covered by `Composite` |
+| `draw_mask` (draw with alpha mask) | ❌ |
+| `draw_smudge` | ❌ |
+
+---
+
+## `foreign/` (~70 files in libvips — loaders + savers)
+
+| Format | libvips coverage | Our coverage |
 | :--- | :--- | :--- |
-| Float-precision ops throughout | Mostly shipped | Mainline pipeline (resize/blur/composite/effects/color management/stats) is Float end-to-end. Remaining UChar-only ops are by-design (Magick-backed artistic effects, bitwise Boolean) or genuinely UChar-input-shaped (HistFind 256-bin LUT, Maplut, drawing ink params); none block typical workflows |
-| Proper CMM-based ICC color management | Significant | Needs a LittleCMS native binding; current `IccTransform` uses Magick.NET as a one-shot transform |
-| `MemoryAllocator` for lazy materializers | Moderate | Transient buffers (`VipsRegion`, `OrderedStripSink`) now pool through `IVipsAllocator`. Extending to `MemorySink.Pixels` and loader `PixelsLazy` requires explicit ownership/disposal semantics on `VipsImage` — design discussion before code |
-| Generic op signatures (`Resize<TPixel>`, etc.) | Significant | The `TypedImage<TPixel>` access layer is shipped; making *every* op generic over pixel type is the remaining piece. Doesn't translate cleanly to the lazy-pipeline model where ops produce new images, so likely better delivered as a typed parallel API rather than replacing the existing one |
-| Streaming (truly-non-buffered) loaders | 🟢 mainline | `VipsSourceStream` adapter + opt-in `LoadStreamingAsync` on every Stream-capable loader: JPEG, TIFF, BMP, WebP (animated), GIF (animated), HEIF/AVIF, SVG, plus the Magick wrapper (TGA/QOI/PBM-PAM). Streaming variant decodes pixels eagerly and drops the encoded buffer immediately. Only PNG (StbImageSharp byte[]-only) and PDF (Docnet byte[]-only) still buffer the encoded bytes; gated on decoder replacement |
-| TIFF pyramidal / dzsave (deep-zoom output) | Moderate | Would need its own multi-resolution writer wrapping libtiff |
+| **JPEG** | full + EXIF/XMP/ICC + progressive + arith | ✅ pure-C# decoder + multi-segment ICC |
+| **PNG** | libpng / libspng | ✅ via StbImageSharp; XMP via iTXt added |
+| **TIFF** | libtiff (huge variant matrix) | 🟡 via Magick; multi-page + Ptif pyramid + OME-XML metadata |
+| **WebP** | libwebp animated | 🟡 via Magick |
+| **HEIF / AVIF** | libheif single + sequence | 🟡 via Magick; animated load works, save single-frame only |
+| **GIF** | nsgif animated | 🟡 via Magick |
+| **PDF** | poppler / pdfium | 🟡 via Docnet |
+| **SVG** | librsvg | 🟡 via Magick |
+| **BMP** | libvips + magick fallback | 🟡 pure-C# fast path (24/32 bpp BI_RGB) + Magick fallback |
+| **TGA** | magick fallback | 🟡 pure-C# fast path (types 2/3/10/11) + Magick fallback |
+| **QOI** | direct | ✅ pure-C# (QOI v1.0 spec) |
+| **PPM family** (PBM/PGM/PPM/PFM) | direct | 🟡 pure-C# P1-P6; PAM via Magick |
+| **CSV / Matrix / Matlab** | csv, matrix, mat (v5 + v7.3) | 🟡 CSV ✅; Matrix ✅; Matlab v5 read ✅; v7.3 (HDF5) ❌; Matlab write ❌ |
+| **Radiance HDR** | direct | ✅ pure-C# |
+| **FITS** | cfitsio | ✅ pure-C# (2D/3D, BSCALE/BZERO, single HDU) |
+| **NIfTI** | niftiio | ✅ single-file `.nii` + paired `.hdr/.img`; 4D fMRI deferred |
+| **Analyze 7.5** | direct | ❌ NIfTI-1 covers most use; pure Analyze rare |
+| **JPEG XL** | libjxl | ❌ header stub only |
+| **JPEG 2000** | libjp2k | ❌ header stub only |
+| **OpenEXR** | OpenEXR library | ❌ |
+| **OpenSlide** | openslide (whole-slide microscopy: SVS / NDPI / MRXS / VMS / VMU / SCN / MIRAX / TIFF) | ❌ |
+| **dcraw** | dcraw camera-raw | ❌ |
+| **uhdr** (Ultra HDR JPEG with gainmap) | libuhdr | ❌ |
+| **DICOM** | via Magick | ❌ |
+
+**Output-only / multi-resolution:**
+| Format | libvips | Ours |
+| :--- | :--- | :--- |
+| **Pyramidal TIFF** (Ptif) | ✅ | ✅ via `SaveTiffAsync(pyramid: true)` |
+| **dzsave** (Deep Zoom — DZI / Zoomify / IIIF / Google) | ✅ all 4 layouts | 🟡 DZI only |
+| **APNG** (animated PNG) | via libspng | ✅ pure-C# saver |
 
 ---
 
-*Last updated: 2026-05-02. Numbers in this matrix track the source tree
-under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 233 tests pass.*
+## `freqfilt/` (~6 files in libvips)
+
+Frequency-domain filtering.
+
+| libvips op | Status |
+| :--- | :---: |
+| `fwfft` | ✅ `FwFft` |
+| `invfft` | ✅ `InvFft` |
+| `spectrum` (log-magnitude visualisation) | ✅ `Spectrum` (FFT-shifted) |
+| `freqmult` (frequency-domain multiply with mask) | ❌ |
+| `phasecor` (phase correlation — image registration) | ❌ |
+
+---
+
+## `histogram/` (~13 files in libvips)
+
+| libvips op | Status |
+| :--- | :---: |
+| `hist_find` | ✅ |
+| `hist_cum`, `hist_norm`, `hist_equal` | ✅ |
+| `maplut` | ✅ |
+| `hist_entropy` | ❌ |
+| `hist_local` (CLAHE — contrast-limited adaptive histogram equalization) | ❌ |
+| `hist_match` (histogram matching against reference) | ❌ |
+| `hist_plot` (visualise hist as image) | ❌ |
+| `hist_ismonotonic` | ❌ |
+| `case` (per-pixel select from band of LUTs) | ❌ |
+| `percent` (find threshold for given percentage) | ❌ |
+| `stdif` (statistical differencing — local-contrast enhancement) | ❌ |
+
+---
+
+## `morphology/` (~5 files in libvips)
+
+| libvips op | Status |
+| :--- | :---: |
+| `morph` (dilate/erode dispatcher) | ✅ `Morph` with Float branch |
+| `rank` | ✅ `Rank`/`Median` |
+| `nearest` (distance to nearest non-zero pixel) | ❌ |
+| `countlines` (count black-white transitions per scanline) | ❌ |
+| `labelregions` (connected-component labeling) | ❌ |
+
+---
+
+## `mosaicing/` (~22 files in libvips)
+
+**Whole subsystem missing.** Image stitching, panorama assembly,
+luminosity balancing.
+
+| libvips op | Status |
+| :--- | :---: |
+| `lrmerge` / `lrmosaic` (left-right) | ❌ |
+| `tbmerge` / `tbmosaic` (top-bottom) | ❌ |
+| `mosaic`, `mosaic1`, `remosaic` | ❌ |
+| `match` (control-point match) | ❌ |
+| `global_balance` | ❌ |
+| `matrixinvert`, `matrixmultiply` | ❌ |
+| `merge`, `chkpair`, `im_avgdxdy`, `im_clinear`, `im_improve`, `im_initialize`, `im_lrcalcon`, `im_tbcalcon` (legacy helpers) | ❌ |
+
+---
+
+## `resample/` (~19 files in libvips)
+
+| libvips op | Status |
+| :--- | :---: |
+| `resize` (kernel-based, separable) | ✅ |
+| `affine` | ✅ |
+| `shrink` (integer box-average) | ✅ |
+| `shrinkh` / `shrinkv` (axis-specific) | 🟡 covered by `Resize1D` |
+| `reduce` / `reduceh` / `reducev` (non-integer downsample) | ✅ via `Resize` |
+| `thumbnail` | ✅ (composes resize + autoorient + crop) |
+| `similarity` (uniform scale + rotate + translate) | 🟡 covered by `Affine` |
+| `mapim` (nonlinear remap via index image) | ❌ |
+| `quadratic` (quadratic transform — used in lens correction) | ❌ |
+| `transform` | 🟡 covered by `Affine` |
+| `interpolate` (custom interpolator registration) | ❌ |
+| Built-in kernels: nearest / linear / cubic / mitchell / lanczos2 / lanczos3 | ✅ + lanczos5 / hermite / bicubic-sharper / bicubic-smoother |
+| `lbb` / `nohalo` / `vsqbs` (advanced edge-preserving interpolators) | ❌ |
+
+---
+
+## CosmoImage extensions (not in upstream libvips)
+
+| Item | Notes |
+| :--- | :--- |
+| `TypedImage<TPixel>` | C# typed-pixel wrapper (`L8`/`La16`/`Rgb24`/`Rgba32`); `RowSpan(y)` reinterprets via `MemoryMarshal.Cast` |
+| `Mutate(action)` | ImageSharp-style block-scoped fluent API |
+| Float-throughout mainline | Linearize → Resize → Composite → Glow → Vignette → Delinearize end-to-end in Float |
+| `IVipsAllocator` (`ArrayPool<byte>`) | Plumbed through `VipsRegion` and `OrderedStripSink` |
+| Effects (`Vignette`, `Glow`, `Pixelate`, `OilPaint`, `Charcoal`, `Sketch`, `Polaroid`, `BokehBlur`) | Effects-pipeline ops on top of the libvips primitives |
+| `EntropyCrop` | Greedy entropy-driven smartcrop variant |
+| `Quantize` (Wu/median-cut) | Magick-backed quantizer |
+| Pure-managed dependency stack | No libpng/libjpeg/libtiff native deps; alternative stack via JpegLibrary, StbImageSharp, Magick.NET-Q8, Docnet, MathNet |
+
+---
+
+## Status summary
+
+By libvips subsystem, where ✅ = full or near-full, 🟡 = partial,
+❌ = missing.
+
+| Subsystem | Files in libvips | Our coverage |
+| :--- | :---: | :---: |
+| `iofuncs/` (engine) | 41 | 🟡 — core ported; profiling / reorder / disc-sink / target abstraction missing |
+| `arithmetic/` | ~50 | 🟡 — math/boolean/relational/stats/hist_find/linear/invert; missing add/sub/mul/div, complex, hough, find_trim, measure |
+| `conversion/` | ~40 | 🟡 — cast/extract/flip/rot/composite/recomb/gamma/autorot/smartcrop; ~25 ops missing (band ops, embed, flatten, premultiply, ifthenelse, switch, …) |
+| `colour/` | ~40 | 🟡 — sRGB↔linear + RGB-matrix ops + ICC; ~30 colourspace converters missing (Lab, LabQ, LabS, LCh, UCS, Oklab, XYZ, Yxy, HSV, CMYK, scRGB, CICP, uhdr) plus dE metrics |
+| `convolution/` | 14 | 🟡 — conv/convsep/gaussblur/sharpen; missing canny, compass, correlation family, conva variants |
+| `morphology/` | 5 | 🟡 — morph/rank shipped; nearest/countlines/labelregions missing |
+| `histogram/` | 13 | 🟡 — find/cum/equal/norm/maplut; ~8 missing (CLAHE, hist_match, percent, stdif, hist_entropy, …) |
+| `freqfilt/` | 6 | 🟡 — fwfft/invfft/spectrum; freqmult and phasecor missing |
+| `resample/` | 19 | 🟡 — resize/affine/shrink/thumbnail/reduce; mapim, quadratic, similarity, edge-preserving interpolators (nohalo/lbb/vsqbs) missing |
+| `mosaicing/` | 22 | ❌ — entire subsystem missing (panorama / stitching / global balance) |
+| `create/` | 30 | ❌ — only `text` covered; all generators (mask_*, perlin, worley, sdf, sines, identity LUT, …) missing |
+| `draw/` | 7 | 🟡 — line/rect; circle/flood/mask/smudge missing |
+| `foreign/` | ~70 | 🟡 — modern web formats covered (mostly via Magick); scientific (HDR/FITS/NIfTI/Matlab v5) covered pure-C#; gaps: OpenEXR, JPEG XL/2K full decode, OpenSlide, dcraw, uhdr, DICOM, Analyze, Matlab v7.3 |
+
+---
+
+*Last updated: 2026-05-02. 233 tests pass. Source files under `Core/`,
+`Loaders/`, `Savers/`, `Operations/{Geometric,Color,Effects,Convolution,
+Drawing,Analysis,Misc}/`. Upstream libvips counts from
+`~/Downloads/libvips-master`.*

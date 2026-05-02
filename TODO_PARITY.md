@@ -1,281 +1,303 @@
-# Parity TODO
+# Parity TODO (vs upstream libvips)
 
-Outstanding items, grouped by what would deliver the most user-visible value.
-The original 13-item TODO is fully complete; this is the **next** layer of
-work. Items already shipped are not listed — see `PARITY_MATRIX.md` for
-current coverage.
+Honest accounting of remaining work to reach upstream libvips parity.
+Reorganised by libvips' own subsystem layout after surveying the
+reference source at `~/Downloads/libvips-master`. The earlier "13-item
+TODO" framing reflected an internal-flavor checklist — the real gap is
+hundreds of ops across a dozen subsystems.
 
----
+What this document is for: a structured map of remaining work, grouped
+so each section is independently actionable and honest about size.
+Tier numbers are gone — they over-promised. Replaced with **scope
+classes** (mechanical / op-set / subsystem / native-binding) that
+describe what kind of work each gap is.
 
-## Tier 1 — production gaps (rare)
-
-The mainline image-service workload is covered. These are the only Tier-1
-items that real production pipelines might still hit.
-
-- [x] ~~**`Image<TPixel>` typed pixel access**~~ — `TypedImage<TPixel>` ships
-  with `L8` / `La16` / `Rgb24` / `Rgba32` pixel structs and zero-copy
-  `RowSpan(y)`. Construct from a `VipsImage` (materializes once) or fresh
-  `(width, height)` and call `AsVipsImage()` to feed back into the lazy op
-  pipeline. **Remaining**: making every existing op signature generic in
-  `TPixel` — that piece is still architectural and likely better as a
-  parallel typed API rather than replacing the untyped one. Float-pixel
-  variants land with Tier-4 Float-throughout.
-
-- [x] ~~**PNG XMP via `iTXt` chunk**~~. Read+write landed; canonical
-  `XML:com.adobe.xmp` keyword, uncompressed UTF-8 payload.
-
-- [x] ~~**GIF / APNG metadata round-trip**~~. EXIF/XMP/ICC profiles plus the
-  free-form `Metadata["comment"]` attribute round-trip via Magick.NET.
+For what's already shipped, see `PARITY_MATRIX.md`. The section
+headers below mirror libvips' subsystem directories.
 
 ---
 
-## Tier 2 — quality-of-life
+## Mechanical follow-ups (per-op, days each)
 
-All Tier-2 items shipped in this pass.
+Single ops or tight clusters that fit the existing dispatch pattern.
+Each lands in a single PR.
 
-- [x] ~~**Math suite**~~ — `Abs/Sin/Cos/Tan/Log/Log10/Exp/Exp10/Sqrt/Pow`,
-  LUT-driven on UChar.
-- [x] ~~**Boolean / Relational suite**~~ — const-vs-image and image-vs-image
-  variants for `And/Or/Xor/LShift/RShift` and `Equal/NotEqual/Less/LessEq/More/MoreEq`.
-- [x] ~~**Stats ops**~~ — `Stats(image)` returns per-band + aggregate
-  `Min/Max/Avg/Deviate`; convenience `Avg/Min/Max/Deviate(image)` shortcuts.
-- [x] ~~**Inverse FFT + spectrum**~~ — `InvFft` reconstructs spatial UChar from
-  DPComplex; `Spectrum` returns FFT-shifted, normalized log-magnitude.
-- [x] ~~**Open / Close / Rank morphology**~~ — Open/Close as Erode↔Dilate
-  compositions; `Rank(w, h, k)` with quickselect; `Median(window)` shortcut.
-- [x] ~~**`Mutate(action)` block scoping API**~~ — `image.Mutate(im => im.Resize(...).Sepia())`.
+### `arithmetic/`
+- [ ] `add` / `subtract` / `multiply` / `divide` / `remainder`
+  (image-image binary arithmetic). Pointwise; trivial Float code path.
+- [ ] `linear` (a·x+b) — already shipped, but `linear_const`
+  variant with broadcast scalar is missing.
+- [ ] `sign` / `floor` / `ceil` / `rint` — extend `VipsMath` to cover
+  the libvips full set.
+- [ ] `clamp` (per-band clamp to range).
+- [ ] `min` / `max` / `sum` reductions exposed as standalone ops
+  (currently only via `Stats`).
+- [ ] `maxpair` / `minpair` (per-pixel max/min of two images).
+- [ ] `getpoint` (extract single pixel as values) — wraps existing
+  `TypedImage<TPixel>.GetPixel`.
 
----
+### `conversion/`
+- [ ] `bandbool` / `bandfold` / `bandunfold` / `bandjoin` /
+  `bandjoin_const` / `bandmean` / `bandrank` — band-axis ops.
+- [ ] `addalpha` (force alpha channel).
+- [ ] `flatten` (alpha-flatten against background colour).
+- [ ] `premultiply` / `unpremultiply`.
+- [ ] `embed` (place into larger canvas with extension mode).
+- [ ] `gravity` (positional embed).
+- [ ] `replicate` (tile to bigger size).
+- [ ] `rot45` (45-degree rotate by lookup).
+- [ ] `byteswap`.
+- [ ] `falsecolour` (per-band LUT for visualisation).
+- [ ] `ifthenelse` (per-pixel ternary).
+- [ ] `switch` (case-style multi-image select).
+- [ ] `wrap` (toroidal shift).
+- [ ] `zoom` (integer scale-up by replication).
+- [ ] `scale` (linear stretch to 0..255 — different from `Resize`).
+- [ ] `extract_band`.
+- [ ] `arrayjoin` / `join` / `grid` / `insert`.
 
-## Tier 3 — niche
+### `convolution/`
+- [ ] `sharpen` — distinct from `UnsharpMask`; libvips' version does
+  Lab-space sharpening with shadow/highlight thresholds.
+- [ ] `canny` (Canny edge detector).
+- [ ] `compass` (compass-pattern edge response).
+- [ ] `correlation` / `fastcor` / `spcor` (template matching).
+- [ ] `conva` / `convasep` (approximate large-kernel via box-pass).
 
-Targeted gaps. Each affects a specific workflow that most users never hit.
+### `morphology/`
+- [ ] `nearest` (distance to nearest non-zero pixel — distance transform).
+- [ ] `labelregions` (connected-component labelling — useful for
+  segmentation pipelines).
+- [ ] `countlines` (count black-white transitions per scanline).
 
-- [ ] **JPEG XL pixel decode**. We have the header stub; full decode needs an
-  ANS-coded bitstream parser or a native libjxl binding.
-- [ ] **JPEG 2000 pixel decode**. Header-only currently; full decode similar
-  scope to JXL.
-- [x] ~~**TGA / QOI / PBM formats**~~. All shipped via Magick.NET wrappers
-  (`VipsTgaLoader`/`VipsTgaSaver`, `VipsQoi*`, `VipsPnm*` covering
-  PBM/PGM/PPM/PAM with Auto variant detection). TGA passes a format hint
-  since it has no magic bytes.
-- [x] ~~**Radiance HDR (`.hdr`)**~~ shipped. Pure C# decoder + encoder
-  (no Magick dependency); 3-band Float output in linear-light RGB,
-  Greg Ward RGBE encoding with new-style per-component RLE. Float-throughout
-  (rounds 5-8) is what made this loadable end-to-end. Header lines like
-  `EXPOSURE=` round-trip via `Metadata["hdr:exposure"]`.
+### `histogram/`
+- [ ] `hist_local` (CLAHE — high-value adaptive equalisation).
+- [ ] `hist_match` (histogram matching against reference).
+- [ ] `hist_entropy`.
+- [ ] `percent` (find threshold for given percentage).
+- [ ] `stdif` (statistical differencing — local-contrast enhancement).
+- [ ] `hist_plot` (visualise hist as image).
+- [ ] `case` (per-pixel select from band of LUTs).
 
-- [ ] **OpenEXR**. Same HDR niche as Radiance HDR but with EXR-specific
-  multi-resolution / multi-channel layout. Now unblocked by the
-  Float-throughout work, but the EXR codec itself is a substantial
-  project — half-precision floats, multiple compression schemes, tile
-  layout. Defer until concrete demand.
-- [x] ~~**FITS**~~ shipped. Pure-C# loader/saver (no native deps). Decodes
-  BITPIX 8 (UChar), 16 / 32 (signed integer → Float, BSCALE/BZERO applied),
-  -32 (IEEE float), -64 (double → cast to Float). NAXIS=2 grayscale and
-  NAXIS=3 with planar→interleaved transpose for RGB/RGBA. WCS / DATE-OBS /
-  OBSERVER / etc. survive load → save via `Metadata["fits:*"]`. NAXIS≥4
-  data cubes and additional HDUs (binary tables) intentionally out of scope.
+### `freqfilt/`
+- [ ] `freqmult` (frequency-domain multiply with mask — apply a
+  designed filter).
+- [ ] `phasecor` (phase correlation — image registration / motion
+  estimation).
 
-- [x] ~~**NIfTI-1 (2D / 3D, single-file `.nii`)**~~ shipped. Pure-C# loader
-  with auto-endian detection (the canonical `dim[0] ∈ 1..7` rule), datatype
-  dispatch (uint8 → UChar, float32/float64 → Float), `scl_slope`/`scl_inter`
-  linear value transform, and `pixdim` → libvips `XRes`/`YRes` with mm
-  units. Saver emits the `n+1` single-file form with native little-endian.
-  3-band and 4-band images map to the third dimension as image planes.
-  Header descrip / datatype / scl fields round-trip via `Metadata["nifti:*"]`.
+### `resample/`
+- [ ] `mapim` (nonlinear remap via index image — lens correction,
+  warping).
+- [ ] `quadratic` (quadratic transform).
+- [ ] `similarity` (constrained scale + rotate + translate).
+- [ ] Edge-preserving interpolators: `nohalo`, `lbb`, `vsqbs`.
 
-  Round 22 added `LoadPairedAsync(headerSource, dataSource)` for the
-  two-file `.hdr/.img` layout (magic `"ni1\0"`). The decoder is shared
-  between single-file and paired forms so a future bug fix in either
-  path applies to both.
-
-  **Remaining**: 4D+ time-series (fMRI volumes — needs N-D semantics that
-  `VipsImage` doesn't model), paired-form save (would need a multi-stream
-  saver API the rest of the library doesn't have today), signed-integer
-  datatypes (int16/int32 are common in raw scanner output), full qform/
-  sform quaternion-based spatial transforms.
-- [x] ~~**Animated AVIF / HEIC sequences (load)**~~ shipped. `VipsHeifLoader`
-  enumerates frames via `MagickImageCollection`, stacks into a tall buffer
-  with `n-pages` / `page-height` / `animation-delays` metadata (same
-  convention as WebP/GIF). Two parsing fixes were needed:
-  - The manual ISOBMFF parser in `LoadHeaderAsync` only handles the still
-    image box layout (top-level `ispe`); sequence-brand files (`avis`,
-    animated HEIC) use a movie-track layout. `LoadAsync` falls through to
-    a Magick-based probe when the manual parser returns null.
-  - `LoadStreamingAsync` now buffers to a seekable `MemoryStream` first —
-    Magick.NET requires random access for ISOBMFF box parsing, and the
-    forward-only `VipsSourceStream` can't provide it. Streaming win is
-    preserved (encoded buffer goes out of scope after decode).
-
-  **Encoding** of animated AVIF/HEIC is gated on the ImageMagick build:
-  Magick.NET-Q8-arm64 ships only a single-frame HEIC encoder; AVIF
-  sequence write does work via `MagickImageCollection.Write(MagickFormat.Avif)`.
-  Sequence write through `VipsHeifSaver` is not yet exposed — defer until
-  there's a concrete use case.
-- [x] ~~**BokehBlur**~~. Hexagonal-aperture kernel composed with the existing
-  `VipsConv`. `image.BokehBlur(radius)`.
-- [x] ~~**TIFF pyramidal write**~~. `SaveTiffAsync(image, writer, pyramid:true)`
-  emits Magick's `Ptif`. Tiled-TIFF (with explicit tile geometry control)
-  still pending — that's a deeper libtiff knob.
-
-- [x] ~~**OME-TIFF**~~ shipped at the metadata-round-trip level. TIFF
-  ImageDescription (tag 270) is now a generic round-trippable field via
-  `Metadata["tiff:image-description"]`; OME-shaped XML is also surfaced
-  as `Metadata["ome:xml"]` and parsed by `VipsOmeTiff` for typed access
-  to `<Pixels>` PhysicalSize and `<Channel>` records. The TIFF loader
-  auto-populates `XRes`/`YRes` from PhysicalSizeX/Y with unit conversion
-  (µm/mm/cm/m/nm/Å). N-D layout (Z, C, T) is intentionally out of scope
-  — `VipsImage` is 2D / multi-page only; callers needing full N-D
-  semantics work with the raw XML.
-- [x] ~~**`dzsave` (Deep Zoom)**~~ shipped. `VipsDzSaver.SaveAsync(image, basePath, …)`
-  emits the Microsoft DZI 2008 layout (`{basePath}.dzi` + `{basePath}_files/`).
-  Supports JPEG and PNG tiles, configurable tile size and overlap.
-  OpenSeadragon-compatible. Other layouts (Zoomify, IIIF) deferred —
-  DZI is the most widely-supported and porting the full layout matrix is
-  its own project. Unlike other savers this writes to a directory rather
-  than a `PipeWriter`, so the entry point takes a base path string.
-- [x] ~~**CSV / Matrix data loaders**~~. `VipsCsvLoader` and `VipsMatrixLoader`
-  parse whitespace/comma-separated numeric grids; comments + header rows
-  supported.
-
-- [x] ~~**Matlab `.mat` v5 numeric reader**~~ shipped. Pure-C# parser
-  (`VipsMatLoader`) for the v5 tagged-binary format: 128-byte header with
-  endianness auto-detect, top-level data elements with 8-byte alignment,
-  miCOMPRESSED zlib-inflate, miMATRIX sub-element walk (Array Flags /
-  Dimensions / Name / Real Part). Numeric classes only — uint8 stays
-  UChar, everything else widens to Float. 2D and 3D with the third
-  dimension ∈ {1, 3, 4} mapping to image planes; column-major storage
-  is transposed to row-major. Cell / struct / sparse / char / object
-  classes, complex (imaginary) parts, ndim ≥ 4, and v7.3 (HDF5-based —
-  completely different format) all out of scope. Writing deferred —
-  read covers the typical "load this image saved by scipy/Octave" case.
+### `draw/`
+- [ ] `draw_circle`.
+- [ ] `draw_flood` (flood fill).
+- [ ] `draw_mask` (draw with alpha mask).
+- [ ] `draw_smudge`.
 
 ---
 
-## Tier 4 — architectural lifts
+## Op-set work (multi-day, structured ports)
 
-Each is significant work; defer until a concrete use case demands it.
+Coherent op clusters that belong together. Each is days-to-a-week.
 
-- 🟢 **Float-format ops throughout** — mainline shipped.
+### Colour-management graph (`colour/`)
+The biggest single op-set gap. libvips supports the full graph between
+sRGB ↔ scRGB ↔ Lab ↔ LabQ ↔ LabS ↔ LCh ↔ UCS ↔ XYZ ↔ Yxy ↔ HSV ↔ CMYK
+↔ Oklab ↔ Oklch, plus CICP and uhdr at the edges. We have only
+sRGB↔linear and a few RGB-space matrix manipulations.
 
-  **Shipped**:
-    - Keystone: `VipsCast` (UChar↔Float, libvips no-auto-normalize convention)
-    - Pointwise: `VipsInvert`, `VipsLinear`, `VipsRecomb` (drives
-      Saturate/Sepia/Hue/Greyscale), `VipsMath`, `VipsGamma`
-    - Window: `VipsConv1D` (drives `GaussBlur`), `VipsConv` (2D mask),
-      `VipsMorph` (Dilate/Erode with -∞/+∞ seeding), `VipsRank` (quickselect
-      on floats; drives `Median`)
-    - Color management: `VipsLinearize`/`VipsDelinearize` with full
-      per-pixel sRGB transfer in double precision (measurably more precise
-      than the UChar 256-entry LUT — covered by `LinearizePrecision_Float_BeatsUCharLut`)
-    - Geometric: `VipsShrink`, `VipsResize1D` (X+Y), `VipsAffine`, driving
-      `VipsResize`, `VipsRotate`, `VipsThumbnail` end-to-end
-    - Composition/Effects: `VipsComposite` (alpha-over with Float alpha as
-      nominal [0,1]), `VipsVignette`, `VipsGlow` (no clamp on the additive
-      blend), `VipsPixelate` (inherits via Shrink + Resize composition)
-    - Analysis: `VipsStats` (per-band Min/Max/Avg/Deviate over Float pixels)
+- [ ] XYZ ↔ Lab, Lab ↔ LCh, LCh ↔ UCS — the CIE colourimetry chain.
+- [ ] Lab ↔ LabQ (8-bit packed), Lab ↔ LabS (16-bit signed).
+- [ ] XYZ ↔ Oklab, Oklab ↔ Oklch — Björn Ottosson's perceptual space.
+- [ ] sRGB ↔ HSV (we use HSV internally for `Lightness` but don't
+  expose the converters).
+- [ ] XYZ ↔ CMYK (print colourspace).
+- [ ] CICP2scRGB (BT.2100 / Rec.2020 / PQ / HLG transfer functions —
+  HDR / wide-gamut interop).
+- [ ] uhdr2scRGB (Ultra HDR JPEG with gainmap).
+- [ ] dE76 / dE00 / dECMC colour-difference metrics.
+- [ ] Pipeline-aware ICC: profile attached to image metadata, transform
+  applied at sink boundary rather than as a one-shot. Currently
+  `IccTransform` is a one-shot Magick call.
 
-  The mainline color-correct linear-light pipeline (Linearize → Resize →
-  Composite → Glow → Vignette → Delinearize) runs end-to-end in Float
-  with no UChar quantization.
+### Image generators (`create/`)
+Whole subsystem missing apart from `Text`. Each is a small standalone
+generator that produces an image from parameters.
 
-  **Remaining UChar-only — by design or out of scope**:
-    - Artistic effects (`VipsOilPaint`/`VipsCharcoal`/`VipsSketch`/`VipsPolaroid`):
-      Magick.NET-backed; the underlying codec is UChar internally, so a
-      Float branch would have to round-trip through Magick anyway. Wait
-      until the broader "drop more Magick.NET" Tier-4 item lands.
-    - `VipsDrawLine`/`VipsDrawRect`: niche; ink colour is a `byte[]` parameter.
-      Adding a Float ink overload would touch the public API.
-    - `VipsHistFind`: 256-bin LUT shape is fundamentally UChar-input. A Float
-      version would need a binning policy (range + bin count); separate design call.
-    - `VipsFwFft`/`VipsInvFft`: already work in DPComplex internally; the
-      Float-input path would just save one Cast at the boundary.
-    - `VipsMaplut`: UChar-input by design — the LUT is indexed by byte value.
-      A Float-input variant would need fractional LUT interpolation, which
-      changes the op's semantics rather than its precision.
-    - Boolean suite (`And`/`Or`/`Xor`/`LShift`/`RShift`): bitwise on Float
-      is not meaningful; intentionally UChar-only.
+- [ ] `black` (constant 0).
+- [ ] `xyz` (per-pixel coordinate image — input to `mapim`).
+- [ ] `eye` / `grey` / `zone` (test-pattern generators).
+- [ ] `gaussmat` / `logmat` / `gaussnoise` (filter-mask generators).
+- [ ] Frequency-domain mask generators: `mask_butterworth` /
+  `mask_gaussian` / `mask_ideal` × {plain, band, ring} = 9 ops.
+- [ ] `mask_fractal` / `fractsurf` (fractal generators).
+- [ ] `perlin` / `worley` / `sines` (procedural texture).
+- [ ] `sdf` (signed distance field).
+- [ ] `point` / `tonelut` / `buildlut` / `invertlut` / `identity`
+  (LUT scaffolding).
 
-- [ ] **Proper PCS-based ICC color management**. Needs a Color Management
-  Module (LittleCMS) native binding. Current `IccTransform` is a one-shot
-  Magick.NET conversion; real CMM workflow keeps source profile attached
-  through ops, transforms at sink boundary. **Cost: significant. Value: only
-  hit in print-prep or color-graded video workflows.**
-
-- [x] ~~**MemoryAllocator hooks (transient buffers)**~~. `IVipsAllocator` is
-  plumbed through `VipsRegion` (working memory rented per Prepare, returned
-  on Dispose) and `OrderedStripSink` (per-tile copy buffers rented before
-  the consumer callback, returned after). Default is
-  `ArrayPoolAllocator.Shared` wrapping `ArrayPool<byte>.Shared`; callers can
-  set a custom `IVipsAllocator` per-image and it propagates through
-  `SetPipeline`. Long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) still
-  use plain `new byte[]` — pool ownership across an image lifetime needs
-  explicit disposal semantics on `VipsImage`, which is a separate design call.
-
-- 🟢 **Streaming load (no full-buffer-into-memory)** — mainline.
-
-  **Shipped**:
-    - `VipsSourceStream`: forward-only `Stream` adapter over `IVipsSource`.
-      `IVipsSource.AsStream()` extension exposes it.
-    - `LoadStreamingAsync` opt-in path on every Stream-capable loader:
-      `VipsJpegLoader`, `VipsTiffLoader`, `VipsBmpLoader`, `VipsWebpLoader`
-      (animated), `VipsGifLoader` (animated), `VipsHeifLoader` (HEIF/AVIF),
-      `VipsSvgLoader`, plus `VipsMagickWrapLoader` (TGA/QOI/PBM-PAM).
-    - The streaming variant decodes pixels eagerly and drops the encoded
-      buffer immediately — trades laziness for not holding the encoded
-      file alongside the decoded pixel buffer. Use when the caller knows
-      pixels will be materialized; pure-metadata callers stick with
-      `LoadHeaderAsync`.
-
-  **Remaining** — gated on decoder API rather than loader work:
-    - PNG: `StbImageSharp.ImageResult.FromMemory` takes `byte[]` only.
-      Replacing the PNG decoder with one that accepts `Stream` (libpng
-      via P/Invoke, or a managed PNG library with stream support)
-      unlocks streaming PNG.
-    - PDF: `Docnet.Core` takes `byte[]` only. Same shape — gated on the
-      underlying decoder.
-
-- [x] ~~**Unified `VipsFields` metadata API**~~. `Core/VipsFields.cs` adds
-  `GetInt/GetDouble/GetDoubleArray/GetBlob` + matching setters, plus
-  well-known shortcuts (`GetOrientation`, `GetComment`, `GetAnimationDelays`,
-  `GetExif`, `GetXmp`, `GetIccProfile`).
-
-- 🟡 **Drop more `Magick.NET` usage** — incremental. Formats now pure-C#:
-  - **PBM/PGM/PPM** (round 16) — Netpbm P1-P6 variants. PAM (P7) and
-    16-bit variants still on Magick.
-  - **QOI** (round 17) — full QOI v1.0 spec, lossless round-trip verified
-    on adversarial random data.
-  - **BMP** (round 18) — 24bpp BGR / 32bpp BGRA, BI_RGB compression,
-    BITMAPINFOHEADER. Both bottom-up (default) and top-down row order
-    handled. Paletted (1/4/8 bpp), 16bpp RGB555, RLE-compressed,
-    BITFIELDS-masked, and V4/V5 variants fall through to Magick — the
-    fast path covers the modern common case while preserving full
-    coverage for edge files.
-  - **TGA** (round 19) — types 2 (uncompressed RGB), 3 (uncompressed
-    grayscale), 10 (RLE RGB), 11 (RLE grayscale); depths 24/32 (RGB)
-    and 8 (grayscale). Both top-to-bottom and bottom-to-top row order
-    handled. Saver always emits uncompressed top-to-bottom — the
-    layout viewers expect from a modern encoder. Paletted (types 1/9)
-    and 16bpp RGB555 still fall through to Magick.
-
-  Other formats still on Magick: WebP / HEIF / AVIF / TIFF / SVG / GIF.
-  Each is a separate decoder port; expect days-to-weeks per format.
-  GIF (LZW) and TIFF (vast variant matrix, libtiff is huge) are the
-  largest remaining; SVG is the only one we can't realistically port
-  (SVG rendering is a full vector toolkit, not a codec).
+### Composite mode parity
+- [ ] Extend `VipsComposite` with the 19 PorterDuff modes libvips'
+  `composite2` supports (over, in, out, atop, xor, dest-over, …).
+  Currently we only do `over`.
 
 ---
 
-## Status summary
+## Subsystem-scale work (week-to-month each)
 
-| Tier | Items remaining | Median effort |
-| :--- | :---: | :--- |
-| 1 (production) | 0 | typed access shipped; generic ops deferred |
-| 2 (quality-of-life) | 0 | — |
-| 3 (niche) | 7 | mostly format-codec heavy |
-| 4 (architectural) | 4 | weeks to months each |
+Bigger than a week. Each is its own focused project.
 
-**The original 13-item TODO is 100% complete.** What's listed here is the next
-horizon. For typical web-image-service, document-processing, photo-editing,
-and CDN-thumbnail workloads, none of these block shipping.
+### Mosaicing (`mosaicing/`, ~22 files)
+Whole subsystem missing. Image stitching and panorama assembly:
+control-point detection (`match`), pair merging (`lrmerge` / `tbmerge`),
+recursive mosaicing (`lrmosaic` / `tbmosaic`), global luminosity balance
+(`global_balance`), matrix-inversion-based remosaic. Substantial own
+project — corresponding to libvips' early scientific-imaging heritage.
+
+### `iofuncs/` engine extensions
+- [ ] **Output target abstraction** (`vips_target_*`). Currently we
+  only have one-shot `PipeWriter`-based saver entry points; libvips
+  has a full `IVipsTarget` interface symmetric to `IVipsSource`.
+  Lets savers write to memory / fd / custom callbacks uniformly.
+- [ ] **Disc-backed sink** (`sinkdisc.c`). For images too big to
+  materialize in memory, libvips writes a temporary tiled file and
+  reads back per-tile. Closes the "what about a 50000×50000-pixel
+  WSI?" use case.
+- [ ] **Op-tree reordering** (`reorder.c`). Memory-locality-aware
+  ordering of pipeline stages.
+- [ ] **Profiling / gating** (`gate.c`). Built-in op-tree profiler
+  for finding slow stages.
+- [ ] **LRU operation cache** (`cache.c` upgrade). Currently
+  count-based; libvips evicts based on resource use.
+
+### Native-format pure-C# ports
+Each is days-to-weeks per format, replacing the corresponding
+Magick.NET dependency:
+- [ ] **TIFF** — vast variant matrix; libtiff is huge. Probably
+  weeks. Most-used "drop Magick" target after PNG.
+- [ ] **GIF** — LZW + GCE + animation extension blocks. ~600-700
+  lines.
+- [ ] **WebP** — VP8 / VP8L bitstream parsers. Significant.
+- [ ] **HEIF / AVIF** — ISOBMFF box parser + AV1 / HEVC bitstream
+  decoder. Out of reach without libheif / libaom; gated on managed
+  AV1 decoder availability.
+- [ ] **SVG** — full vector renderer, not a codec. Likely permanent
+  Magick dep (out of scope to port the rendering engine).
+
+### `Image<TPixel>` generic op surface
+The `TypedImage<TPixel>` access layer is shipped. Making *every* op
+signature generic in `TPixel` is the architectural piece. Doesn't
+translate cleanly to the lazy-pipeline model where ops produce new
+images, so likely better as a parallel typed API rather than
+replacing the existing one. Substantial undertaking — touches every
+op signature.
+
+---
+
+## Native-dependency-bound (months, or never)
+
+Items that genuinely can't be done in pure-C# without a native binding
+the .NET ecosystem doesn't have.
+
+- [ ] **Proper ICC color management** (LittleCMS binding). Current
+  `IccTransform` uses Magick.NET as a one-shot transform; real CMM
+  workflow keeps source profile attached through ops, transforms at
+  sink boundary. Needs LittleCMS via P/Invoke.
+- [ ] **JPEG XL** full pixel decode (libjxl).
+- [ ] **JPEG 2000** full pixel decode (libjp2k or OpenJPEG).
+- [ ] **OpenEXR** (OpenEXR / OpenEXRCore — half-precision floats,
+  multiple compression schemes, tile layouts).
+- [ ] **OpenSlide** (whole-slide microscopy: SVS / NDPI / MRXS / VMS
+  / VMU / SCN / MIRAX).
+- [ ] **dcraw** (camera RAW formats — Bayer demosaic, 1000+ camera
+  body matrices).
+- [ ] **uhdr** (Ultra HDR JPEG with gainmap — libuhdr).
+- [ ] **DICOM** (medical imaging — libvips delegates to Magick).
+- [ ] **Matlab v7.3** (HDF5-based, completely different format from
+  v5; needs HDF5 dependency).
+- [ ] **Streaming PNG/PDF load** — gated on byte[]-only decoders we
+  use today (StbImageSharp, Docnet) being replaced.
+- [ ] **Live preview sink** (`sinkscreen.c`) — niche, used by
+  libvips' own GUI. Probably never relevant for a library port.
+
+---
+
+## Format-specific narrow gaps
+
+Holes inside formats we already handle, that would close edge cases.
+
+- [ ] **NIfTI**: 4D+ time-series (fMRI volumes — needs N-D semantics
+  `VipsImage` doesn't model), paired-form save (multi-stream saver
+  API needed), signed-int datatypes (int16/int32 are common in raw
+  scanner output), full qform/sform quaternion-based spatial
+  transforms.
+- [ ] **FITS**: NAXIS≥4 data cubes, additional HDUs (binary tables,
+  ASCII tables), WCS coordinate-system reconstruction beyond the
+  raw card preservation we do today.
+- [ ] **Matlab v5 writer** (mirror of the v5 reader shipped in round 21).
+- [ ] **PBM/PGM/PPM 16-bit variants** — currently fall through to
+  Magick because of parser inflation; can be added as a follow-up.
+- [ ] **PAM (P7)** — currently delegates to Magick; pure-C# parser
+  doable but the WIDTH/HEIGHT/DEPTH/MAXVAL/TUPLTYPE header is more
+  elaborate than P1-P6.
+- [ ] **BMP**: paletted (1/4/8 bpp), 16bpp RGB555, RLE-compressed,
+  BITFIELDS-masked, V4/V5 colour-space variants — currently
+  fall through to Magick.
+- [ ] **TGA**: paletted (types 1/9), 16bpp RGB555 — fall through.
+- [ ] **dzsave**: Zoomify, IIIF, Google layouts (we ship DZI only).
+- [ ] **APNG**: all-frames-animated variant (we ship single + simple
+  multi-frame).
+- [ ] **Animated AVIF/HEIC save** — gated on Magick.NET-Q8 HEIC
+  encoder availability.
+- [ ] **TIFF**: full Tiled-TIFF with explicit tile geometry control;
+  16-bit-per-sample throughput; OME-TIFF Z/C/T full N-D mapping
+  (we surface OME-XML metadata only).
+
+---
+
+## Misc / quality items
+
+- [ ] **Real glyph shaping for `Text`** (HarfBuzz binding or pure-managed
+  text shaper). Currently Magick.NET fallback with rudimentary kerning.
+- [ ] **`vector.cpp` SIMD IR equivalent** — libvips compiles per-op
+  SIMD at runtime via Orc; we have ad-hoc `Vector<T>` use in a few
+  hot paths. A systematic IR isn't on the radar but would close the
+  "SIMD pervasive" gap.
+- [ ] **Pool ownership across image lifetime** — `MemorySink.Pixels`
+  and loader `PixelsLazy` currently allocate via `new byte[]`;
+  pooling them needs explicit disposal semantics on `VipsImage`,
+  which is a separate design call.
+- [ ] **Cache LRU** — current `VipsCache` is count-based with simple
+  eviction; libvips uses LRU + resource cost.
+
+---
+
+## Where this leaves the project
+
+CosmoImage covers the **mainline web-image-service / document /
+photo-editing / CDN-thumbnail** workloads completely:
+
+- Lazy demand-driven pipeline, sink-driven threadpool, full
+  Float-throughout pipeline (Linearize → Resize → Composite → Glow →
+  Vignette → Delinearize end-to-end in Float).
+- All popular web formats (JPEG, PNG, WebP, HEIF/AVIF, GIF, SVG) plus
+  scientific (HDR, FITS, NIfTI, Matlab v5) plus deep-zoom output.
+- Typed pixel access, pool-backed transient buffers, opt-in streaming
+  load on every Stream-capable format.
+
+It does **not** cover:
+
+- The full libvips colour-management graph (Lab / Oklab / CMYK / etc.).
+- The mosaicing / panorama subsystem.
+- Most generators (`create/`).
+- Many band-manipulation conversion ops.
+- Several niche format codecs (OpenEXR, JPEG XL/2K, OpenSlide, dcraw,
+  DICOM).
+
+Closing the full gap is hundreds of ops and several native bindings'
+worth of work — multi-month at minimum. The matrix above is the map
+for whoever picks it up.
