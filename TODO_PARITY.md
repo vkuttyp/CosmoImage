@@ -185,18 +185,25 @@ generator that produces an image from parameters.
   coordinate image; input to `mapim`-style remap.
 - [ ] `eye` / `grey` / `zone` (test-pattern generators).
 - [x] ~~`gaussmat`~~ (round 38) — Float matrix kernel image; auto-sized
-  by `min_ampl` cutoff. `logmat` / `gaussnoise` still missing.
+  by `min_ampl` cutoff.
+- [x] ~~`logmat`~~ (round 39) — Laplacian-of-Gaussian Float kernel.
+- [x] ~~`gaussnoise`~~ (round 39) — Box-Muller; deterministic seed.
 - [ ] Frequency-domain mask generators: `mask_butterworth` /
   `mask_gaussian` / `mask_ideal` × {plain, band, ring} = 9 ops.
 - [ ] `mask_fractal` / `fractsurf` (fractal generators).
 - [x] ~~`sines`~~ (round 38) — Float sinusoid pattern; frequencies in
-  cycles per image. `perlin` / `worley` still missing.
-- [ ] `sdf` (signed distance field).
+  cycles per image.
+- [x] ~~`perlin`~~ (round 39) — Perlin 2002 fade curve;
+  deterministic seed.
+- [x] ~~`worley`~~ (round 39) — F1 distance, deterministic per-cell hash.
+- [x] ~~`sdf`~~ (round 39) — `SdfCircle` / `SdfBox` / `SdfRoundedBox`
+  Float distance fields.
 - [x] ~~`buildlut`~~ (round 38) — piecewise-linear LUT from anchor
   points; multi-band when each anchor carries multiple y values.
 - [x] ~~`identity`~~ (round 38) — identity LUT (256-wide UChar; or
   65536-wide UShort with `ushort_: true`).
-- [ ] `point` / `tonelut` / `invertlut` (remaining LUT scaffolding).
+- [x] ~~`invertlut`~~ (round 39) — invert a monotonic 1D LUT.
+- [ ] `point` / `tonelut` (remaining LUT scaffolding).
 
 ### Composite mode parity
 - [ ] Extend `VipsComposite` with the 19 PorterDuff modes libvips'

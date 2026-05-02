@@ -1234,6 +1234,59 @@ public static partial class VipsImageOps
     public static VipsImage Sines(int width, int height, double hFreq = 0.5, double vFreq = 0.5)
         => Run(new VipsSines { Width = width, Height = height, HFreq = hFreq, VFreq = vFreq });
 
+    // From Operations/Create/VipsLogmat.cs
+    /// <summary>Synthesise a Laplacian-of-Gaussian kernel as a Float matrix image.</summary>
+    public static VipsImage Logmat(double sigma = 1.0, double minAmpl = 0.1)
+        => Run(new VipsLogmat { Sigma = sigma, MinAmpl = minAmpl });
+
+    // From Operations/Create/VipsGaussnoise.cs
+    /// <summary>Synthesise a Gaussian-noise image (Float, Box-Muller). Seed = 0 → clock.</summary>
+    public static VipsImage Gaussnoise(int width, int height,
+        double mean = 128, double sigma = 30, int seed = 0)
+        => Run(new VipsGaussnoise { Width = width, Height = height, Mean = mean, Sigma = sigma, Seed = seed });
+
+    // From Operations/Create/VipsPerlin.cs
+    /// <summary>Synthesise 2D Perlin noise (Ottosson 2002 fade curve).</summary>
+    public static VipsImage Perlin(int width, int height, int cellSize = 256, int seed = 0)
+        => Run(new VipsPerlin { Width = width, Height = height, CellSize = cellSize, Seed = seed });
+
+    // From Operations/Create/VipsWorley.cs
+    /// <summary>Synthesise 2D Worley/cellular noise (F1 distance).</summary>
+    public static VipsImage Worley(int width, int height, int cellSize = 256, int seed = 0)
+        => Run(new VipsWorley { Width = width, Height = height, CellSize = cellSize, Seed = seed });
+
+    // From Operations/Create/VipsSdf.cs
+    /// <summary>Signed-distance field of a circle (default origin = image centre).</summary>
+    public static VipsImage SdfCircle(int width, int height, double radius,
+        double cx = double.NaN, double cy = double.NaN)
+        => Run(new VipsSdf {
+            Width = width, Height = height, Shape = VipsSdfShape.Circle,
+            Radius = radius, Cx = cx, Cy = cy,
+        });
+
+    /// <summary>Signed-distance field of an axis-aligned box.</summary>
+    public static VipsImage SdfBox(int width, int height, double halfWidth, double halfHeight,
+        double cx = double.NaN, double cy = double.NaN)
+        => Run(new VipsSdf {
+            Width = width, Height = height, Shape = VipsSdfShape.Box,
+            HalfWidth = halfWidth, HalfHeight = halfHeight, Cx = cx, Cy = cy,
+        });
+
+    /// <summary>Signed-distance field of a rounded box.</summary>
+    public static VipsImage SdfRoundedBox(int width, int height,
+        double halfWidth, double halfHeight, double cornerRadius,
+        double cx = double.NaN, double cy = double.NaN)
+        => Run(new VipsSdf {
+            Width = width, Height = height, Shape = VipsSdfShape.RoundedBox,
+            HalfWidth = halfWidth, HalfHeight = halfHeight,
+            CornerRadius = cornerRadius, Cx = cx, Cy = cy,
+        });
+
+    // From Operations/Create/VipsInvertlut.cs
+    /// <summary>Invert a monotonic 1D LUT. Default <c>size = 0</c> keeps the input width.</summary>
+    public static VipsImage Invertlut(VipsImage input, int size = 0)
+        => Run(new VipsInvertlut { In = input, Size = size });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
