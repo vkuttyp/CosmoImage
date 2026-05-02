@@ -31,7 +31,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | PNG | ✅ | ✅ | n/a | EXIF (eXIf), ICC (iCCP, deflated), XMP (iTXt) |
 | WebP | ✅ | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
 | TIFF | ✅ | ✅ | ✅ multi-page | EXIF/XMP/ICC + orientation + ImageDescription (incl. OME-XML) |
-| BMP | ✅ | ✅ | n/a | — |
+| BMP | ✅ pure-C# fast path (24/32 bpp BI_RGB) + Magick fallback | ✅ pure-C# (24/32 bpp) | n/a | paletted/RLE/BITFIELDS still go through Magick |
 | GIF | ✅ | ✅ | ✅ animated (per-frame delays) | EXIF/XMP/ICC + Comment via Magick |
 | HEIF / AVIF | ✅ | ✅ | ✅ sequences (animated AVIF, animated HEIC) | EXIF/XMP/ICC via Magick |
 | PDF | ✅ | ✅ | ✅ multi-page render | `pdf-n-pages` count |
@@ -210,4 +210,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 200 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 207 tests pass.*

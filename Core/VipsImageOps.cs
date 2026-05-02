@@ -911,4 +911,13 @@ public static partial class VipsImageOps
     /// </summary>
     public static Task SaveFitsAsync(VipsImage image, PipeWriter writer)
         => VipsFitsSaver.SaveAsync(image, writer);
+
+    // From Savers/VipsBmpSaver.cs
+    /// <summary>
+    /// Save as BMP. 24bpp BGR (3-band input) or 32bpp BGRA (4-band input);
+    /// 1-band grayscale is replicated to 24bpp. BITMAPINFOHEADER, BI_RGB,
+    /// bottom-up rows — the layout every BMP reader handles.
+    /// </summary>
+    public static Task SaveBmpAsync(VipsImage image, PipeWriter writer)
+        => VipsBmpSaver.SaveAsync(image, writer);
 }

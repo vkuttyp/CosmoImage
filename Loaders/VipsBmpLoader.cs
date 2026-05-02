@@ -77,9 +77,12 @@ public static class VipsBmpLoader
     }
 
     /// <summary>
-    /// Full BMP load with pixel data. Goes through Magick.NET — BMP variants
-    /// (BITMAPCOREHEADER through V5, RLE-compressed paletted, 16/24/32 bpp,
-    /// alpha bit-fields) all decode uniformly there.
+    /// Full BMP load with pixel data. Tries the pure-C# fast path first
+    /// (24bpp BGR / 32bpp BGRA, BI_RGB compression, BITMAPINFOHEADER) which
+    /// covers the modern common cases without a Magick.NET hop. Falls back
+    /// to Magick for paletted (1/4/8 bpp), 16-bit RGB555, RLE-compressed
+    /// (BI_RLE4 / BI_RLE8), BITFIELDS-masked, V4/V5 colour-space variants,
+    /// and any header version we don't recognise.
     /// </summary>
     public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken cancellationToken = default)
     {
@@ -97,6 +100,91 @@ public static class VipsBmpLoader
 
         var imageBytes = ms.ToArray();
 
+        // Fast path: 24/32 bpp BI_RGB.
+        var fast = TryDecodePureCSharp(imageBytes);
+        if (fast != null) return fast;
+
+        // Fallback to Magick for everything else.
+        return DecodeViaMagick(imageBytes);
+    }
+
+    /// <summary>
+    /// Pure-C# decoder for the common BMP variants (BITMAPINFOHEADER,
+    /// 24bpp BGR or 32bpp BGRA, BI_RGB compression). Returns
+    /// <see langword="null"/> when the file uses a variant we don't handle,
+    /// signalling the caller to fall back to Magick.
+    /// </summary>
+    private static VipsImage? TryDecodePureCSharp(byte[] bytes)
+    {
+        if (bytes.Length < 14 + 40) return null;
+        if (bytes[0] != 'B' || bytes[1] != 'M') return null;
+
+        uint pixelOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(10, 4));
+        uint dibSize = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(14, 4));
+        // Only BITMAPINFOHEADER for the fast path. V4/V5 sometimes use
+        // identical pixel layout but the extra fields complicate validation.
+        if (dibSize != 40) return null;
+
+        int width = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(18, 4));
+        int rawHeight = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(22, 4));
+        ushort planes = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(26, 2));
+        ushort bpp = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(28, 2));
+        uint compression = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(30, 4));
+
+        if (planes != 1) return null;
+        if (compression != 0 /* BI_RGB */) return null;
+        if (bpp != 24 && bpp != 32) return null;
+        if (width <= 0) return null;
+
+        int height = Math.Abs(rawHeight);
+        if (height == 0) return null;
+        // Positive height: rows stored bottom-to-top in the file. Negative:
+        // top-to-bottom. We always flip to top-to-bottom in the output buffer.
+        bool bottomUp = rawHeight > 0;
+
+        int bytesPerPixel = bpp / 8;
+        int bands = bytesPerPixel; // 24 → 3 RGB; 32 → 4 RGBA.
+        // BMP rows are padded to 4-byte boundary.
+        int rowStride = ((width * bpp + 31) / 32) * 4;
+        long pixelDataSize = (long)rowStride * height;
+        if (pixelOffset + pixelDataSize > bytes.Length) return null;
+
+        var pixels = new byte[width * height * bands];
+        for (int srcRow = 0; srcRow < height; srcRow++)
+        {
+            int dstRow = bottomUp ? (height - 1 - srcRow) : srcRow;
+            int srcOffset = (int)pixelOffset + srcRow * rowStride;
+            int dstOffset = dstRow * width * bands;
+
+            for (int x = 0; x < width; x++)
+            {
+                int sp = srcOffset + x * bytesPerPixel;
+                int dp = dstOffset + x * bands;
+                // BMP pixel order: BGR(A). Convert to RGB(A) by swapping
+                // B↔R; alpha (if present) passes through.
+                pixels[dp + 0] = bytes[sp + 2];
+                pixels[dp + 1] = bytes[sp + 1];
+                pixels[dp + 2] = bytes[sp + 0];
+                if (bands == 4) pixels[dp + 3] = bytes[sp + 3];
+            }
+        }
+
+        return new VipsImage
+        {
+            Width = width,
+            Height = height,
+            Bands = bands,
+            BandFormat = VipsBandFormat.UChar,
+            Interpretation = VipsInterpretation.RGB,
+            Coding = VipsCoding.None,
+            XRes = 1.0,
+            YRes = 1.0,
+            PixelsLazy = new Lazy<byte[]>(() => pixels),
+        };
+    }
+
+    private static VipsImage? DecodeViaMagick(byte[] imageBytes)
+    {
         int width, height, bands;
         try
         {

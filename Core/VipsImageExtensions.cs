@@ -371,4 +371,8 @@ public static class VipsImageExtensions
     /// <summary>Save as FITS. UChar → BITPIX 8; Float → BITPIX -32. Multi-band → planar.</summary>
     public static Task SaveFitsAsync(this VipsImage image, PipeWriter writer)
         => VipsImageOps.SaveFitsAsync(image, writer);
+
+    /// <summary>Save as BMP. 24/32 bpp BI_RGB; 1-band gray replicated to 24bpp.</summary>
+    public static Task SaveBmpAsync(this VipsImage image, PipeWriter writer)
+        => VipsImageOps.SaveBmpAsync(image, writer);
 }

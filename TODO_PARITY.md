@@ -217,18 +217,21 @@ Each is significant work; defer until a concrete use case demands it.
   `GetExif`, `GetXmp`, `GetIccProfile`).
 
 - 🟡 **Drop more `Magick.NET` usage** — incremental. Formats now pure-C#:
-  - **PBM/PGM/PPM** (round 16) — Netpbm P1-P6 variants in
-    `VipsPnmLoader`/`VipsPnmSaver`. PAM (P7) and 16-bit variants still on
-    Magick.
-  - **QOI** (round 17) — full QOI v1.0 spec (RGB/RGBA/INDEX/DIFF/LUMA/RUN
-    ops, 64-entry hash table, 8-byte end marker) in `VipsQoiLoader`/
-    `VipsQoiSaver`. Lossless round-trip verified on a deterministic random
-    pattern.
+  - **PBM/PGM/PPM** (round 16) — Netpbm P1-P6 variants. PAM (P7) and
+    16-bit variants still on Magick.
+  - **QOI** (round 17) — full QOI v1.0 spec, lossless round-trip verified
+    on adversarial random data.
+  - **BMP** (round 18) — 24bpp BGR / 32bpp BGRA, BI_RGB compression,
+    BITMAPINFOHEADER. Both bottom-up (default) and top-down row order
+    handled. Paletted (1/4/8 bpp), 16bpp RGB555, RLE-compressed,
+    BITFIELDS-masked, and V4/V5 variants fall through to Magick — the
+    fast path covers the modern common case while preserving full
+    coverage for edge files.
 
-  Other formats still on Magick: WebP / HEIF / AVIF / TIFF / SVG / BMP /
-  GIF / TGA. Each is a separate decoder port; expect days-to-weeks per
-  format. BMP and TGA are both small spec-wise and probably the next
-  cheapest wins.
+  Other formats still on Magick: WebP / HEIF / AVIF / TIFF / SVG / GIF /
+  TGA. Each is a separate decoder port; expect days-to-weeks per format.
+  TGA is probably the next cheapest win — fixed-layout 18-byte header
+  with optional RLE.
 
 ---
 
