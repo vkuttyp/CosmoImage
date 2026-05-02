@@ -85,8 +85,14 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
   3-band and 4-band images map to the third dimension as image planes.
   Header descrip / datatype / scl fields round-trip via `Metadata["nifti:*"]`.
 
+  Round 22 added `LoadPairedAsync(headerSource, dataSource)` for the
+  two-file `.hdr/.img` layout (magic `"ni1\0"`). The decoder is shared
+  between single-file and paired forms so a future bug fix in either
+  path applies to both.
+
   **Remaining**: 4D+ time-series (fMRI volumes — needs N-D semantics that
-  `VipsImage` doesn't model), paired `.hdr/.img` form, signed-integer
+  `VipsImage` doesn't model), paired-form save (would need a multi-stream
+  saver API the rest of the library doesn't have today), signed-integer
   datatypes (int16/int32 are common in raw scanner output), full qform/
   sform quaternion-based spatial transforms.
 - [x] ~~**Animated AVIF / HEIC sequences (load)**~~ shipped. `VipsHeifLoader`

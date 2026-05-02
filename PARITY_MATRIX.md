@@ -40,7 +40,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | JPEG 2000 | 🟡 header only | ❌ | n/a | — |
 | Radiance HDR (`.hdr`) | ✅ | ✅ | n/a | header lines surfaced as `hdr:*` metadata |
 | FITS | ✅ | ✅ | n/a | All header cards round-trip via `Metadata["fits:*"]`; BSCALE/BZERO interpreted on load |
-| NIfTI-1 (single-file `.nii`) | ✅ | ✅ | n/a | datatypes 2/16/64; 2D and 3D; scl_slope/scl_inter applied; pixdim → XRes/YRes |
+| NIfTI-1 (single-file `.nii` + paired `.hdr/.img`) | ✅ | ✅ single-file | n/a | datatypes 2/16/64; 2D and 3D; scl_slope/scl_inter applied; pixdim → XRes/YRes; `LoadPairedAsync(hdr, img)` for the two-file form |
 | OpenEXR | ❌ | ❌ | n/a | — |
 | CSV / Matrix / Matlab | ❌ | ❌ | n/a | — |
 | TGA | ✅ pure-C# fast path (types 2/3/10/11) + Magick fallback | ✅ pure-C# (uncompressed types 2/3) | n/a | paletted (types 1/9) and 16bpp still go through Magick |
@@ -212,4 +212,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 230 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 233 tests pass.*

@@ -49,7 +49,33 @@ public static class VipsNiftiLoader
     public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken cancellationToken = default)
     {
         if (!await IsNiftiAsync(source, cancellationToken)) return null;
+        var bytes = await DrainAsync(source, cancellationToken);
+        return Decode(bytes);
+    }
 
+    /// <summary>
+    /// Paired-form NIfTI load: header in <paramref name="headerSource"/>
+    /// (typically <c>xxx.hdr</c>) and pixel data in
+    /// <paramref name="dataSource"/> (typically <c>xxx.img</c>). The
+    /// header file's magic must be <c>"ni1\0"</c> and its
+    /// <c>vox_offset</c> field is honoured against the data file.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadPairedAsync(IVipsSource headerSource, IVipsSource dataSource, CancellationToken cancellationToken = default)
+    {
+        if (headerSource == null) throw new ArgumentNullException(nameof(headerSource));
+        if (dataSource == null) throw new ArgumentNullException(nameof(dataSource));
+
+        var headerBytes = await DrainAsync(headerSource, cancellationToken);
+        if (headerBytes.Length < HeaderSize) return null;
+        // Don't gate on IsNiftiAsync here — that helper accepts both single
+        // and paired magic, but the paired path specifically requires ni1.
+        // DecodePaired enforces it.
+        var pixelBytes = await DrainAsync(dataSource, cancellationToken);
+        return DecodePaired(headerBytes, pixelBytes);
+    }
+
+    private static async ValueTask<byte[]> DrainAsync(IVipsSource source, CancellationToken cancellationToken)
+    {
         var ms = new MemoryStream();
         var rawBuffer = new byte[81920];
         while (true)
@@ -58,18 +84,49 @@ public static class VipsNiftiLoader
             if (read == 0) break;
             ms.Write(rawBuffer, 0, read);
         }
-        var bytes = ms.ToArray();
-        return Decode(bytes);
+        return ms.ToArray();
     }
 
+    /// <summary>
+    /// Single-file <c>.nii</c> decode. Magic check + delegate to the
+    /// shared header-driven decoder using the same byte array as both
+    /// header and pixel source.
+    /// </summary>
     private static VipsImage? Decode(byte[] bytes)
     {
         if (bytes.Length < HeaderSize) return null;
-
-        // Magic must be n+1 (single-file). ni1 paired form not handled here.
+        // Magic must be n+1 (single-file). ni1 paired form goes through
+        // DecodePaired below.
         if (!(bytes[344] == 'n' && bytes[345] == '+' && bytes[346] == '1' && bytes[347] == 0))
             return null;
+        return DecodeFromHeader(bytes, pixelData: bytes);
+    }
 
+    /// <summary>
+    /// Paired-form decode. <paramref name="headerBytes"/> is the
+    /// <c>.hdr</c> file (348 bytes); <paramref name="pixelData"/> is the
+    /// matching <c>.img</c> file (raw pixels starting at byte
+    /// <c>vox_offset</c>, which is typically 0). Magic must be
+    /// <c>"ni1\0"</c>.
+    /// </summary>
+    private static VipsImage? DecodePaired(byte[] headerBytes, byte[] pixelData)
+    {
+        if (headerBytes.Length < HeaderSize) return null;
+        if (!(headerBytes[344] == 'n' && headerBytes[345] == 'i' && headerBytes[346] == '1' && headerBytes[347] == 0))
+            return null;
+        return DecodeFromHeader(headerBytes, pixelData);
+    }
+
+    /// <summary>
+    /// Shared decoder: parses the 348-byte header from <paramref name="bytes"/>
+    /// and reads the pixel block from <paramref name="pixelData"/> at
+    /// <c>vox_offset</c>. The two arguments are the same array for
+    /// single-file <c>.nii</c> and different arrays for paired
+    /// <c>.hdr/.img</c>. <c>vox_offset</c> is taken verbatim from the
+    /// header — 352 (typical) for single-file, 0 (typical) for paired.
+    /// </summary>
+    private static VipsImage? DecodeFromHeader(byte[] bytes, byte[] pixelData)
+    {
         // Auto-detect endianness via dim[0] (int16 at offset 40, must be 1..7).
         bool littleEndian = true;
         short dim0Le = BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(40, 2));
@@ -114,7 +171,9 @@ public static class VipsNiftiLoader
         if (sclSlope == 0f) sclSlope = 1f;
 
         int dataOffset = (int)voxOffset;
-        if (dataOffset < HeaderSize || dataOffset > bytes.Length) return null;
+        // Paired form: vox_offset is an offset within the .img file (usually 0).
+        // Single-file: vox_offset is past the header (usually 352).
+        if (dataOffset < 0 || dataOffset > pixelData.Length) return null;
 
         // Datatype dispatch. Output band-format is UChar for type 2 with no
         // value transform; Float otherwise. The image's "bands" axis is
@@ -153,7 +212,7 @@ public static class VipsNiftiLoader
 
         long sampleCount = (long)nx * ny * planes;
         long dataLen = sampleCount * bytesPerSample;
-        if (dataOffset + dataLen > bytes.Length) return null;
+        if (dataOffset + dataLen > pixelData.Length) return null;
 
         int outBands = planes;
         int outBytesPerSample = outFloat ? 4 : 1;
@@ -172,9 +231,9 @@ public static class VipsNiftiLoader
                     long srcOff = planeBase + ((long)y * nx + x) * bytesPerSample;
                     double sample = datatype switch
                     {
-                        2 => bytes[srcOff],
-                        16 => ReadFloatAt(bytes, (int)srcOff, littleEndian),
-                        64 => ReadDoubleAt(bytes, (int)srcOff, littleEndian),
+                        2 => pixelData[srcOff],
+                        16 => ReadFloatAt(pixelData, (int)srcOff, littleEndian),
+                        64 => ReadDoubleAt(pixelData, (int)srcOff, littleEndian),
                         _ => 0,
                     };
                     if (needsTransform) sample = sample * sclSlope + sclInter;
