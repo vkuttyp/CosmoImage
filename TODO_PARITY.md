@@ -70,7 +70,17 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
   Float-throughout work, but the EXR codec itself is a substantial
   project — half-precision floats, multiple compression schemes, tile
   layout. Defer until concrete demand.
-- [ ] **FITS / NIfTI**. Scientific imaging.
+- [x] ~~**FITS**~~ shipped. Pure-C# loader/saver (no native deps). Decodes
+  BITPIX 8 (UChar), 16 / 32 (signed integer → Float, BSCALE/BZERO applied),
+  -32 (IEEE float), -64 (double → cast to Float). NAXIS=2 grayscale and
+  NAXIS=3 with planar→interleaved transpose for RGB/RGBA. WCS / DATE-OBS /
+  OBSERVER / etc. survive load → save via `Metadata["fits:*"]`. NAXIS≥4
+  data cubes and additional HDUs (binary tables) intentionally out of scope.
+
+- [ ] **NIfTI**. Neuroimaging format. Similar shape to FITS (header +
+  raw pixel data) but the header is binary-fixed rather than ASCII cards,
+  and the data layout is more complex (4D volumes, slope/intercept,
+  qform/sform spatial transforms). Defer until a concrete use case shows up.
 - [ ] **Animated AVIF / HEIC sequences**. Encoder-dependent in libheif;
   Magick.NET surface is limited.
 - [x] ~~**BokehBlur**~~. Hexagonal-aperture kernel composed with the existing

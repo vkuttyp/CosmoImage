@@ -901,4 +901,14 @@ public static partial class VipsImageOps
     /// </summary>
     public static Task SaveHdrAsync(VipsImage image, PipeWriter writer)
         => VipsHdrSaver.SaveAsync(image, writer);
+
+    // From Savers/VipsFitsSaver.cs
+    /// <summary>
+    /// Save as FITS (Flexible Image Transport System). UChar → BITPIX 8;
+    /// Float and other formats → BITPIX -32. Multi-band input writes a
+    /// planar layout (NAXIS = 3, NAXIS3 = bands). Cards from
+    /// <c>Metadata["fits:*"]</c> round-trip into the header.
+    /// </summary>
+    public static Task SaveFitsAsync(VipsImage image, PipeWriter writer)
+        => VipsFitsSaver.SaveAsync(image, writer);
 }

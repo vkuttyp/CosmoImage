@@ -39,7 +39,8 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | JPEG XL | 🟡 header stub | ❌ | n/a | — (decoder unavailable in managed) |
 | JPEG 2000 | 🟡 header only | ❌ | n/a | — |
 | Radiance HDR (`.hdr`) | ✅ | ✅ | n/a | header lines surfaced as `hdr:*` metadata |
-| OpenEXR / FITS / NIfTI | ❌ | ❌ | n/a | — |
+| FITS | ✅ | ✅ | n/a | All header cards round-trip via `Metadata["fits:*"]`; BSCALE/BZERO interpreted on load |
+| OpenEXR / NIfTI | ❌ | ❌ | n/a | — |
 | CSV / Matrix / Matlab | ❌ | ❌ | n/a | — |
 | TGA | ✅ | ✅ | n/a | EXIF/XMP/ICC via Magick |
 | QOI | ✅ | ✅ | n/a | — |
@@ -208,4 +209,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 167 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 176 tests pass.*

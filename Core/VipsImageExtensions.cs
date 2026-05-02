@@ -367,4 +367,8 @@ public static class VipsImageExtensions
     /// <summary>Save as Radiance HDR. 3-band image; UChar auto-cast to Float.</summary>
     public static Task SaveHdrAsync(this VipsImage image, PipeWriter writer)
         => VipsImageOps.SaveHdrAsync(image, writer);
+
+    /// <summary>Save as FITS. UChar → BITPIX 8; Float → BITPIX -32. Multi-band → planar.</summary>
+    public static Task SaveFitsAsync(this VipsImage image, PipeWriter writer)
+        => VipsImageOps.SaveFitsAsync(image, writer);
 }
