@@ -88,8 +88,8 @@ flattening, premultiplication. **Major gap area.**
 | `premultiply` / `unpremultiply` | ✅ | `Premultiply` / `Unpremultiply` — UChar normalizes alpha by 255; Float treats alpha as nominal [0,1]. Pass-through on band counts without alpha |
 | `addalpha` | ✅ | `AddAlpha(alpha=255)` — synthesise constant alpha plane and bandjoin. Pass-through if input already has alpha |
 | `bandbool` (and/or/xor across bands) | ✅ | `Bandbool(op)` reduces input bands with AND/OR/XOR → single-band UChar |
-| `bandfold` / `bandunfold` (W↔W*bands rearrange) | ❌ | |
-| `bandjoin` | ✅ | `Bandjoin(other, …)` — concatenate bands across N images. `bandjoin_const` (fold constants in) still missing |
+| `bandfold` / `bandunfold` (W↔W*bands rearrange) | ✅ | `Bandfold(factor)` / `Bandunfold(factor)` — pure metadata reshape, default factor folds the whole row |
+| `bandjoin` / `bandjoin_const` | ✅ | `Bandjoin(other, …)` and `BandjoinConst(c …)` — append constant bands without a synthetic source |
 | `bandmean` (average all bands) | ✅ | `Bandmean()` — UChar (with rounding) and Float branches |
 | `bandrank` (rank-statistic across bands) | ❌ | |
 | `byteswap` | ❌ | |
@@ -102,14 +102,14 @@ flattening, premultiplication. **Major gap area.**
 | `arrayjoin` (join N images in a grid) | ❌ | |
 | `msb` (most-significant-byte extraction) | ❌ | |
 | `replicate` (tile to bigger size) | ✅ | `Replicate(across, down)` — scanline-slab copy across tile seams |
-| `scale` (linear stretch to 0..255) | ❌ | Different from `Resize` — value-range scaling |
+| `scale` (linear stretch to 0..255) | ✅ | `Scale(log=false, exponent=0.25)` — linear or log-scale stretch to UChar; aggregate min/max via `VipsStats` |
 | `sequential` (force sequential read order) | ❌ | |
 | `subsample` | 🟡 | `Shrink` covers integer subsample |
 | `switch` (case-style multi-image select) | ❌ | |
 | `tilecache` (region cache) | ❌ | |
 | `transpose3d` | ❌ | |
-| `wrap` (toroidal shift) | ❌ | |
-| `zoom` (integer scale-up by replication) | ❌ | |
+| `wrap` (toroidal shift) | ✅ | `Wrap(x, y)` — default offset centres the image; scanline-slab copy across the seam |
+| `zoom` (integer scale-up by replication) | ✅ | `Zoom(xfac, yfac)` — nearest-neighbour pel→block enlarge |
 | `smartcrop` | ✅ | `EntropyCrop` |
 
 ---

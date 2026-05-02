@@ -352,6 +352,30 @@ public static class VipsImageExtensions
     public static VipsImage Falsecolor(this VipsImage image)
         => VipsImageOps.Falsecolor(image);
 
+    /// <summary>Reshape (W, H, B) → (W/factor, H, B*factor).</summary>
+    public static VipsImage Bandfold(this VipsImage image, int factor = 0)
+        => VipsImageOps.Bandfold(image, factor);
+
+    /// <summary>Reshape (W, H, B*factor) → (W*factor, H, B).</summary>
+    public static VipsImage Bandunfold(this VipsImage image, int factor = 0)
+        => VipsImageOps.Bandunfold(image, factor);
+
+    /// <summary>Append constant bands.</summary>
+    public static VipsImage BandjoinConst(this VipsImage image, params double[] c)
+        => VipsImageOps.BandjoinConst(image, c);
+
+    /// <summary>Toroidal shift (default centres the image at origin).</summary>
+    public static VipsImage Wrap(this VipsImage image, int x = int.MinValue, int y = int.MinValue)
+        => VipsImageOps.Wrap(image, x, y);
+
+    /// <summary>Integer scale-up by replication (nearest-neighbour enlarge).</summary>
+    public static VipsImage Zoom(this VipsImage image, int xfac, int yfac)
+        => VipsImageOps.Zoom(image, xfac, yfac);
+
+    /// <summary>Linear-stretch input to UChar 0..255.</summary>
+    public static VipsImage Scale(this VipsImage image, bool log = false, double exponent = 0.25)
+        => VipsImageOps.Scale(image, log, exponent);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

@@ -40,8 +40,10 @@ Each lands in a single PR.
 - [x] ~~`bandjoin`~~ (round 26) — `Bandjoin(other, …)` for N inputs.
 - [x] ~~`bandbool`~~ (round 28) — AND/OR/XOR fold across bands (UChar).
 - [x] ~~`bandmean`~~ (round 28) — average bands; UChar (rounded) + Float.
-- [ ] `bandfold` / `bandunfold` / `bandjoin_const` / `bandrank` —
-  remaining band-axis ops.
+- [x] ~~`bandfold` / `bandunfold`~~ (round 29) — pure metadata reshape;
+  default factor folds the whole row.
+- [x] ~~`bandjoin_const`~~ (round 29) — append per-band constants.
+- [ ] `bandrank` — rank-statistic across bands.
 - [x] ~~`addalpha`~~ (round 27) — synthesise constant-fill alpha plane and
   bandjoin. Pass-through if input already has alpha.
 - [x] ~~`flatten`~~ (round 27) — composes RGBA/GA over an opaque background
@@ -63,9 +65,12 @@ Each lands in a single PR.
 - [x] ~~`ifthenelse`~~ (round 28) — per-pixel ternary; UChar condition
   broadcasts or selects per-band, UChar + Float then/else.
 - [ ] `switch` (case-style multi-image select).
-- [ ] `wrap` (toroidal shift).
-- [ ] `zoom` (integer scale-up by replication).
-- [ ] `scale` (linear stretch to 0..255 — different from `Resize`).
+- [x] ~~`wrap`~~ (round 29) — toroidal shift; default offset centres the
+  image, scanline-slab copy across the seam.
+- [x] ~~`zoom`~~ (round 29) — integer scale-up by replication
+  (nearest-neighbour pel→block).
+- [x] ~~`scale`~~ (round 29) — linear or log-scale stretch to UChar
+  0..255; aggregate min/max via `VipsStats`.
 - [x] ~~`extract_band`~~ (round 28) — pull N consecutive bands from offset.
 - [ ] `arrayjoin` / `join` / `grid` / `insert`.
 

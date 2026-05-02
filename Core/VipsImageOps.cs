@@ -949,6 +949,35 @@ public static partial class VipsImageOps
     public static VipsImage Falsecolor(VipsImage input)
         => Run(new VipsFalsecolor { In = input });
 
+    // From Operations/Misc/VipsBandfold.cs
+    /// <summary>Reshape <c>(W, H, B)</c> → <c>(W/factor, H, B*factor)</c>; default factor folds the whole row.</summary>
+    public static VipsImage Bandfold(VipsImage input, int factor = 0)
+        => Run(new VipsBandfold { In = input, Factor = factor });
+
+    /// <summary>Inverse of <see cref="Bandfold"/> — <c>(W, H, B*factor)</c> → <c>(W*factor, H, B)</c>.</summary>
+    public static VipsImage Bandunfold(VipsImage input, int factor = 0)
+        => Run(new VipsBandunfold { In = input, Factor = factor });
+
+    // From Operations/Misc/VipsBandjoinConst.cs
+    /// <summary>Append constant bands. Each entry of <paramref name="c"/> becomes one extra band.</summary>
+    public static VipsImage BandjoinConst(VipsImage input, params double[] c)
+        => Run(new VipsBandjoinConst { In = input, C = c });
+
+    // From Operations/Geometric/VipsWrap.cs
+    /// <summary>Toroidal shift. Default offset puts the image centre at the origin.</summary>
+    public static VipsImage Wrap(VipsImage input, int x = int.MinValue, int y = int.MinValue)
+        => Run(new VipsWrap { In = input, X = x, Y = y });
+
+    // From Operations/Geometric/VipsZoom.cs
+    /// <summary>Integer scale-up by replication — each input pel covers an <paramref name="xfac"/>×<paramref name="yfac"/> block.</summary>
+    public static VipsImage Zoom(VipsImage input, int xfac, int yfac)
+        => Run(new VipsZoom { In = input, XFac = xfac, YFac = yfac });
+
+    // From Operations/Misc/VipsScale.cs
+    /// <summary>Linear-stretch input to UChar 0..255. <paramref name="log"/> uses log-scale (good for FFT magnitudes).</summary>
+    public static VipsImage Scale(VipsImage input, bool log = false, double exponent = 0.25)
+        => Run(new VipsScale { In = input, Log = log, Exponent = exponent });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
