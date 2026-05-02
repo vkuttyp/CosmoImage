@@ -81,8 +81,24 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
   raw pixel data) but the header is binary-fixed rather than ASCII cards,
   and the data layout is more complex (4D volumes, slope/intercept,
   qform/sform spatial transforms). Defer until a concrete use case shows up.
-- [ ] **Animated AVIF / HEIC sequences**. Encoder-dependent in libheif;
-  Magick.NET surface is limited.
+- [x] ~~**Animated AVIF / HEIC sequences (load)**~~ shipped. `VipsHeifLoader`
+  enumerates frames via `MagickImageCollection`, stacks into a tall buffer
+  with `n-pages` / `page-height` / `animation-delays` metadata (same
+  convention as WebP/GIF). Two parsing fixes were needed:
+  - The manual ISOBMFF parser in `LoadHeaderAsync` only handles the still
+    image box layout (top-level `ispe`); sequence-brand files (`avis`,
+    animated HEIC) use a movie-track layout. `LoadAsync` falls through to
+    a Magick-based probe when the manual parser returns null.
+  - `LoadStreamingAsync` now buffers to a seekable `MemoryStream` first —
+    Magick.NET requires random access for ISOBMFF box parsing, and the
+    forward-only `VipsSourceStream` can't provide it. Streaming win is
+    preserved (encoded buffer goes out of scope after decode).
+
+  **Encoding** of animated AVIF/HEIC is gated on the ImageMagick build:
+  Magick.NET-Q8-arm64 ships only a single-frame HEIC encoder; AVIF
+  sequence write does work via `MagickImageCollection.Write(MagickFormat.Avif)`.
+  Sequence write through `VipsHeifSaver` is not yet exposed — defer until
+  there's a concrete use case.
 - [x] ~~**BokehBlur**~~. Hexagonal-aperture kernel composed with the existing
   `VipsConv`. `image.BokehBlur(radius)`.
 - [x] ~~**TIFF pyramidal write**~~. `SaveTiffAsync(image, writer, pyramid:true)`
