@@ -809,6 +809,47 @@ public static partial class VipsImageOps
     public static VipsImage Relational(VipsImage left, VipsImage right, VipsRelationalOperation op)
         => Run(new VipsRelational2 { Left = left, Right = right, Op = op });
 
+    // From Operations/Misc/VipsArithmetic2.cs — image-image arithmetic
+    /// <summary>Image + image, per pixel. UChar clamps; Float unclamped.</summary>
+    public static VipsImage Add(VipsImage left, VipsImage right)
+        => Run(new VipsArithmetic2 { Left = left, Right = right, Op = VipsArith2Op.Add });
+    /// <summary>Image - image, per pixel. UChar clamps; Float unclamped.</summary>
+    public static VipsImage Subtract(VipsImage left, VipsImage right)
+        => Run(new VipsArithmetic2 { Left = left, Right = right, Op = VipsArith2Op.Subtract });
+    /// <summary>Image * image, per pixel. UChar treats both as fractions of 255.</summary>
+    public static VipsImage Multiply(VipsImage left, VipsImage right)
+        => Run(new VipsArithmetic2 { Left = left, Right = right, Op = VipsArith2Op.Multiply });
+    /// <summary>Image / image, per pixel. Divisor=0 → 0.</summary>
+    public static VipsImage Divide(VipsImage left, VipsImage right)
+        => Run(new VipsArithmetic2 { Left = left, Right = right, Op = VipsArith2Op.Divide });
+    public static VipsImage Remainder(VipsImage left, VipsImage right)
+        => Run(new VipsArithmetic2 { Left = left, Right = right, Op = VipsArith2Op.Remainder });
+
+    // From Operations/Color/VipsPremultiply.cs
+    /// <summary>Multiply colour bands by alpha (alpha-correct compositing prep).</summary>
+    public static VipsImage Premultiply(VipsImage input)
+        => Run(new VipsPremultiply { In = input, Mode = VipsAlphaMode.Premultiply });
+    /// <summary>Divide colour bands by alpha (inverse of <see cref="Premultiply"/>).</summary>
+    public static VipsImage Unpremultiply(VipsImage input)
+        => Run(new VipsPremultiply { In = input, Mode = VipsAlphaMode.Unpremultiply });
+
+    // From Operations/Geometric/VipsEmbed.cs
+    /// <summary>
+    /// Place <paramref name="input"/> at (<paramref name="x"/>, <paramref name="y"/>)
+    /// inside a <paramref name="width"/>×<paramref name="height"/> canvas, filling
+    /// the rest by <paramref name="extend"/>. <paramref name="background"/>
+    /// is per-band fill colour for <see cref="VipsExtend.Background"/>.
+    /// </summary>
+    public static VipsImage Embed(VipsImage input, int x, int y, int width, int height,
+        VipsExtend extend = VipsExtend.Black, double[]? background = null)
+        => Run(new VipsEmbed { In = input, X = x, Y = y, OutWidth = width, OutHeight = height,
+            Extend = extend, Background = background });
+
+    // From Operations/Misc/VipsBandjoin.cs
+    /// <summary>Concatenate bands of N input images. All inputs must share W/H/format.</summary>
+    public static VipsImage Bandjoin(params VipsImage[] inputs)
+        => Run(new VipsBandjoin { Inputs = inputs });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

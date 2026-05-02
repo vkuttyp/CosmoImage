@@ -23,10 +23,10 @@ Single ops or tight clusters that fit the existing dispatch pattern.
 Each lands in a single PR.
 
 ### `arithmetic/`
-- [ ] `add` / `subtract` / `multiply` / `divide` / `remainder`
-  (image-image binary arithmetic). Pointwise; trivial Float code path.
-- [ ] `linear` (a·x+b) — already shipped, but `linear_const`
-  variant with broadcast scalar is missing.
+- [x] ~~`add` / `subtract` / `multiply` / `divide` / `remainder`~~
+  (round 26) — `VipsArithmetic2` covers all five. UChar clamps and
+  treats multiply as fraction-of-255; Float unclamped, direct multiply.
+- [ ] `linear_const` variant with broadcast scalar (`linear` shipped).
 - [ ] `sign` / `floor` / `ceil` / `rint` — extend `VipsMath` to cover
   the libvips full set.
 - [ ] `clamp` (per-band clamp to range).
@@ -37,12 +37,17 @@ Each lands in a single PR.
   `TypedImage<TPixel>.GetPixel`.
 
 ### `conversion/`
-- [ ] `bandbool` / `bandfold` / `bandunfold` / `bandjoin` /
-  `bandjoin_const` / `bandmean` / `bandrank` — band-axis ops.
+- [x] ~~`bandjoin`~~ (round 26) — `Bandjoin(other, …)` for N inputs.
+- [ ] `bandbool` / `bandfold` / `bandunfold` / `bandjoin_const` /
+  `bandmean` / `bandrank` — remaining band-axis ops.
 - [ ] `addalpha` (force alpha channel).
 - [ ] `flatten` (alpha-flatten against background colour).
-- [ ] `premultiply` / `unpremultiply`.
-- [ ] `embed` (place into larger canvas with extension mode).
+- [x] ~~`premultiply` / `unpremultiply`~~ (round 26) — alpha-correct
+  compositing primitives. UChar normalizes alpha by 255; Float treats
+  alpha as nominal [0,1].
+- [x] ~~`embed`~~ (round 26) — Black/White/Copy/Repeat/Mirror/Background
+  extension modes; per-band background colour for the
+  `Background` mode.
 - [ ] `gravity` (positional embed).
 - [ ] `replicate` (tile to bigger size).
 - [ ] `rot45` (45-degree rotate by lookup).

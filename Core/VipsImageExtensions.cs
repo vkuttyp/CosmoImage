@@ -273,6 +273,39 @@ public static class VipsImageExtensions
     public static VipsImage MoreConst(this VipsImage image, params double[] c) => VipsImageOps.MoreConst(image, c);
     public static VipsImage MoreEqConst(this VipsImage image, params double[] c) => VipsImageOps.MoreEqConst(image, c);
 
+    // --- Image-image arithmetic ---
+
+    public static VipsImage Add(this VipsImage left, VipsImage right) => VipsImageOps.Add(left, right);
+    public static VipsImage Subtract(this VipsImage left, VipsImage right) => VipsImageOps.Subtract(left, right);
+    public static VipsImage Multiply(this VipsImage left, VipsImage right) => VipsImageOps.Multiply(left, right);
+    public static VipsImage Divide(this VipsImage left, VipsImage right) => VipsImageOps.Divide(left, right);
+    public static VipsImage Remainder(this VipsImage left, VipsImage right) => VipsImageOps.Remainder(left, right);
+
+    // --- Alpha management ---
+
+    /// <summary>Multiply colour bands by alpha — alpha-correct compositing prep.</summary>
+    public static VipsImage Premultiply(this VipsImage image) => VipsImageOps.Premultiply(image);
+
+    /// <summary>Divide colour bands by alpha — inverse of <see cref="Premultiply"/>.</summary>
+    public static VipsImage Unpremultiply(this VipsImage image) => VipsImageOps.Unpremultiply(image);
+
+    // --- Embed / Bandjoin ---
+
+    /// <summary>Place this image at (x, y) inside a (w, h) canvas with extension fill.</summary>
+    public static VipsImage Embed(this VipsImage image, int x, int y, int width, int height,
+        CosmoImage.Operations.Geometric.VipsExtend extend = CosmoImage.Operations.Geometric.VipsExtend.Black,
+        double[]? background = null)
+        => VipsImageOps.Embed(image, x, y, width, height, extend, background);
+
+    /// <summary>Concatenate this image's bands with one or more others.</summary>
+    public static VipsImage Bandjoin(this VipsImage left, params VipsImage[] others)
+    {
+        var all = new VipsImage[1 + others.Length];
+        all[0] = left;
+        for (int i = 0; i < others.Length; i++) all[i + 1] = others[i];
+        return VipsImageOps.Bandjoin(all);
+    }
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

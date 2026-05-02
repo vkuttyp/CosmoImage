@@ -46,7 +46,7 @@ Pointwise arithmetic, statistics, hough transform, measurement.
 | :--- | :---: | :--- |
 | `abs`, `sin`, `cos`, `tan`, `atan`, `log`, `log10`, `exp`, `exp10`, `sqrt`, `sign`, `round`/`floor`/`ceil`/`rint` (math, math2, sign, round, unary) | 🟡 | `Math` suite covers abs/sin/cos/tan/log/log10/exp/exp10/sqrt/pow. Missing: atan/atan2, sign, floor/ceil/rint variants |
 | `pow`, `wop` (math2 — y = x^a) | ✅ | `Pow(image, exp)` |
-| `add`, `subtract`, `multiply`, `divide`, `remainder` (binary) | ❌ | No image-image arithmetic ops |
+| `add`, `subtract`, `multiply`, `divide`, `remainder` (binary) | ✅ | `Add`/`Subtract`/`Multiply`/`Divide`/`Remainder` — UChar branch clamps and treats multiply as fraction-of-255; Float branch unclamped |
 | `linear` (a·x + b per band) | ✅ | `Linear` with SIMD same-coefficient path |
 | `invert` | ✅ | SIMD pointwise; libvips Float convention (`-x`) on Float input |
 | `boolean`, `boolean_const` (and/or/xor/lshift/rshift) | ✅ | `Boolean2`, `BooleanConst` |
@@ -76,7 +76,7 @@ flattening, premultiplication. **Major gap area.**
 | `cast` (band-format conversion) | ✅ | `Cast`/`CastFloat`/`CastUChar` (UChar↔Float only) |
 | `copy` | 🟡 | Implicit via op pipeline; no explicit `Copy(image)` |
 | `extract_area` / `extract_band` | 🟡 | `ExtractArea` ✅; band extraction missing |
-| `embed` (place into larger canvas with extension mode) | ❌ | |
+| `embed` (place into larger canvas with extension mode) | ✅ | `Embed` with Black/White/Copy/Repeat/Mirror/Background modes; per-band background colour |
 | `gravity` (positional embed) | ❌ | |
 | `flip` | ✅ | |
 | `rot` (orthogonal) / `rot45` | 🟡 | `Rotate(VipsAngle)` ✅; rot45 missing |
@@ -85,11 +85,11 @@ flattening, premultiplication. **Major gap area.**
 | `recomb` | ✅ | |
 | `gamma` | ✅ | |
 | `flatten` (alpha-flatten against background) | ❌ | |
-| `premultiply` / `unpremultiply` | ❌ | |
+| `premultiply` / `unpremultiply` | ✅ | `Premultiply` / `Unpremultiply` — UChar normalizes alpha by 255; Float treats alpha as nominal [0,1]. Pass-through on band counts without alpha |
 | `addalpha` | ❌ | |
 | `bandbool` (and/or/xor across bands) | ❌ | |
 | `bandfold` / `bandunfold` (W↔W*bands rearrange) | ❌ | |
-| `bandjoin` / `bandjoin_const` | ❌ | Concatenate bands across images |
+| `bandjoin` | ✅ | `Bandjoin(other, …)` — concatenate bands across N images. `bandjoin_const` (fold constants in) still missing |
 | `bandmean` (average all bands) | ❌ | |
 | `bandrank` (rank-statistic across bands) | ❌ | |
 | `byteswap` | ❌ | |
@@ -362,7 +362,7 @@ By libvips subsystem, where ✅ = full or near-full, 🟡 = partial,
 
 ---
 
-*Last updated: 2026-05-02. 233 tests pass. Source files under `Core/`,
+*Last updated: 2026-05-02. 251 tests pass. Source files under `Core/`,
 `Loaders/`, `Savers/`, `Operations/{Geometric,Color,Effects,Convolution,
 Drawing,Analysis,Misc}/`. Upstream libvips counts from
 `~/Downloads/libvips-master`.*
