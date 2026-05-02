@@ -181,6 +181,10 @@ public static class VipsImageExtensions
     public static VipsImage Median(this VipsImage image, int windowSize = 3)
         => VipsImageOps.Median(image, windowSize);
 
+    /// <summary>Hexagonal-aperture bokeh blur. Radius in pixels.</summary>
+    public static VipsImage BokehBlur(this VipsImage image, int radius)
+        => VipsImageOps.BokehBlur(image, radius);
+
     // --- Color ---
 
     public static VipsImage Colourspace(this VipsImage image, VipsInterpretation space)
@@ -276,8 +280,8 @@ public static class VipsImageExtensions
     public static Task SaveWebpAsync(this VipsImage image, PipeWriter writer, int quality = 75, bool lossless = false)
         => VipsImageOps.SaveWebpAsync(image, writer, quality, lossless);
 
-    public static Task SaveTiffAsync(this VipsImage image, PipeWriter writer)
-        => VipsImageOps.SaveTiffAsync(image, writer);
+    public static Task SaveTiffAsync(this VipsImage image, PipeWriter writer, bool pyramid = false)
+        => VipsImageOps.SaveTiffAsync(image, writer, pyramid);
 
     public static Task SaveHeifAsync(this VipsImage image, PipeWriter writer, int quality = 75, bool lossless = false)
         => VipsImageOps.SaveHeifAsync(image, writer, quality, lossless);
@@ -300,4 +304,14 @@ public static class VipsImageExtensions
     /// </summary>
     public static Task SaveApngAsync(this VipsImage image, PipeWriter writer)
         => VipsImageOps.SaveApngAsync(image, writer);
+
+    public static Task SaveTgaAsync(this VipsImage image, PipeWriter writer)
+        => VipsImageOps.SaveTgaAsync(image, writer);
+
+    public static Task SaveQoiAsync(this VipsImage image, PipeWriter writer)
+        => VipsImageOps.SaveQoiAsync(image, writer);
+
+    /// <summary>Save as Netpbm (PBM/PGM/PPM/PAM). Auto picks by band count.</summary>
+    public static Task SavePnmAsync(this VipsImage image, PipeWriter writer, CosmoImage.Savers.VipsPnmVariant variant = CosmoImage.Savers.VipsPnmVariant.Auto)
+        => VipsImageOps.SavePnmAsync(image, writer, variant);
 }

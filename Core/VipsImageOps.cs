@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using ImageMagick;
 using CosmoImage.Loaders;
 using CosmoImage.Savers;
+// Bring VipsPnmVariant enum into scope.
 using CosmoImage.Operations.Geometric;
 using CosmoImage.Operations.Color;
 using CosmoImage.Operations.Convolution;
@@ -59,9 +60,13 @@ public static partial class VipsImageOps
         return VipsWebpSaver.SaveAsync(image, writer, quality, lossless);
     }
 
-    public static Task SaveTiffAsync(VipsImage image, System.IO.Pipelines.PipeWriter writer)
+    /// <summary>
+    /// Save as TIFF. <paramref name="pyramid"/> writes tiled pyramidal TIFF
+    /// (Ptif) for deep-zoom viewers; only effective on single-page input.
+    /// </summary>
+    public static Task SaveTiffAsync(VipsImage image, System.IO.Pipelines.PipeWriter writer, bool pyramid = false)
     {
-        return VipsTiffSaver.SaveAsync(image, writer);
+        return VipsTiffSaver.SaveAsync(image, writer, pyramid);
     }
 
     // ===== Geometric =====
@@ -556,6 +561,15 @@ public static partial class VipsImageOps
     public static VipsImage Median(VipsImage input, int windowSize = 3)
         => Rank(input, windowSize, windowSize, (windowSize * windowSize) / 2);
 
+    // From Operations/Convolution/VipsBokehBlur.cs
+    /// <summary>
+    /// Hexagonal-aperture bokeh blur. <paramref name="radius"/> in pixels
+    /// (≥ 1). Produces photographic hex-shaped specular highlights, unlike
+    /// Gaussian blur which always rounds them.
+    /// </summary>
+    public static VipsImage BokehBlur(VipsImage input, int radius)
+        => VipsBokehBlur.Run(input, radius);
+
     // ===== Drawing =====
     // From Operations/Drawing/VipsText.cs
     public static VipsImage Text(string text, string font = "Arial", int fontSize = 72)
@@ -830,4 +844,21 @@ public static partial class VipsImageOps
     // From Savers/VipsGifSaver.cs
     public static Task SaveGifAsync(VipsImage image, PipeWriter writer)
         => VipsGifSaver.SaveAsync(image, writer);
+
+    // From Savers/VipsTgaSaver.cs
+    public static Task SaveTgaAsync(VipsImage image, PipeWriter writer)
+        => VipsTgaSaver.SaveAsync(image, writer);
+
+    // From Savers/VipsQoiSaver.cs
+    public static Task SaveQoiAsync(VipsImage image, PipeWriter writer)
+        => VipsQoiSaver.SaveAsync(image, writer);
+
+    // From Savers/VipsPnmSaver.cs
+    /// <summary>
+    /// Save as Netpbm. <paramref name="variant"/> = Auto picks PBM/PGM/PPM/PAM
+    /// from band count; PAM is used for alpha-bearing inputs so the alpha
+    /// channel survives the round-trip.
+    /// </summary>
+    public static Task SavePnmAsync(VipsImage image, PipeWriter writer, VipsPnmVariant variant = VipsPnmVariant.Auto)
+        => VipsPnmSaver.SaveAsync(image, writer, variant);
 }

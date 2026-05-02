@@ -40,7 +40,10 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | JPEG 2000 | 🟡 header only | ❌ | n/a | — |
 | OpenEXR / Radiance HDR / FITS / NIfTI | ❌ | ❌ | n/a | — |
 | CSV / Matrix / Matlab | ❌ | ❌ | n/a | — |
-| TGA / QOI / PBM | ❌ | ❌ | n/a | — |
+| TGA | ✅ | ✅ | n/a | EXIF/XMP/ICC via Magick |
+| QOI | ✅ | ✅ | n/a | — |
+| PBM / PGM / PPM / PAM | ✅ | ✅ | n/a | — |
+| CSV / Matrix (numeric text) | ✅ | ✅ | n/a | — |
 
 ---
 
@@ -51,11 +54,13 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | JPEG | ✅ | n/a | EXIF + XMP via APP1; ICC via multi-segment APP2 |
 | PNG | ✅ (full + palette PNG-8) | n/a | eXIf, iCCP (deflated), iTXt for XMP |
 | WebP | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
-| TIFF | ✅ | ✅ multi-page | EXIF/XMP/ICC native |
+| TIFF | ✅ | ✅ multi-page; pyramidal (Ptif) on `pyramid:true` | EXIF/XMP/ICC native |
 | HEIF / AVIF | ✅ | ❌ sequences | EXIF/XMP/ICC via Magick |
 | GIF | ✅ | ✅ animated | profiles + Comment on first frame |
 | APNG | ✅ | ✅ animated | profiles + Comment on first frame |
-| TIFF Pyramids / Tiled TIFF / OME-TIFF / dzsave | ❌ | — | — |
+| TGA / QOI / PBM-PAM | ✅ | n/a | EXIF/XMP/ICC via Magick (where supported) |
+| Pyramidal TIFF (Ptif) | ✅ via `SaveTiffAsync(pyramid:true)` | — | — |
+| OME-TIFF / dzsave (Deep Zoom) | ❌ | — | — |
 
 ---
 
@@ -130,7 +135,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | Pixelate | ✅ | Shrink + Nearest upscale |
 | Glow | ✅ | Bloom (input + sigma·blur) |
 | OilPaint / Charcoal / Sketch / Polaroid | ✅ | Magick.NET wrappers |
-| BokehBlur | ❌ | Aperture-shaped blur — niche |
+| BokehBlur | ✅ | Hexagonal-aperture kernel via `Conv` |
 
 ### Analysis / frequency
 
@@ -199,6 +204,6 @@ Items where we match or exceed ImageSharp:
 
 ---
 
-*Last updated: 2026-05-02. Numbers in this matrix track the 50-file source
-tree under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 68 tests pass.*
+*Last updated: 2026-05-02. Numbers in this matrix track the source tree
+under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
+Effects,Convolution,Drawing,Analysis,Misc}/`. 79 tests pass.*

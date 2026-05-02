@@ -52,20 +52,26 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
   ANS-coded bitstream parser or a native libjxl binding.
 - [ ] **JPEG 2000 pixel decode**. Header-only currently; full decode similar
   scope to JXL.
-- [ ] **TGA / QOI / PBM formats**. Magick.NET supports all three; ~10 lines
-  per loader/saver wrapping the existing Magick pipeline.
+- [x] ~~**TGA / QOI / PBM formats**~~. All shipped via Magick.NET wrappers
+  (`VipsTgaLoader`/`VipsTgaSaver`, `VipsQoi*`, `VipsPnm*` covering
+  PBM/PGM/PPM/PAM with Auto variant detection). TGA passes a format hint
+  since it has no magic bytes.
 - [ ] **OpenEXR / Radiance HDR**. Scientific HDR formats; would need
   Float-format ops first to be meaningful.
 - [ ] **FITS / NIfTI**. Scientific imaging.
 - [ ] **Animated AVIF / HEIC sequences**. Encoder-dependent in libheif;
   Magick.NET surface is limited.
-- [ ] **BokehBlur**. Aperture-shaped (typically hexagonal) blur kernel — niche
-  vs Gaussian.
-- [ ] **TIFF pyramidal / Tiled TIFF / OME-TIFF**. Deep-zoom and microscopy
-  workflows. Each is a focused multi-resolution write extension.
+- [x] ~~**BokehBlur**~~. Hexagonal-aperture kernel composed with the existing
+  `VipsConv`. `image.BokehBlur(radius)`.
+- [x] ~~**TIFF pyramidal write**~~. `SaveTiffAsync(image, writer, pyramid:true)`
+  emits Magick's `Ptif`. OME-TIFF and Tiled-TIFF (with explicit tile geometry
+  control) still pending — those are deeper libtiff knobs.
 - [ ] **`dzsave` (Deep Zoom)**. IIIF / OpenSeadragon-compatible tiled output.
   libvips has this; non-trivial to port.
-- [ ] **CSV / Matrix / Matlab data loaders**. Niche scientific use.
+- [x] ~~**CSV / Matrix data loaders**~~. `VipsCsvLoader` and `VipsMatrixLoader`
+  parse whitespace/comma-separated numeric grids; comments + header rows
+  supported. Matlab `.mat` parsing still pending (binary format, separate
+  effort).
 
 ---
 
@@ -96,12 +102,10 @@ Each is significant work; defer until a concrete use case demands it.
   byte stream. ImageSharp also buffers, so it's a parity item rather than a
   gap — but it would meaningfully improve memory profile on huge inputs.
 
-- [ ] **Unified `VipsFields` metadata API**. Currently we have
-  `Metadata` (`Dictionary<string, string>`) for parsed text and
-  `MetadataBlobs` (`Dictionary<string, byte[]>`) for raw segments.
-  libvips' `vips_image_get_*` family gives typed access to scalar tags
-  (orientation as int, GPS as double[3], etc.). Would mostly be a
-  convenience wrapper on top of what's there.
+- [x] ~~**Unified `VipsFields` metadata API**~~. `Core/VipsFields.cs` adds
+  `GetInt/GetDouble/GetDoubleArray/GetBlob` + matching setters, plus
+  well-known shortcuts (`GetOrientation`, `GetComment`, `GetAnimationDelays`,
+  `GetExif`, `GetXmp`, `GetIccProfile`).
 
 - [ ] **Drop more `Magick.NET` usage**. Magick.NET-Q8 is the only native
   dependency left. Every loader/saver could in principle use a format-specific
@@ -118,8 +122,8 @@ Each is significant work; defer until a concrete use case demands it.
 | :--- | :---: | :--- |
 | 1 (production) | 1 | architectural (Image<TPixel>) |
 | 2 (quality-of-life) | 0 | — |
-| 3 (niche) | ~12 | small to medium |
-| 4 (architectural) | 6 | weeks to months each |
+| 3 (niche) | 7 | mostly format-codec heavy |
+| 4 (architectural) | 5 | weeks to months each |
 
 **The original 13-item TODO is 100% complete.** What's listed here is the next
 horizon. For typical web-image-service, document-processing, photo-editing,

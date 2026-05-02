@@ -18,7 +18,13 @@ namespace CosmoImage.Savers;
 /// </summary>
 public static class VipsTiffSaver
 {
-    public static async Task SaveAsync(VipsImage image, PipeWriter writer, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Save as TIFF. <paramref name="pyramid"/> = true writes a tiled
+    /// pyramidal TIFF (Magick's <c>Ptif</c>) — multi-resolution layout used by
+    /// deep-zoom viewers (OpenSeadragon, IIIF). Only meaningful for
+    /// single-page input; for multi-page input it falls back to standard TIFF.
+    /// </summary>
+    public static async Task SaveAsync(VipsImage image, PipeWriter writer, bool pyramid = false, CancellationToken cancellationToken = default)
     {
         int width = image.Width;
         int height = image.Height;
@@ -97,8 +103,15 @@ public static class VipsTiffSaver
                 collection[0].SetProfile(new ColorProfile(icc));
         }
 
+        // Pyramid only applies to single-page output. Multi-page + pyramid is
+        // ambiguous (each page would need its own pyramid); fall back to plain
+        // multi-page TIFF in that case.
+        var outFmt = (pyramid && nPages == 1) ? MagickFormat.Ptif : MagickFormat.Tiff;
+        if (outFmt == MagickFormat.Ptif && collection.Count > 0)
+            collection[0].Format = MagickFormat.Ptif;
+
         using var ms = new MemoryStream();
-        collection.Write(ms, MagickFormat.Tiff);
+        collection.Write(ms, outFmt);
         ms.Position = 0;
         await ms.CopyToAsync(writer.AsStream(), cancellationToken);
 
