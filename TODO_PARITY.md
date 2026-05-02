@@ -154,7 +154,11 @@ sRGB↔linear and a few RGB-space matrix manipulations.
 - [ ] CICP2scRGB (BT.2100 / Rec.2020 / PQ / HLG transfer functions —
   HDR / wide-gamut interop).
 - [ ] uhdr2scRGB (Ultra HDR JPEG with gainmap).
-- [ ] dE76 / dE00 / dECMC colour-difference metrics.
+- [x] ~~dE76 / dE00~~ (round 33) — `DE76` Euclidean Lab and `DE2000`
+  CIEDE2000 (Sharma reference vectors verified). Also exposed as
+  per-triplet `DE2000(L1, a1, b1, L2, a2, b2)`. `dECMC` still missing.
+- [x] ~~Lab ↔ XYZ~~ (round 33) — D65 white point.
+- [x] ~~Lab ↔ LCh~~ (round 33) — polar form.
 - [ ] Pipeline-aware ICC: profile attached to image metadata, transform
   applied at sink boundary rather than as a one-shot. Currently
   `IccTransform` is a one-shot Magick call.

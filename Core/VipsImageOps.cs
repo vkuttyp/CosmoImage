@@ -1079,6 +1079,33 @@ public static partial class VipsImageOps
     public static VipsImage Case(VipsImage index, params VipsImage[] cases)
         => Run(new VipsCase { Index = index, Cases = cases });
 
+    // From Operations/Color/VipsLabXYZ.cs
+    /// <summary>CIE Lab (D65) → XYZ.</summary>
+    public static VipsImage Lab2XYZ(VipsImage input) => Run(new VipsLab2XYZ { In = input });
+
+    /// <summary>CIE XYZ (D65) → Lab.</summary>
+    public static VipsImage XYZ2Lab(VipsImage input) => Run(new VipsXYZ2Lab { In = input });
+
+    // From Operations/Color/VipsLabLCh.cs
+    /// <summary>Lab → LCh polar form (L, chroma, hue°).</summary>
+    public static VipsImage Lab2LCh(VipsImage input) => Run(new VipsLab2LCh { In = input });
+
+    /// <summary>LCh → Lab.</summary>
+    public static VipsImage LCh2Lab(VipsImage input) => Run(new VipsLCh2Lab { In = input });
+
+    // From Operations/Color/VipsdE.cs
+    /// <summary>Per-pixel CIE76 ΔE between two Lab images.</summary>
+    public static VipsImage DE76(VipsImage left, VipsImage right)
+        => Run(new VipsdE76 { Left = left, Right = right });
+
+    /// <summary>Per-pixel CIEDE2000 ΔE between two Lab images.</summary>
+    public static VipsImage DE2000(VipsImage left, VipsImage right)
+        => Run(new VipsdE2000 { Left = left, Right = right });
+
+    /// <summary>CIEDE2000 ΔE between two Lab triplets (no image required).</summary>
+    public static double DE2000(double L1, double a1, double b1, double L2, double a2, double b2)
+        => VipsdE2000.ComputeDE2000(L1, a1, b1, L2, a2, b2);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

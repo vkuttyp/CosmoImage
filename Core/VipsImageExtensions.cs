@@ -434,6 +434,24 @@ public static class VipsImageExtensions
     public static VipsImage Freqmult(this VipsImage image, VipsImage mask)
         => VipsImageOps.Freqmult(image, mask);
 
+    /// <summary>Lab → XYZ (D65).</summary>
+    public static VipsImage Lab2XYZ(this VipsImage image) => VipsImageOps.Lab2XYZ(image);
+
+    /// <summary>XYZ (D65) → Lab.</summary>
+    public static VipsImage XYZ2Lab(this VipsImage image) => VipsImageOps.XYZ2Lab(image);
+
+    /// <summary>Lab → LCh polar form.</summary>
+    public static VipsImage Lab2LCh(this VipsImage image) => VipsImageOps.Lab2LCh(image);
+
+    /// <summary>LCh → Lab.</summary>
+    public static VipsImage LCh2Lab(this VipsImage image) => VipsImageOps.LCh2Lab(image);
+
+    /// <summary>Per-pixel CIE76 ΔE against another Lab image.</summary>
+    public static VipsImage DE76(this VipsImage image, VipsImage other) => VipsImageOps.DE76(image, other);
+
+    /// <summary>Per-pixel CIEDE2000 ΔE against another Lab image.</summary>
+    public static VipsImage DE2000(this VipsImage image, VipsImage other) => VipsImageOps.DE2000(image, other);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

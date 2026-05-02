@@ -127,8 +127,8 @@ We have only a few corners of it.
 | `colourspace` (graph dispatcher) | 🟡 | `Colourspace` covers a subset of target spaces |
 | `sRGB2scRGB` / `scRGB2sRGB` (IEC 61966-2-1 transfer) | ✅ | `Linearize` / `Delinearize` (Float and UChar paths) |
 | `scRGB2BW` | 🟡 | `Greyscale` (RGB-space, not scRGB) |
-| `XYZ2Lab`, `Lab2XYZ`, `XYZ2Yxy`, `Yxy2XYZ` | ❌ | |
-| `Lab2LCh`, `LCh2Lab`, `LCh2UCS`, `UCS2LCh` | ❌ | |
+| `XYZ2Lab`, `Lab2XYZ`, `XYZ2Yxy`, `Yxy2XYZ` | 🟡 | `Lab2XYZ` ✅ and `XYZ2Lab` ✅ (D65); `Yxy` pair still missing |
+| `Lab2LCh`, `LCh2Lab`, `LCh2UCS`, `UCS2LCh` | 🟡 | `Lab2LCh` ✅ and `LCh2Lab` ✅; `UCS` pair still missing |
 | `Lab2LabQ` / `LabQ2Lab` (8-bit packed Lab) | ❌ | |
 | `Lab2LabS` / `LabS2Lab` (16-bit Lab) | ❌ | |
 | `LabQ2sRGB`, `LabQ2LabS`, `LabS2LabQ` | ❌ | |
@@ -139,7 +139,7 @@ We have only a few corners of it.
 | `CICP2scRGB` (ITU-R BT.2100 / Rec.2020 + transfer) | ❌ | HDR / wide-gamut |
 | `uhdr2scRGB` (Ultra HDR JPEG gainmap → scRGB) | ❌ | Modern HDR-photo path |
 | `float2rad` / `rad2float` (Radiance RGBE ↔ Float) | 🟡 | Built into `VipsHdrLoader`/`Saver` directly, not a standalone op |
-| `dE76`, `dE00`, `dECMC` | ❌ | Colour-difference metrics |
+| `dE76`, `dE00`, `dECMC` | 🟡 | `DE76(other)` and `DE2000(other)` ✅ (image + per-triplet APIs); `dECMC` still missing |
 | `icc_transform` | 🟡 | `IccTransform` via Magick.NET (one-shot, not pipeline-aware) |
 | `profile_load` (load named ICC profile) | ❌ | |
 | Custom "color" ops (matrix-driven RGB) | ✅ | `Saturate`, `Sepia`, `Hue`, `Brightness`, `Contrast`, `Lightness` |
