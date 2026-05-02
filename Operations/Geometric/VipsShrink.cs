@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Geometric;
@@ -57,8 +58,12 @@ public class VipsShrink : VipsOperation
         if (inRegion.Prepare(inRect) != 0) return -1;
 
         int bands = @in.Bands;
-        int pelSize = @in.SizeOfPel;
         int shrinkArea = hShrink * vShrink;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, inRect, r, hShrink, vShrink, bands, shrinkArea);
+
+        int pelSize = @in.SizeOfPel;
 
         for (int y = 0; y < r.Height; y++)
         {
@@ -73,7 +78,7 @@ public class VipsShrink : VipsOperation
                         int inY = inRect.Top + y * vShrink + sy;
                         int inXBase = inRect.Left + x * hShrink;
                         var inLine = inRegion.GetAddress(inXBase, inY);
-                        
+
                         for (int sx = 0; sx < hShrink; sx++)
                         {
                             sum += inLine[sx * pelSize + bnd];
@@ -84,6 +89,31 @@ public class VipsShrink : VipsOperation
             }
         }
 
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsRect inRect, VipsRect r, int hShrink, int vShrink, int bands, int shrinkArea)
+    {
+        for (int y = 0; y < r.Height; y++)
+        {
+            var outLine = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    double sum = 0;
+                    for (int sy = 0; sy < vShrink; sy++)
+                    {
+                        int inY = inRect.Top + y * vShrink + sy;
+                        int inXBase = inRect.Left + x * hShrink;
+                        var inLine = inRegion.GetAddress(inXBase, inY);
+                        for (int sx = 0; sx < hShrink; sx++)
+                            sum += BinaryPrimitives.ReadSingleLittleEndian(inLine.Slice((sx * bands + bnd) * 4, 4));
+                    }
+                    BinaryPrimitives.WriteSingleLittleEndian(outLine.Slice((x * bands + bnd) * 4, 4), (float)(sum / shrinkArea));
+                }
+            }
+        }
         return 0;
     }
 }

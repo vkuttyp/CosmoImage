@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Geometric;
@@ -102,9 +103,13 @@ public class VipsAffine : VipsOperation
         if (inRegion.Prepare(new VipsRect(left, top, right - left, bottom - top)) != 0) return -1;
 
         int bands = @in.Bands;
-        int pelSize = @in.SizeOfPel;
         int W = @in.Width;
         int H = @in.Height;
+
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, r, A, B, C, D, Idx, Idy, kernel, support, windowSize, bands, W, H);
+
+        int pelSize = @in.SizeOfPel;
 
         Span<double> wy = stackalloc double[windowSize];
         Span<double> wx = stackalloc double[windowSize];
@@ -163,6 +168,73 @@ public class VipsAffine : VipsOperation
             }
         }
 
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsRect r,
+        double A, double B, double C, double D, double Idx, double Idy,
+        VipsKernel kernel, int support, int windowSize, int bands, int W, int H)
+    {
+        Span<double> wy = stackalloc double[windowSize];
+        Span<double> wx = stackalloc double[windowSize];
+        int rowBytes = bands * 4;
+
+        for (int y = 0; y < r.Height; y++)
+        {
+            var outLine = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                double srcX = A * (r.Left + x) + B * (r.Top + y) + Idx;
+                double srcY = C * (r.Left + x) + D * (r.Top + y) + Idy;
+
+                if (srcX < 0 || srcX >= W - 1 || srcY < 0 || srcY >= H - 1)
+                {
+                    // Out-of-source — write band-zero floats. Matches the
+                    // UChar path's transparent-background behavior.
+                    outLine.Slice(x * rowBytes, rowBytes).Clear();
+                    continue;
+                }
+
+                if (kernel == VipsKernel.Nearest)
+                {
+                    var p = inRegion.GetAddress((int)Math.Round(srcX), (int)Math.Round(srcY));
+                    p.Slice(0, rowBytes).CopyTo(outLine.Slice(x * rowBytes, rowBytes));
+                    continue;
+                }
+
+                int xStart = (int)Math.Floor(srcX) - support + 1;
+                int yStart = (int)Math.Floor(srcY) - support + 1;
+                double wxSum = 0, wySum = 0;
+                for (int sx = 0; sx < windowSize; sx++)
+                {
+                    wx[sx] = VipsKernels.Evaluate(kernel, (xStart + sx) - srcX);
+                    wxSum += wx[sx];
+                }
+                for (int sy = 0; sy < windowSize; sy++)
+                {
+                    wy[sy] = VipsKernels.Evaluate(kernel, (yStart + sy) - srcY);
+                    wySum += wy[sy];
+                }
+                double normalizer = 1.0 / (wxSum * wySum);
+
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    double sum = 0;
+                    for (int sy = 0; sy < windowSize; sy++)
+                    {
+                        int iy = Math.Clamp(yStart + sy, 0, H - 1);
+                        for (int sx = 0; sx < windowSize; sx++)
+                        {
+                            int ix = Math.Clamp(xStart + sx, 0, W - 1);
+                            var pel = inRegion.GetAddress(ix, iy);
+                            float v = BinaryPrimitives.ReadSingleLittleEndian(pel.Slice(bnd * 4, 4));
+                            sum += v * wx[sx] * wy[sy];
+                        }
+                    }
+                    BinaryPrimitives.WriteSingleLittleEndian(outLine.Slice(x * rowBytes + bnd * 4, 4), (float)(sum * normalizer));
+                }
+            }
+        }
         return 0;
     }
 }

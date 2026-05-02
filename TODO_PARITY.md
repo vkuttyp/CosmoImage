@@ -87,19 +87,20 @@ Each is significant work; defer until a concrete use case demands it.
   **Shipped**:
     - Keystone: `VipsCast` (UChar↔Float, libvips no-auto-normalize convention)
     - Pointwise: `VipsInvert`, `VipsLinear`, `VipsRecomb` (drives
-      Saturate/Sepia/Hue/Greyscale), `VipsMath` (Abs/Sin/Cos/Tan/Log/Log10/
-      Exp/Exp10/Sqrt/Pow with mathematical-radian semantics on Float)
+      Saturate/Sepia/Hue/Greyscale), `VipsMath` (full transcendental suite
+      with mathematical-radian semantics on Float)
     - Window: `VipsConv1D` (drives `GaussBlur`), `VipsConv` (2D mask),
       `VipsMorph` (Dilate/Erode with -∞/+∞ seeding)
     - Color management: `VipsLinearize`/`VipsDelinearize` with full
       per-pixel sRGB transfer in double precision (much higher precision
       than the UChar 256-entry LUT)
+    - Geometric: `VipsShrink`, `VipsResize1D` (X+Y), `VipsAffine`. These
+      drive `VipsResize` (Shrink + Resize1D) and `VipsRotate` (Affine), so
+      the canonical color-correct linear-light resize chain
+      (`Linearize → Resize → Delinearize`) now runs end-to-end in Float.
 
-  **Remaining** — each follows the same dispatch pattern; geometric ops
-  are the biggest remaining chunk:
-    - Geometric: `VipsResize` / `VipsResize1D` / `VipsAffine` / `VipsShrink`
-      / `VipsRotate`. Kernel sampling reads bytes per band — needs reworking
-      for arbitrary pel sizes
+  **Remaining** — each follows the same dispatch pattern; none block the
+  typical resize/blur/composite workflow:
     - Drawing/Composite: `VipsComposite`, `VipsDrawLine`, `VipsDrawRect`
     - Effects: `VipsGlow`, `VipsVignette`, `VipsPixelate`, `VipsArtisticEffects`
     - Analysis: `VipsHistFind` (needs binning strategy beyond 256 bins),
