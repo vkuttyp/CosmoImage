@@ -115,11 +115,21 @@ public abstract class VipsSink
 /// </summary>
 public sealed class OrderedStripSink : VipsSink
 {
-    public delegate void StripConsumer(int top, int height, byte[] bytes);
+    /// <summary>
+    /// Receives a strip of finalized pixels in top-down order. <c>bytes</c> is
+    /// a span over a pool-rented buffer whose physical length may exceed the
+    /// logical strip size — only the supplied span is valid contents. The
+    /// callback must finish using the data before returning; the sink will
+    /// reclaim the underlying buffer immediately afterward.
+    /// </summary>
+    public delegate void StripConsumer(int top, int height, ReadOnlySpan<byte> bytes);
 
     private readonly StripConsumer _onStripReady;
     private readonly object _lock = new();
-    private readonly SortedDictionary<int, (int Height, byte[] Bytes)> _pending = new();
+    // Tuple holds the pool-rented buffer plus the logical byte count; the
+    // physical length (Bytes.Length) can be larger than ByteCount when the
+    // allocator returns an oversized buffer.
+    private readonly SortedDictionary<int, (int Height, byte[] Bytes, int ByteCount)> _pending = new();
     private int _nextTop;
 
     /// <param name="image">Image to drain.</param>
@@ -148,7 +158,11 @@ public sealed class OrderedStripSink : VipsSink
     protected override void ConsumeTile(int workerId, VipsRegion region, VipsRect tile)
     {
         int rowBytes = tile.Width * Image.SizeOfPel;
-        var copy = new byte[rowBytes * tile.Height];
+        int byteCount = rowBytes * tile.Height;
+        // Rent from the image's allocator. Pool buffers may be oversized
+        // (e.g. ArrayPool rounds up to the next power of two); the consumer
+        // is handed a span sized to byteCount so it never sees the slack.
+        var copy = Image.Allocator.Rent(byteCount);
         for (int row = 0; row < tile.Height; row++)
         {
             var src = region.GetAddress(tile.Left, tile.Top + row);
@@ -157,12 +171,13 @@ public sealed class OrderedStripSink : VipsSink
 
         lock (_lock)
         {
-            _pending.Add(tile.Top, (tile.Height, copy));
+            _pending.Add(tile.Top, (tile.Height, copy, byteCount));
             while (_pending.TryGetValue(_nextTop, out var ready))
             {
-                _onStripReady(_nextTop, ready.Height, ready.Bytes);
+                _onStripReady(_nextTop, ready.Height, ready.Bytes.AsSpan(0, ready.ByteCount));
                 _pending.Remove(_nextTop);
                 _nextTop += ready.Height;
+                Image.Allocator.Return(ready.Bytes);
             }
         }
     }

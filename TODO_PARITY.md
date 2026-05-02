@@ -91,10 +91,15 @@ Each is significant work; defer until a concrete use case demands it.
   through ops, transforms at sink boundary. **Cost: significant. Value: only
   hit in print-prep or color-graded video workflows.**
 
-- [ ] **MemoryAllocator hooks**. Plumb `ArrayPool<byte>` (or caller-supplied
-  pool) through `VipsRegion`, `MemorySink`, and the lazy materializers.
-  **Cost: moderate. Value: production high-throughput services that need
-  fine-grained GC control.**
+- [x] ~~**MemoryAllocator hooks (transient buffers)**~~. `IVipsAllocator` is
+  plumbed through `VipsRegion` (working memory rented per Prepare, returned
+  on Dispose) and `OrderedStripSink` (per-tile copy buffers rented before
+  the consumer callback, returned after). Default is
+  `ArrayPoolAllocator.Shared` wrapping `ArrayPool<byte>.Shared`; callers can
+  set a custom `IVipsAllocator` per-image and it propagates through
+  `SetPipeline`. Long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) still
+  use plain `new byte[]` — pool ownership across an image lifetime needs
+  explicit disposal semantics on `VipsImage`, which is a separate design call.
 
 - [ ] **Streaming load (no full-buffer-into-memory)**. All loaders currently
   read the source into a `byte[]` before decoding. Codecs that support
@@ -123,7 +128,7 @@ Each is significant work; defer until a concrete use case demands it.
 | 1 (production) | 1 | architectural (Image<TPixel>) |
 | 2 (quality-of-life) | 0 | — |
 | 3 (niche) | 7 | mostly format-codec heavy |
-| 4 (architectural) | 5 | weeks to months each |
+| 4 (architectural) | 4 | weeks to months each |
 
 **The original 13-item TODO is 100% complete.** What's listed here is the next
 horizon. For typical web-image-service, document-processing, photo-editing,

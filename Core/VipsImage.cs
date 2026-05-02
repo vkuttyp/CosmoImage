@@ -29,6 +29,18 @@ public class VipsImage : IDisposable
     /// </summary>
     public VipsDemandStyle DemandHint { get; set; } = VipsDemandStyle.Any;
 
+    /// <summary>
+    /// Backing pool for transient pixel buffers allocated against this image
+    /// (currently <see cref="VipsRegion"/> working memory and
+    /// <see cref="OrderedStripSink"/> per-tile copies). Defaults to
+    /// <see cref="ArrayPoolAllocator.Shared"/> so high-throughput pipelines
+    /// reuse buffers without churning the GC. Override per-image for tests
+    /// or to plug in a caller-supplied pool. Long-lived buffers
+    /// (<see cref="PixelsLazy"/>, <see cref="MemorySink.Pixels"/>) bypass
+    /// this allocator on purpose — see <see cref="IVipsAllocator"/> doc.
+    /// </summary>
+    public IVipsAllocator Allocator { get; set; } = ArrayPoolAllocator.Shared;
+
     internal VipsGenerateFn? GenerateFn { get; set; }
     internal VipsStartFn? StartFn { get; set; }
     internal VipsStopFn? StopFn { get; set; }
@@ -66,6 +78,20 @@ public class VipsImage : IDisposable
                 setHint = input.DemandHint;
         }
         DemandHint = setHint;
+
+        // Inherit a non-default allocator from inputs so a caller's custom
+        // pool plumbs through the whole derived pipeline. First input with a
+        // non-shared allocator wins — matches libvips' "lower-numbered input
+        // takes priority" convention used elsewhere here.
+        foreach (var input in inputs)
+        {
+            if (input == null) continue;
+            if (!ReferenceEquals(input.Allocator, ArrayPoolAllocator.Shared))
+            {
+                Allocator = input.Allocator;
+                break;
+            }
+        }
     }
 
     public System.Collections.Generic.Dictionary<string, string> Metadata { get; } = new();

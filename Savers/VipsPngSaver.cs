@@ -85,7 +85,7 @@ public static class VipsPngSaver
                     for (int row = 0; row < height; row++)
                     {
                         zlib.WriteByte(0); // Filter type 0 (None)
-                        zlib.Write(bytes.AsSpan(row * rowWidth, rowWidth));
+                        zlib.Write(bytes.Slice(row * rowWidth, rowWidth));
                     }
                 });
                 await sink.RunAsync(cancellationToken);

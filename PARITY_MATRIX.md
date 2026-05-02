@@ -175,7 +175,7 @@ Items where ImageSharp differs and we don't currently match:
 | `Image<TPixel>` strongly-typed pixel access | ❌ | We use `byte[] Pixels` + `BandFormat` enum; pixel safety is runtime, not compile-time |
 | `Mutate(action)` block-scoped op chaining | ✅ | `image.Mutate(im => im.Resize(0.5).Sepia())` — wraps the fluent extensions |
 | Float-format pixel ops throughout | ❌ | Most ops are UChar-only; would require every op to gain a Float code path |
-| `MemoryAllocator` (caller-supplied buffer pool) | ❌ | Default `byte[]` allocations; high-throughput services that need pool control would notice |
+| `MemoryAllocator` (caller-supplied buffer pool) | 🟡 | `IVipsAllocator` plumbed through `VipsRegion` and `OrderedStripSink`; default `ArrayPoolAllocator` wraps `ArrayPool<byte>.Shared`. Long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) intentionally bypass the pool — pool ownership across an image lifetime is harder to reason about |
 | TGA / QOI / PBM formats | ❌ | Niche; rarely needed |
 
 Items where we match or exceed ImageSharp:
@@ -197,7 +197,7 @@ Items where we match or exceed ImageSharp:
 | :--- | :--- | :--- |
 | Float-precision ops throughout | Months | Every op (Resize/Conv/Linear/Affine/etc.) needs a parallel Float code path; current Linearize/Delinearize covers the 90% case via UChar LUT |
 | Proper CMM-based ICC color management | Significant | Needs a LittleCMS native binding; current `IccTransform` uses Magick.NET as a one-shot transform |
-| `MemoryAllocator` integration | Moderate | Plumb a pool through `VipsRegion`, `MemorySink`, lazy materializers; gain mostly on high-throughput services |
+| `MemoryAllocator` for lazy materializers | Moderate | Transient buffers (`VipsRegion`, `OrderedStripSink`) now pool through `IVipsAllocator`. Extending to `MemorySink.Pixels` and loader `PixelsLazy` requires explicit ownership/disposal semantics on `VipsImage` — design discussion before code |
 | `Image<TPixel>` strong typing | Significant | Would touch every public op signature; doesn't translate cleanly to lazy-pipeline model where ops produce new images |
 | Streaming (truly-non-buffered) loaders | Significant | All codecs decode into memory; ImageSharp does the same — parity item not gap |
 | TIFF pyramidal / dzsave (deep-zoom output) | Moderate | Would need its own multi-resolution writer wrapping libtiff |
@@ -206,4 +206,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 79 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 84 tests pass.*

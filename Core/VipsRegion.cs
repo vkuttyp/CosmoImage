@@ -14,6 +14,11 @@ public class VipsRegion : IDisposable
     private int _originX;
     private int _originY;
 
+    // Set when _buffer was rented from Image.Allocator (so Dispose / regrow
+    // returns it). Stays false for aliased buffers (the internal ctor and
+    // the memory-backed Image.Pixels fast-path), which the region doesn't own.
+    private bool _ownsBuffer;
+
     // Per-region "seq" cookie produced by Image.StartFn on first Prepare and
     // freed by Image.StopFn (or, if the cookie is IDisposable, Dispose) when
     // this region is disposed. Lets operations cache per-thread state — most
@@ -64,6 +69,8 @@ public class VipsRegion : IDisposable
         // Direct port of libvips vips_region_image (SETBUF/MMAPIN path).
         if (Image.Pixels is { } pixels)
         {
+            // Switching from owned → aliased: hand the rented buffer back.
+            ReleaseOwnedBuffer();
             _buffer = pixels;
             _bpl = Image.Width * Image.SizeOfPel;
             Valid = r;
@@ -75,9 +82,15 @@ public class VipsRegion : IDisposable
         int requiredBpl = r.Width * Image.SizeOfPel;
         int requiredSize = requiredBpl * r.Height;
 
+        // Buffer.Length here is the *pool capacity* — it can exceed
+        // requiredSize when the pool returned an oversized array. That's
+        // exactly the property we want for the "is the current buffer big
+        // enough?" check, so no special handling is needed.
         if (_buffer == null || _buffer.Length < requiredSize)
         {
-            _buffer = new byte[requiredSize];
+            ReleaseOwnedBuffer();
+            _buffer = Image.Allocator.Rent(requiredSize);
+            _ownsBuffer = true;
         }
 
         _bpl = requiredBpl;
@@ -114,6 +127,17 @@ public class VipsRegion : IDisposable
 
             _seq = null;
             _seqStarted = false;
+        }
+        ReleaseOwnedBuffer();
+    }
+
+    private void ReleaseOwnedBuffer()
+    {
+        if (_ownsBuffer && _buffer != null)
+        {
+            Image.Allocator.Return(_buffer);
+            _buffer = null;
+            _ownsBuffer = false;
         }
     }
 }
