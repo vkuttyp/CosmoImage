@@ -127,4 +127,90 @@ public static class VipsGifLoader
 
         return image;
     }
+
+    /// <summary>
+    /// Streaming GIF load: feeds the source directly to Magick.NET, decodes
+    /// every frame eagerly into a tall buffer, and drops the encoded buffer.
+    /// Single-frame GIFs decode through the same path with n-pages=1 and no
+    /// animation-delays metadata.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsGifAsync(source, cancellationToken)) return null;
+        await Task.Yield();
+
+        try
+        {
+            using var stream = source.AsStream();
+            using var collection = new MagickImageCollection(stream);
+            if (collection.Count == 0) return null;
+
+            int width = (int)collection[0].Width;
+            int pageHeight = (int)collection[0].Height;
+            int nPages = collection.Count;
+            int totalHeight = pageHeight * nPages;
+            const int bands = 4; // GIF expanded to RGBA, matching LoadAsync
+
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < nPages; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(collection[i].AnimationDelay);
+            }
+            string animationDelays = sb.ToString();
+
+            int stride = width * bands;
+            var buf = new byte[stride * totalHeight];
+
+            for (int p = 0; p < nPages; p++)
+            {
+                var frame = collection[p];
+                if (!frame.HasAlpha) frame.Alpha(AlphaOption.On);
+                frame.ColorSpace = ColorSpace.sRGB;
+
+                using var pixels = frame.GetPixels();
+                int pageBase = p * pageHeight * stride;
+                for (int y = 0; y < pageHeight; y++)
+                {
+                    var row = pixels.GetArea(0, y, (uint)width, 1)
+                        ?? throw new InvalidOperationException($"GIF streaming: page {p} row {y} returned null");
+                    Array.Copy(row, 0, buf, pageBase + y * stride, stride);
+                }
+            }
+
+            var image = new VipsImage
+            {
+                Width = width,
+                Height = totalHeight,
+                Bands = bands,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = VipsInterpretation.RGB,
+                Coding = VipsCoding.None,
+                XRes = 1.0,
+                YRes = 1.0,
+                PixelsLazy = new Lazy<byte[]>(() => buf),
+            };
+
+            image.Metadata["n-pages"] = nPages.ToString();
+            image.Metadata["page-height"] = pageHeight.ToString();
+            image.Metadata["animation-delays"] = animationDelays;
+
+            // Profile + comment metadata attaches to the first frame.
+            var first = collection[0];
+            var exifBlob = first.GetProfile("exif")?.ToByteArray();
+            var xmpBlob = first.GetProfile("xmp")?.ToByteArray();
+            var iccBlob = first.GetProfile("icc")?.ToByteArray();
+            var commentAttr = first.GetAttribute("comment");
+            if (exifBlob != null) image.MetadataBlobs["exif"] = exifBlob;
+            if (xmpBlob != null) image.MetadataBlobs["xmp"] = xmpBlob;
+            if (iccBlob != null) image.MetadataBlobs["icc"] = iccBlob;
+            if (!string.IsNullOrEmpty(commentAttr)) image.Metadata["comment"] = commentAttr;
+
+            return image;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

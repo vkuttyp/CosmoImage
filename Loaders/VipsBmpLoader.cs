@@ -142,4 +142,60 @@ public static class VipsBmpLoader
             })
         };
     }
+
+    /// <summary>
+    /// Streaming BMP load: feeds the source directly to Magick.NET, decodes
+    /// pixels eagerly, and drops the encoded buffer. Trades the laziness of
+    /// <see cref="LoadAsync"/> for not holding the encoded BMP alongside the
+    /// decoded pixel buffer.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsBmpAsync(source, cancellationToken)) return null;
+        await Task.Yield();
+
+        try
+        {
+            using var stream = source.AsStream();
+            using var img = new MagickImage(stream);
+
+            int width = (int)img.Width;
+            int height = (int)img.Height;
+            int colorBands = img.ColorSpace == ColorSpace.Gray ? 1 : 3;
+            int bands = colorBands + (img.HasAlpha ? 1 : 0);
+            int stride = width * bands;
+            var buf = new byte[stride * height];
+
+            if (bands == 1) img.ColorSpace = ColorSpace.Gray;
+            else if (bands == 3 && img.HasAlpha) img.Alpha(AlphaOption.Off);
+            else if (bands == 4 && !img.HasAlpha) img.Alpha(AlphaOption.On);
+
+            using (var pixels = img.GetPixels())
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var row = pixels.GetArea(0, y, (uint)width, 1)
+                        ?? throw new InvalidOperationException($"BMP streaming: pixel row {y} returned null");
+                    Array.Copy(row, 0, buf, y * stride, stride);
+                }
+            }
+
+            return new VipsImage
+            {
+                Width = width,
+                Height = height,
+                Bands = bands,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = bands <= 2 ? VipsInterpretation.BW : VipsInterpretation.RGB,
+                Coding = VipsCoding.None,
+                XRes = 1.0,
+                YRes = 1.0,
+                PixelsLazy = new Lazy<byte[]>(() => buf),
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

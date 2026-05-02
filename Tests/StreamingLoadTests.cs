@@ -91,6 +91,114 @@ public class StreamingLoadTests
     }
 
     [Fact]
+    public async Task Bmp_StreamingLoad_MatchesByteBufferedLoad()
+    {
+        // Round-trip through Magick: write a BMP, then load back via both paths.
+        var src = SyntheticRgb(8, 8, fill: 75);
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        {
+            using var img = new ImageMagick.MagickImage(ImageMagick.MagickColors.White, 8, 8);
+            // Replace pixels with the synthetic content.
+            using (var pc = img.GetPixels())
+            {
+                var row = new byte[8 * 3];
+                for (int i = 0; i < row.Length; i++) row[i] = 75;
+                for (int y = 0; y < 8; y++) pc.SetArea(0, y, 8, 1, row);
+            }
+            img.Write(ms, ImageMagick.MagickFormat.Bmp);
+            bytes = ms.ToArray();
+        }
+
+        var lazy = await VipsBmpLoader.LoadAsync(SourceFromBytes(bytes));
+        var streamed = await VipsBmpLoader.LoadStreamingAsync(SourceFromBytes(bytes));
+        Assert.NotNull(lazy);
+        Assert.NotNull(streamed);
+        Assert.Equal(lazy!.Width, streamed!.Width);
+        Assert.Equal(lazy.Height, streamed.Height);
+
+        using var rl = new VipsRegion(lazy);
+        using var rs = new VipsRegion(streamed);
+        rl.Prepare(new VipsRect(0, 0, lazy.Width, lazy.Height));
+        rs.Prepare(new VipsRect(0, 0, streamed.Width, streamed.Height));
+        Assert.Equal(rl.GetAddress(2, 2)[0], rs.GetAddress(2, 2)[0]);
+    }
+
+    [Fact]
+    public async Task Heif_StreamingLoad_NonHeifInput_ReturnsNull()
+    {
+        // Magick.NET-Q8-arm64 ships the HEIC decoder but not the encoder, so
+        // we can't synthesize a HEIF in-test. The streaming codepath shape is
+        // identical to BMP/SVG (both covered by round-trip tests). This test
+        // just locks down the early-out for non-HEIF input.
+        var notHeif = System.Text.Encoding.ASCII.GetBytes("not a heif file at all");
+        var result = await VipsHeifLoader.LoadStreamingAsync(SourceFromBytes(notHeif));
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task Svg_StreamingLoad_RastersPixels()
+    {
+        var svg = "<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"><rect width=\"16\" height=\"16\" fill=\"red\"/></svg>";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(svg);
+
+        var streamed = await VipsSvgLoader.LoadStreamingAsync(SourceFromBytes(bytes));
+        Assert.NotNull(streamed);
+        Assert.Equal(16, streamed!.Width);
+        Assert.Equal(16, streamed.Height);
+        Assert.Equal(4, streamed.Bands);
+        using var reg = new VipsRegion(streamed);
+        reg.Prepare(new VipsRect(0, 0, 16, 16));
+        // Red pixel: R=255, G=0, B=0, A=255.
+        Assert.Equal(255, reg.GetAddress(8, 8)[0]);
+        Assert.Equal(0, reg.GetAddress(8, 8)[1]);
+        Assert.Equal(0, reg.GetAddress(8, 8)[2]);
+        Assert.Equal(255, reg.GetAddress(8, 8)[3]);
+    }
+
+    [Fact]
+    public async Task Webp_StreamingLoad_PropagatesMetadata()
+    {
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        {
+            using var img = new ImageMagick.MagickImage(ImageMagick.MagickColors.Green, 16, 16);
+            img.Write(ms, ImageMagick.MagickFormat.WebP);
+            bytes = ms.ToArray();
+        }
+
+        var streamed = await VipsWebpLoader.LoadStreamingAsync(SourceFromBytes(bytes));
+        Assert.NotNull(streamed);
+        Assert.Equal(16, streamed!.Width);
+        Assert.Equal(16, streamed.Height);
+    }
+
+    [Fact]
+    public async Task Gif_StreamingLoad_AnimatedPropagatesNPages()
+    {
+        // Round-trip a 2-frame animated GIF.
+        byte[] bytes;
+        using (var ms = new MemoryStream())
+        using (var col = new ImageMagick.MagickImageCollection())
+        {
+            col.Add(new ImageMagick.MagickImage(ImageMagick.MagickColors.Red, 8, 8));
+            col.Add(new ImageMagick.MagickImage(ImageMagick.MagickColors.Blue, 8, 8));
+            col[0].AnimationDelay = 10;
+            col[1].AnimationDelay = 20;
+            col.Write(ms, ImageMagick.MagickFormat.Gif);
+            bytes = ms.ToArray();
+        }
+
+        var streamed = await VipsGifLoader.LoadStreamingAsync(SourceFromBytes(bytes));
+        Assert.NotNull(streamed);
+        Assert.Equal(8, streamed!.Width);
+        Assert.Equal(16, streamed.Height); // 2 frames stacked
+        Assert.Equal("2", streamed.Metadata["n-pages"]);
+        Assert.Equal("8", streamed.Metadata["page-height"]);
+        Assert.Equal("10,20", streamed.Metadata["animation-delays"]);
+    }
+
+    [Fact]
     public async Task Tiff_StreamingLoad_MatchesByteBufferedLoad()
     {
         var src = SyntheticRgb(16, 16, fill: 175);

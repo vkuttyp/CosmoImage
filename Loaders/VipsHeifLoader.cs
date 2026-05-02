@@ -171,4 +171,68 @@ public static class VipsHeifLoader
 
         return image;
     }
+
+    /// <summary>
+    /// Streaming HEIF/AVIF load: feeds the source directly to Magick.NET,
+    /// decodes pixels eagerly, and drops the encoded buffer. Trades the
+    /// laziness of <see cref="LoadAsync"/> for not holding the encoded
+    /// HEIF/AVIF alongside the decoded pixel buffer. Single-frame only —
+    /// animated HEIC sequences are tracked separately in TODO_PARITY.md.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsHeifAsync(source, cancellationToken)) return null;
+        await Task.Yield();
+
+        try
+        {
+            using var stream = source.AsStream();
+            using var img = new MagickImage(stream);
+
+            int width = (int)img.Width;
+            int height = (int)img.Height;
+            int bands = img.HasAlpha ? 4 : 3;
+            int stride = width * bands;
+            var buf = new byte[stride * height];
+
+            if (bands == 4) img.ColorSpace = ColorSpace.sRGB;
+            else img.Alpha(AlphaOption.Off);
+
+            using (var pixels = img.GetPixels())
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var row = pixels.GetArea(0, y, (uint)width, 1)
+                        ?? throw new InvalidOperationException($"HEIF streaming: pixel row {y} returned null");
+                    Array.Copy(row, 0, buf, y * stride, stride);
+                }
+            }
+
+            var image = new VipsImage
+            {
+                Width = width,
+                Height = height,
+                Bands = bands,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = VipsInterpretation.RGB,
+                Coding = VipsCoding.None,
+                XRes = 1.0,
+                YRes = 1.0,
+                PixelsLazy = new Lazy<byte[]>(() => buf),
+            };
+
+            var exifProfile = img.GetProfile("exif");
+            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
+            var xmpProfile = img.GetProfile("xmp");
+            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
+            var iccProfile = img.GetColorProfile();
+            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
+
+            return image;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

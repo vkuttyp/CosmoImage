@@ -138,20 +138,20 @@ Each is significant work; defer until a concrete use case demands it.
   use plain `new byte[]` — pool ownership across an image lifetime needs
   explicit disposal semantics on `VipsImage`, which is a separate design call.
 
-- 🟡 **Streaming load (no full-buffer-into-memory)** — partial.
+- 🟢 **Streaming load (no full-buffer-into-memory)** — mainline.
 
   **Shipped**:
     - `VipsSourceStream`: forward-only `Stream` adapter over `IVipsSource`.
       `IVipsSource.AsStream()` extension exposes it.
-    - `LoadStreamingAsync` opt-in path on `VipsJpegLoader`, `VipsTiffLoader`,
-      and `VipsMagickWrapLoader` (which covers TGA/QOI/PBM-PAM via
-      per-format dispatch).
+    - `LoadStreamingAsync` opt-in path on every Stream-capable loader:
+      `VipsJpegLoader`, `VipsTiffLoader`, `VipsBmpLoader`, `VipsWebpLoader`
+      (animated), `VipsGifLoader` (animated), `VipsHeifLoader` (HEIF/AVIF),
+      `VipsSvgLoader`, plus `VipsMagickWrapLoader` (TGA/QOI/PBM-PAM).
     - The streaming variant decodes pixels eagerly and drops the encoded
       buffer immediately — trades laziness for not holding the encoded
-      file alongside the decoded pixel buffer (a 50 MB TIFF that decodes
-      to 200 MB of pixels keeps just the 200 MB instead of 250 MB). Use
-      when the caller knows pixels will be materialized; pure-metadata
-      callers stick with `LoadHeaderAsync`.
+      file alongside the decoded pixel buffer. Use when the caller knows
+      pixels will be materialized; pure-metadata callers stick with
+      `LoadHeaderAsync`.
 
   **Remaining** — gated on decoder API rather than loader work:
     - PNG: `StbImageSharp.ImageResult.FromMemory` takes `byte[]` only.
@@ -160,9 +160,6 @@ Each is significant work; defer until a concrete use case demands it.
       unlocks streaming PNG.
     - PDF: `Docnet.Core` takes `byte[]` only. Same shape — gated on the
       underlying decoder.
-    - WebP/HEIF/AVIF/GIF/SVG/BMP: route through Magick.NET which accepts
-      `Stream`; would mirror the TIFF streaming pattern. Each is ~30 lines
-      of mechanical work.
 
 - [x] ~~**Unified `VipsFields` metadata API**~~. `Core/VipsFields.cs` adds
   `GetInt/GetDouble/GetDoubleArray/GetBlob` + matching setters, plus

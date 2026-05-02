@@ -220,4 +220,95 @@ public static class VipsWebpLoader
 
         return image;
     }
+
+    /// <summary>
+    /// Streaming WebP load: feeds the source directly to Magick.NET, decodes
+    /// all frames eagerly into the same tall buffer (n-pages × page-height
+    /// stack used by animated formats here), and drops the encoded buffer.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+    {
+        if (!await IsWebpAsync(source, cancellationToken)) return null;
+        await Task.Yield();
+
+        try
+        {
+            using var stream = source.AsStream();
+            using var collection = new MagickImageCollection(stream);
+            if (collection.Count == 0) return null;
+
+            int width = (int)collection[0].Width;
+            int pageHeight = (int)collection[0].Height;
+            int bands = collection[0].HasAlpha ? 4 : 3;
+            int nPages = collection.Count;
+            int totalHeight = pageHeight * nPages;
+
+            int stride = width * bands;
+            var buf = new byte[stride * totalHeight];
+
+            string? animationDelays = null;
+            if (nPages > 1)
+            {
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < nPages; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append(collection[i].AnimationDelay);
+                }
+                animationDelays = sb.ToString();
+            }
+
+            for (int p = 0; p < nPages; p++)
+            {
+                var frame = collection[p];
+                if (bands == 4) frame.ColorSpace = ColorSpace.sRGB;
+                else frame.Alpha(AlphaOption.Off);
+
+                using var pixels = frame.GetPixels();
+                int pageBase = p * pageHeight * stride;
+                for (int y = 0; y < pageHeight; y++)
+                {
+                    var row = pixels.GetArea(0, y, (uint)width, 1)
+                        ?? throw new InvalidOperationException($"WebP streaming: page {p} row {y} returned null");
+                    Array.Copy(row, 0, buf, pageBase + y * stride, stride);
+                }
+            }
+
+            var image = new VipsImage
+            {
+                Width = width,
+                Height = totalHeight,
+                Bands = bands,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = VipsInterpretation.RGB,
+                Coding = VipsCoding.None,
+                XRes = 1.0,
+                YRes = 1.0,
+                PixelsLazy = new Lazy<byte[]>(() => buf),
+            };
+
+            if (nPages > 1)
+            {
+                image.Metadata["n-pages"] = nPages.ToString();
+                image.Metadata["page-height"] = pageHeight.ToString();
+                if (animationDelays != null)
+                    image.Metadata["animation-delays"] = animationDelays;
+            }
+
+            // Profiles attach to the first frame.
+            var first = collection[0];
+            var exifProfile = first.GetProfile("exif");
+            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
+            var xmpProfile = first.GetProfile("xmp");
+            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
+            var iccProfile = first.GetColorProfile();
+            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
+
+            return image;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
