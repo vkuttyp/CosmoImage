@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Numerics;
 
@@ -58,6 +59,11 @@ public class VipsLinear : VipsOperation
 
         if (inRegion.Prepare(r) != 0) return -1;
 
+        // Float pipeline: no clamp, full-precision linear transform.
+        // Output format matches input — Build copies BandFormat unchanged.
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, @in, A, B, r);
+
         int bands = @in.Bands;
         int totalBytes = r.Width * bands;
         bool allSame = A.Length == 1 && B.Length == 1;
@@ -101,6 +107,29 @@ public class VipsLinear : VipsOperation
             }
         }
 
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsImage @in, double[] A, double[] B, VipsRect r)
+    {
+        int bands = @in.Bands;
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inAddr = inRegion.GetAddress(r.Left, r.Top + y);
+            var outAddr = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    int off = (x * bands + bnd) * 4;
+                    float val = BinaryPrimitives.ReadSingleLittleEndian(inAddr.Slice(off, 4));
+                    double a = A.Length > bnd ? A[bnd] : A[0];
+                    double bb = B.Length > bnd ? B[bnd] : B[0];
+                    float res = (float)(val * a + bb);
+                    BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), res);
+                }
+            }
+        }
         return 0;
     }
 }

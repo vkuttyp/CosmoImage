@@ -234,6 +234,18 @@ public static class VipsImageExtensions
     public static double Max(this VipsImage image) => VipsImageOps.Max(image);
     public static double Deviate(this VipsImage image) => VipsImageOps.Deviate(image);
 
+    // --- Cast / Format conversion ---
+
+    /// <summary>Numeric band-format conversion. UChar↔Float supported.</summary>
+    public static VipsImage Cast(this VipsImage image, VipsBandFormat target)
+        => VipsImageOps.Cast(image, target);
+
+    /// <summary>Convert to Float band format (no auto-normalization).</summary>
+    public static VipsImage CastFloat(this VipsImage image) => VipsImageOps.CastFloat(image);
+
+    /// <summary>Convert to UChar band format (clamps + rounds).</summary>
+    public static VipsImage CastUChar(this VipsImage image) => VipsImageOps.CastUChar(image);
+
     // --- Math / Boolean / Relational ---
 
     public static VipsImage Abs(this VipsImage image) => VipsImageOps.Abs(image);

@@ -82,11 +82,19 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
 
 Each is significant work; defer until a concrete use case demands it.
 
-- [ ] **Float-format ops throughout**. The big one. Every op (Resize, Conv,
-  Linear, Affine, Composite, …) needs a Float band-format code path. Required
-  for true high-precision linear-light processing. **Cost: months. Current
-  workaround: UChar LUT-based `Linearize`/`Delinearize` covers the common
-  resize-without-halos case.**
+- 🟡 **Float-format ops throughout** — partial. Infrastructure shipped:
+    - `VipsCast` (UChar↔Float, no auto-normalization, identity pass-through)
+    - `VipsLinear` Float code path (no clamp, full-precision a·x+b)
+    - `VipsConv1D` Float code path (gives `GaussBlur` Float for free)
+    - Fluent `image.CastFloat()` / `image.CastUChar()`
+
+  **Remaining**: each existing op (Invert, Recomb, Resize, Resize1D, Affine,
+  Conv 2D, Composite, Morph, Rank, Maplut, Linearize/Delinearize, Math suite,
+  HistFind, FwFft/InvFft, Glow/Vignette/Effects) needs its own Float branch
+  added following the dispatch pattern in `VipsLinear.Generate` /
+  `VipsConv1D.Generate`. Each op is a small, independent change; the work
+  is breadth-first not depth-first. Estimate: a few days per ~5 ops once
+  the pattern is internalised.
 
 - [ ] **Proper PCS-based ICC color management**. Needs a Color Management
   Module (LittleCMS) native binding. Current `IccTransform` is a one-shot

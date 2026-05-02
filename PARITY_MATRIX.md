@@ -174,7 +174,7 @@ Items where ImageSharp differs and we don't currently match:
 | :--- | :---: | :--- |
 | `Image<TPixel>` strongly-typed pixel access | 🟡 | `TypedImage<TPixel>` wraps a materialized `byte[]` for typed reads/writes (`L8`/`La16`/`Rgb24`/`Rgba32`); ops still flow through untyped `VipsImage`. `RowSpan(y)` reinterprets via `MemoryMarshal.Cast` for zero-copy tight loops. Float pixel structs land with Tier-4 Float-throughout |
 | `Mutate(action)` block-scoped op chaining | ✅ | `image.Mutate(im => im.Resize(0.5).Sepia())` — wraps the fluent extensions |
-| Float-format pixel ops throughout | ❌ | Most ops are UChar-only; would require every op to gain a Float code path |
+| Float-format pixel ops throughout | 🟡 | `VipsCast` (UChar↔Float), `VipsLinear`, and `VipsConv1D` (which carries `GaussBlur`) have full Float code paths. Pattern is established (per-op band-format dispatch); remaining ops still need their Float branches added |
 | `MemoryAllocator` (caller-supplied buffer pool) | 🟡 | `IVipsAllocator` plumbed through `VipsRegion` and `OrderedStripSink`; default `ArrayPoolAllocator` wraps `ArrayPool<byte>.Shared`. Long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) intentionally bypass the pool — pool ownership across an image lifetime is harder to reason about |
 | TGA / QOI / PBM formats | ❌ | Niche; rarely needed |
 
@@ -195,7 +195,7 @@ Items where we match or exceed ImageSharp:
 
 | Item | Effort | Why deferred |
 | :--- | :--- | :--- |
-| Float-precision ops throughout | Months | Every op (Resize/Conv/Linear/Affine/etc.) needs a parallel Float code path; current Linearize/Delinearize covers the 90% case via UChar LUT |
+| Float-precision ops throughout | Multi-week (per-op work) | Infrastructure shipped: `VipsCast` keystone, dispatch pattern in `VipsLinear` and `VipsConv1D` (→ `GaussBlur`). Each remaining op (Invert, Recomb, Resize, Affine, Conv 2D, Composite, Morph, Maplut, Linearize, Math, etc.) needs its own Float branch following the same pattern |
 | Proper CMM-based ICC color management | Significant | Needs a LittleCMS native binding; current `IccTransform` uses Magick.NET as a one-shot transform |
 | `MemoryAllocator` for lazy materializers | Moderate | Transient buffers (`VipsRegion`, `OrderedStripSink`) now pool through `IVipsAllocator`. Extending to `MemorySink.Pixels` and loader `PixelsLazy` requires explicit ownership/disposal semantics on `VipsImage` — design discussion before code |
 | Generic op signatures (`Resize<TPixel>`, etc.) | Significant | The `TypedImage<TPixel>` access layer is shipped; making *every* op generic over pixel type is the remaining piece. Doesn't translate cleanly to the lazy-pipeline model where ops produce new images, so likely better delivered as a typed parallel API rather than replacing the existing one |
@@ -206,4 +206,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 96 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 103 tests pass.*

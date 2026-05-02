@@ -757,6 +757,21 @@ public static partial class VipsImageOps
         return Run(new VipsMaplut { In = input, Lut = lut });
     }
 
+    // From Operations/Misc/VipsCast.cs
+    /// <summary>
+    /// Numeric band-format conversion. UChar↔Float currently supported with
+    /// no auto-normalization (UChar 100 → Float 100.0). Identity casts return
+    /// the input unchanged. Mirrors libvips <c>vips_cast</c>.
+    /// </summary>
+    public static VipsImage Cast(VipsImage input, VipsBandFormat target)
+    {
+        if (input.BandFormat == target) return input;
+        return Run(new VipsCast { In = input, TargetFormat = target });
+    }
+
+    public static VipsImage CastFloat(VipsImage input) => Cast(input, VipsBandFormat.Float);
+    public static VipsImage CastUChar(VipsImage input) => Cast(input, VipsBandFormat.UChar);
+
     // From Operations/Misc/VipsMath.cs
     /// <summary>
     /// Pointwise math op. Treats UChar input as <c>x = byte/255</c>; trig

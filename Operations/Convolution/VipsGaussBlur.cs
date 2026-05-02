@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace CosmoImage.Operations.Convolution;
@@ -66,6 +67,12 @@ public class VipsConv1D : VipsOperation
         if (inRegion.Prepare(clippedRect) != 0) return -1;
 
         int bands = @in.Bands;
+
+        // Float input: read 4 bytes per band, accumulate, write 4 bytes back
+        // unclamped — Float pipelines preserve out-of-[0,255] intermediates.
+        if (@in.BandFormat == VipsBandFormat.Float)
+            return GenerateFloat(inRegion, outRegion, @in, kernel, vertical, r, kSize, kOffset, bands);
+
         int pelSize = @in.SizeOfPel;
 
         for (int y = 0; y < r.Height; y++)
@@ -92,6 +99,34 @@ public class VipsConv1D : VipsOperation
             }
         }
 
+        return 0;
+    }
+
+    private static int GenerateFloat(VipsRegion inRegion, VipsRegion outRegion, VipsImage @in, double[] kernel, bool vertical, VipsRect r, int kSize, int kOffset, int bands)
+    {
+        for (int y = 0; y < r.Height; y++)
+        {
+            var outLine = outRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                for (int bnd = 0; bnd < bands; bnd++)
+                {
+                    double sum = 0;
+                    for (int i = 0; i < kSize; i++)
+                    {
+                        int ix = vertical ? (r.Left + x) : (r.Left + x + i - kOffset);
+                        int iy = vertical ? (r.Top + y + i - kOffset) : (r.Top + y);
+                        if (ix >= 0 && ix < @in.Width && iy >= 0 && iy < @in.Height)
+                        {
+                            var inPel = inRegion.GetAddress(ix, iy);
+                            float v = BinaryPrimitives.ReadSingleLittleEndian(inPel.Slice(bnd * 4, 4));
+                            sum += v * kernel[i];
+                        }
+                    }
+                    BinaryPrimitives.WriteSingleLittleEndian(outLine.Slice((x * bands + bnd) * 4, 4), (float)sum);
+                }
+            }
+        }
         return 0;
     }
 }
