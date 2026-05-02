@@ -216,12 +216,13 @@ Each is significant work; defer until a concrete use case demands it.
   well-known shortcuts (`GetOrientation`, `GetComment`, `GetAnimationDelays`,
   `GetExif`, `GetXmp`, `GetIccProfile`).
 
-- [ ] **Drop more `Magick.NET` usage**. Magick.NET-Q8 is the only native
-  dependency left. Every loader/saver could in principle use a format-specific
-  managed library (JpegLibrary already does for JPEG, StbImageSharp for PNG).
-  WebP/HEIF/AVIF/TIFF/SVG/BMP/GIF currently route through Magick. Replacing
-  those would shrink the native footprint but is ~weeks of work and trades
-  one large dep for several smaller ones.
+- 🟡 **Drop more `Magick.NET` usage** — incremental. First format dropped:
+  PBM/PGM/PPM (the standard P1-P6 Netpbm variants) are now pure-C# in
+  `VipsPnmLoader` and `VipsPnmSaver`. PAM (P7) and 16-bit-per-sample
+  variants still go through Magick because the parser inflation isn't
+  worth it for the rare formats. Other formats still on Magick:
+  WebP / HEIF / AVIF / TIFF / SVG / BMP / GIF / TGA / QOI. Each is a
+  separate decoder port; expect days-to-weeks per format.
 
 ---
 

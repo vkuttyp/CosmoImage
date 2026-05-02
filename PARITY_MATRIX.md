@@ -44,7 +44,8 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | CSV / Matrix / Matlab | ❌ | ❌ | n/a | — |
 | TGA | ✅ | ✅ | n/a | EXIF/XMP/ICC via Magick |
 | QOI | ✅ | ✅ | n/a | — |
-| PBM / PGM / PPM / PAM | ✅ | ✅ | n/a | — |
+| PBM / PGM / PPM | ✅ pure-C# | ✅ pure-C# | n/a | first format dropped from Magick.NET dependency |
+| PAM | ✅ via Magick | ✅ via Magick | n/a | — |
 | CSV / Matrix (numeric text) | ✅ | ✅ | n/a | — |
 
 ---
@@ -209,4 +210,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 180 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 190 tests pass.*
