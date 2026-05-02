@@ -127,10 +127,10 @@ We have only a few corners of it.
 | `colourspace` (graph dispatcher) | 🟡 | `Colourspace` covers a subset of target spaces |
 | `sRGB2scRGB` / `scRGB2sRGB` (IEC 61966-2-1 transfer) | ✅ | `Linearize` / `Delinearize` (Float and UChar paths) |
 | `scRGB2BW` | 🟡 | `Greyscale` (RGB-space, not scRGB) |
-| `XYZ2Lab`, `Lab2XYZ`, `XYZ2Yxy`, `Yxy2XYZ` | 🟡 | `Lab2XYZ` ✅ and `XYZ2Lab` ✅ (D65); `Yxy` pair still missing |
+| `XYZ2Lab`, `Lab2XYZ`, `XYZ2Yxy`, `Yxy2XYZ` | ✅ | `Lab2XYZ` / `XYZ2Lab` (D65) and `XYZ2Yxy` / `Yxy2XYZ` chromaticity coordinates |
 | `Lab2LCh`, `LCh2Lab`, `LCh2UCS`, `UCS2LCh` | 🟡 | `Lab2LCh` ✅ and `LCh2Lab` ✅; `UCS` pair still missing |
-| `Lab2LabQ` / `LabQ2Lab` (8-bit packed Lab) | ❌ | |
-| `Lab2LabS` / `LabS2Lab` (16-bit Lab) | ❌ | |
+| `Lab2LabQ` / `LabQ2Lab` (8-bit packed Lab) | ✅ | libvips' 4-byte LabQ layout: 10-bit L + 11-bit signed a + 11-bit signed b + extension byte |
+| `Lab2LabS` / `LabS2Lab` (16-bit Lab) | ✅ | 3-band Short LabS — high-precision intermediate (L · 327.67, a/b · 256) |
 | `LabQ2sRGB`, `LabQ2LabS`, `LabS2LabQ` | ❌ | |
 | `XYZ2Oklab`, `Oklab2XYZ`, `Oklab2Oklch`, `Oklch2Oklab` | ❌ | OkLab perceptual space |
 | `sRGB2HSV` / `HSV2sRGB` | 🟡 | Internal use only inside `Lightness` |

@@ -146,7 +146,11 @@ sRGB ↔ scRGB ↔ Lab ↔ LabQ ↔ LabS ↔ LCh ↔ UCS ↔ XYZ ↔ Yxy ↔ HSV
 sRGB↔linear and a few RGB-space matrix manipulations.
 
 - [ ] XYZ ↔ Lab, Lab ↔ LCh, LCh ↔ UCS — the CIE colourimetry chain.
-- [ ] Lab ↔ LabQ (8-bit packed), Lab ↔ LabS (16-bit signed).
+- [x] ~~Lab ↔ LabQ~~ (round 34) — libvips 4-byte layout
+  (10-bit L + 11-bit signed a + 11-bit signed b + extension byte).
+- [x] ~~Lab ↔ LabS~~ (round 34) — 3-band Short
+  high-precision intermediate (L · 327.67, a/b · 256).
+- [x] ~~XYZ ↔ Yxy~~ (round 34) — chromaticity coordinates.
 - [ ] XYZ ↔ Oklab, Oklab ↔ Oklch — Björn Ottosson's perceptual space.
 - [ ] sRGB ↔ HSV (we use HSV internally for `Lightness` but don't
   expose the converters).

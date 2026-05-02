@@ -452,6 +452,24 @@ public static class VipsImageExtensions
     /// <summary>Per-pixel CIEDE2000 ΔE against another Lab image.</summary>
     public static VipsImage DE2000(this VipsImage image, VipsImage other) => VipsImageOps.DE2000(image, other);
 
+    /// <summary>XYZ → Yxy chromaticity (Y, x, y).</summary>
+    public static VipsImage XYZ2Yxy(this VipsImage image) => VipsImageOps.XYZ2Yxy(image);
+
+    /// <summary>Yxy → XYZ.</summary>
+    public static VipsImage Yxy2XYZ(this VipsImage image) => VipsImageOps.Yxy2XYZ(image);
+
+    /// <summary>Float Lab → libvips 4-byte LabQ.</summary>
+    public static VipsImage Lab2LabQ(this VipsImage image) => VipsImageOps.Lab2LabQ(image);
+
+    /// <summary>libvips 4-byte LabQ → Float Lab.</summary>
+    public static VipsImage LabQ2Lab(this VipsImage image) => VipsImageOps.LabQ2Lab(image);
+
+    /// <summary>Float Lab → 16-bit signed-short LabS.</summary>
+    public static VipsImage Lab2LabS(this VipsImage image) => VipsImageOps.Lab2LabS(image);
+
+    /// <summary>16-bit signed-short LabS → Float Lab.</summary>
+    public static VipsImage LabS2Lab(this VipsImage image) => VipsImageOps.LabS2Lab(image);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

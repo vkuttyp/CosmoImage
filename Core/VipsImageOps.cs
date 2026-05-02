@@ -1106,6 +1106,27 @@ public static partial class VipsImageOps
     public static double DE2000(double L1, double a1, double b1, double L2, double a2, double b2)
         => VipsdE2000.ComputeDE2000(L1, a1, b1, L2, a2, b2);
 
+    // From Operations/Color/VipsXYZYxy.cs
+    /// <summary>XYZ → Yxy chromaticity coordinates (Y, x, y).</summary>
+    public static VipsImage XYZ2Yxy(VipsImage input) => Run(new VipsXYZ2Yxy { In = input });
+
+    /// <summary>Yxy chromaticity → XYZ.</summary>
+    public static VipsImage Yxy2XYZ(VipsImage input) => Run(new VipsYxy2XYZ { In = input });
+
+    // From Operations/Color/VipsLabQ.cs
+    /// <summary>Float Lab → libvips' 4-byte packed LabQ encoding.</summary>
+    public static VipsImage Lab2LabQ(VipsImage input) => Run(new VipsLab2LabQ { In = input });
+
+    /// <summary>libvips 4-byte LabQ → Float Lab.</summary>
+    public static VipsImage LabQ2Lab(VipsImage input) => Run(new VipsLabQ2Lab { In = input });
+
+    // From Operations/Color/VipsLabS.cs
+    /// <summary>Float Lab → 16-bit signed-short LabS (high-precision intermediate format).</summary>
+    public static VipsImage Lab2LabS(VipsImage input) => Run(new VipsLab2LabS { In = input });
+
+    /// <summary>16-bit signed-short LabS → Float Lab.</summary>
+    public static VipsImage LabS2Lab(VipsImage input) => Run(new VipsLabS2Lab { In = input });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
