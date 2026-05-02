@@ -19,9 +19,11 @@ permissive-only dependency stack.
   thumbnails don't double-rotate.
 - **Permissive licensing only** — no Six Labors split-license dependency.
 
-For a feature-by-feature comparison see
-[`PARITY_MATRIX.md`](./PARITY_MATRIX.md). For the outstanding work list see
-[`TODO_PARITY.md`](./TODO_PARITY.md).
+For honest feature-by-feature comparisons against the two parents see
+[`PARITY_MATRIX.md`](./PARITY_MATRIX.md) (vs upstream **libvips** —
+the architecture parent) and [`IMAGESHARP_PARITY.md`](./IMAGESHARP_PARITY.md)
+(vs **SixLabors.ImageSharp** — the surface-area parent). For the
+outstanding work list see [`TODO_PARITY.md`](./TODO_PARITY.md).
 
 ---
 
@@ -445,7 +447,7 @@ dotnet build CosmoImage.csproj
 dotnet test  Tests/CosmoImage.Tests.csproj
 ```
 
-Target framework: **net10.0**. 54 tests cover all loaders, savers, and core
+Target framework: **net10.0**. 233 tests cover loaders, savers, and core
 ops.
 
 ---
@@ -472,23 +474,24 @@ commercial use.
 
 ## What's missing
 
-The library covers the mainline image-service, document-processing, and
-photo-editing workloads end-to-end. Remaining gaps fall into four
-categories:
+CosmoImage covers the mainline image-service, document-processing, and
+photo-editing workloads end-to-end (load → orient → resize → composite
+→ save with full Float-throughout colour-correct intermediates). The
+honest gap against either parent is *much* bigger than that:
 
-- **Architectural lifts** — `Image<TPixel>` strong typing, Float-format
-  ops throughout, a proper PCS-based ICC color management module, caller-
-  supplied `MemoryAllocator` hooks.
-- **Niche formats** — JPEG XL/JPEG 2000 pixel decode, OpenEXR / Radiance
-  HDR, FITS / NIfTI, TGA / QOI / PBM.
-- **Niche features** — animated AVIF / HEIC sequences, BokehBlur, TIFF
-  pyramidal output (`dzsave`), proper glyph shaping for `Text`.
-- **Quality-of-life** — pointwise math/boolean/relational ops, stats
-  (`avg`/`min`/`max`), inverse FFT, morphology compositions
-  (open/close/rank).
+- vs **libvips** (300+ ops across 12 subsystems): whole subsystems
+  missing (mosaicing/, create/), a severe colour-management graph
+  gap (only sRGB↔linear, missing Lab/Oklab/CMYK/etc.), many
+  band-manipulation ops, several niche format codecs that need native
+  bindings (OpenEXR, JPEG XL/2K, OpenSlide, dcraw, DICOM).
+- vs **ImageSharp** (~25 pixel structs, full vector-graphics drawing,
+  typed metadata profiles): pixel-format zoo (4 of 25 shipped), no
+  generic op surface, no vector-graphics drawing layer (paths,
+  brushes, gradients, glyph shaping), raw-bytes-only metadata.
 
-See [`TODO_PARITY.md`](./TODO_PARITY.md) for the full prioritized list and
-[`PARITY_MATRIX.md`](./PARITY_MATRIX.md) for the detailed coverage table.
+See [`PARITY_MATRIX.md`](./PARITY_MATRIX.md) and
+[`IMAGESHARP_PARITY.md`](./IMAGESHARP_PARITY.md) for honest matrices,
+and [`TODO_PARITY.md`](./TODO_PARITY.md) for the actionable work map.
 
 ---
 
