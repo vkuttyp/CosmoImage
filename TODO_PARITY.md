@@ -59,8 +59,17 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
   (`VipsTgaLoader`/`VipsTgaSaver`, `VipsQoi*`, `VipsPnm*` covering
   PBM/PGM/PPM/PAM with Auto variant detection). TGA passes a format hint
   since it has no magic bytes.
-- [ ] **OpenEXR / Radiance HDR**. Scientific HDR formats; would need
-  Float-format ops first to be meaningful.
+- [x] ~~**Radiance HDR (`.hdr`)**~~ shipped. Pure C# decoder + encoder
+  (no Magick dependency); 3-band Float output in linear-light RGB,
+  Greg Ward RGBE encoding with new-style per-component RLE. Float-throughout
+  (rounds 5-8) is what made this loadable end-to-end. Header lines like
+  `EXPOSURE=` round-trip via `Metadata["hdr:exposure"]`.
+
+- [ ] **OpenEXR**. Same HDR niche as Radiance HDR but with EXR-specific
+  multi-resolution / multi-channel layout. Now unblocked by the
+  Float-throughout work, but the EXR codec itself is a substantial
+  project — half-precision floats, multiple compression schemes, tile
+  layout. Defer until concrete demand.
 - [ ] **FITS / NIfTI**. Scientific imaging.
 - [ ] **Animated AVIF / HEIC sequences**. Encoder-dependent in libheif;
   Magick.NET surface is limited.

@@ -38,7 +38,8 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | SVG | ✅ | ✅ rasterize | n/a | — |
 | JPEG XL | 🟡 header stub | ❌ | n/a | — (decoder unavailable in managed) |
 | JPEG 2000 | 🟡 header only | ❌ | n/a | — |
-| OpenEXR / Radiance HDR / FITS / NIfTI | ❌ | ❌ | n/a | — |
+| Radiance HDR (`.hdr`) | ✅ | ✅ | n/a | header lines surfaced as `hdr:*` metadata |
+| OpenEXR / FITS / NIfTI | ❌ | ❌ | n/a | — |
 | CSV / Matrix / Matlab | ❌ | ❌ | n/a | — |
 | TGA | ✅ | ✅ | n/a | EXIF/XMP/ICC via Magick |
 | QOI | ✅ | ✅ | n/a | — |
@@ -207,4 +208,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 151 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 158 tests pass.*

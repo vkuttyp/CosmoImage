@@ -363,4 +363,8 @@ public static class VipsImageExtensions
         CosmoImage.Savers.VipsDzTileFormat format = CosmoImage.Savers.VipsDzTileFormat.Jpeg,
         int jpegQuality = 85)
         => VipsImageOps.SaveDeepZoomAsync(image, basePath, tileSize, overlap, format, jpegQuality);
+
+    /// <summary>Save as Radiance HDR. 3-band image; UChar auto-cast to Float.</summary>
+    public static Task SaveHdrAsync(this VipsImage image, PipeWriter writer)
+        => VipsImageOps.SaveHdrAsync(image, writer);
 }

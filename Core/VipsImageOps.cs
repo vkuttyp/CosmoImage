@@ -893,4 +893,12 @@ public static partial class VipsImageOps
         VipsDzTileFormat format = VipsDzTileFormat.Jpeg,
         int jpegQuality = 85)
         => VipsDzSaver.SaveAsync(image, basePath, tileSize, overlap, format, jpegQuality);
+
+    // From Savers/VipsHdrSaver.cs
+    /// <summary>
+    /// Save as Radiance HDR (<c>.hdr</c>). 3-band Float input recommended;
+    /// UChar input is auto-cast to Float. RLE-compressed scanlines.
+    /// </summary>
+    public static Task SaveHdrAsync(VipsImage image, PipeWriter writer)
+        => VipsHdrSaver.SaveAsync(image, writer);
 }
