@@ -69,8 +69,13 @@ Targeted gaps. Each affects a specific workflow that most users never hit.
 - [x] ~~**TIFF pyramidal write**~~. `SaveTiffAsync(image, writer, pyramid:true)`
   emits Magick's `Ptif`. OME-TIFF and Tiled-TIFF (with explicit tile geometry
   control) still pending — those are deeper libtiff knobs.
-- [ ] **`dzsave` (Deep Zoom)**. IIIF / OpenSeadragon-compatible tiled output.
-  libvips has this; non-trivial to port.
+- [x] ~~**`dzsave` (Deep Zoom)**~~ shipped. `VipsDzSaver.SaveAsync(image, basePath, …)`
+  emits the Microsoft DZI 2008 layout (`{basePath}.dzi` + `{basePath}_files/`).
+  Supports JPEG and PNG tiles, configurable tile size and overlap.
+  OpenSeadragon-compatible. Other layouts (Zoomify, IIIF) deferred —
+  DZI is the most widely-supported and porting the full layout matrix is
+  its own project. Unlike other savers this writes to a directory rather
+  than a `PipeWriter`, so the entry point takes a base path string.
 - [x] ~~**CSV / Matrix data loaders**~~. `VipsCsvLoader` and `VipsMatrixLoader`
   parse whitespace/comma-separated numeric grids; comments + header rows
   supported. Matlab `.mat` parsing still pending (binary format, separate

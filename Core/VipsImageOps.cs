@@ -876,4 +876,21 @@ public static partial class VipsImageOps
     /// </summary>
     public static Task SavePnmAsync(VipsImage image, PipeWriter writer, VipsPnmVariant variant = VipsPnmVariant.Auto)
         => VipsPnmSaver.SaveAsync(image, writer, variant);
+
+    // From Savers/VipsDzSaver.cs
+    /// <summary>
+    /// Save as a Deep Zoom Image (DZI) pyramid. Output is a directory tree
+    /// rooted at <paramref name="basePath"/> — <c>{basePath}.dzi</c> for the
+    /// XML descriptor and <c>{basePath}_files/</c> for per-level tile
+    /// subdirectories. Compatible with OpenSeadragon and other viewers
+    /// implementing the Microsoft DZI 2008 schema.
+    /// </summary>
+    public static Task SaveDeepZoomAsync(
+        VipsImage image,
+        string basePath,
+        int tileSize = 256,
+        int overlap = 1,
+        VipsDzTileFormat format = VipsDzTileFormat.Jpeg,
+        int jpegQuality = 85)
+        => VipsDzSaver.SaveAsync(image, basePath, tileSize, overlap, format, jpegQuality);
 }

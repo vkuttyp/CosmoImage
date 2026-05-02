@@ -349,4 +349,18 @@ public static class VipsImageExtensions
     /// <summary>Save as Netpbm (PBM/PGM/PPM/PAM). Auto picks by band count.</summary>
     public static Task SavePnmAsync(this VipsImage image, PipeWriter writer, CosmoImage.Savers.VipsPnmVariant variant = CosmoImage.Savers.VipsPnmVariant.Auto)
         => VipsImageOps.SavePnmAsync(image, writer, variant);
+
+    /// <summary>
+    /// Save as a Deep Zoom Image (DZI) pyramid — directory tree at
+    /// <paramref name="basePath"/>. <c>basePath.dzi</c> is the descriptor;
+    /// <c>basePath_files/</c> holds per-level tile subdirectories.
+    /// </summary>
+    public static Task SaveDeepZoomAsync(
+        this VipsImage image,
+        string basePath,
+        int tileSize = 256,
+        int overlap = 1,
+        CosmoImage.Savers.VipsDzTileFormat format = CosmoImage.Savers.VipsDzTileFormat.Jpeg,
+        int jpegQuality = 85)
+        => VipsImageOps.SaveDeepZoomAsync(image, basePath, tileSize, overlap, format, jpegQuality);
 }

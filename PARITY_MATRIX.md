@@ -60,7 +60,8 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 | APNG | ✅ | ✅ animated | profiles + Comment on first frame |
 | TGA / QOI / PBM-PAM | ✅ | n/a | EXIF/XMP/ICC via Magick (where supported) |
 | Pyramidal TIFF (Ptif) | ✅ via `SaveTiffAsync(pyramid:true)` | — | — |
-| OME-TIFF / dzsave (Deep Zoom) | ❌ | — | — |
+| dzsave (Deep Zoom / DZI) | ✅ | n/a | Microsoft DZI 2008 schema; OpenSeadragon-compatible |
+| OME-TIFF | ❌ | — | — |
 
 ---
 
@@ -206,4 +207,4 @@ Items where we match or exceed ImageSharp:
 
 *Last updated: 2026-05-02. Numbers in this matrix track the source tree
 under `Core/`, `Loaders/`, `Savers/`, and `Operations/{Geometric,Color,
-Effects,Convolution,Drawing,Analysis,Misc}/`. 144 tests pass.*
+Effects,Convolution,Drawing,Analysis,Misc}/`. 151 tests pass.*
