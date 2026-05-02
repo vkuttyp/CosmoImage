@@ -306,6 +306,27 @@ public static class VipsImageExtensions
         return VipsImageOps.Bandjoin(all);
     }
 
+    /// <summary>Composite alpha-bearing image onto background, drop alpha.</summary>
+    public static VipsImage Flatten(this VipsImage image, params double[] background)
+        => VipsImageOps.Flatten(image, background.Length == 0 ? null : background);
+
+    /// <summary>Add an opaque alpha channel; pass-through if alpha already present.</summary>
+    public static VipsImage AddAlpha(this VipsImage image, double alpha = 255.0)
+        => VipsImageOps.AddAlpha(image, alpha);
+
+    /// <summary>Place into a larger canvas with background fill (compass-anchored).</summary>
+    public static VipsImage Pad(this VipsImage image, int width, int height,
+        double[]? background = null, VipsCompass position = VipsCompass.Centre)
+        => VipsImageOps.Pad(image, width, height, background, position);
+
+    /// <summary>Composite onto background colour at same dimensions; alpha kept and set opaque.</summary>
+    public static VipsImage BackgroundColor(this VipsImage image, params double[] background)
+        => VipsImageOps.BackgroundColor(image, background);
+
+    /// <summary>Contrast-limited adaptive histogram equalization (CLAHE).</summary>
+    public static VipsImage HistLocal(this VipsImage image, int tileGridSize = 8, double clipLimit = 3.0)
+        => VipsImageOps.HistLocal(image, tileGridSize, clipLimit);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

@@ -833,6 +833,68 @@ public static partial class VipsImageOps
     public static VipsImage Unpremultiply(VipsImage input)
         => Run(new VipsPremultiply { In = input, Mode = VipsAlphaMode.Unpremultiply });
 
+    // From Operations/Color/VipsFlatten.cs
+    /// <summary>
+    /// Composite alpha-bearing image onto an opaque background colour and
+    /// drop the alpha channel. Inputs without alpha pass through.
+    /// </summary>
+    public static VipsImage Flatten(VipsImage input, double[]? background = null)
+        => Run(new VipsFlatten { In = input, Background = background });
+
+    /// <summary>
+    /// Add an opaque alpha channel to an image without one. 1-band → 2-band,
+    /// 3-band → 4-band; alpha-bearing inputs pass through unchanged.
+    /// </summary>
+    public static VipsImage AddAlpha(VipsImage input, double alpha = 255.0)
+        => VipsAddAlpha.Apply(input, alpha);
+
+    /// <summary>
+    /// Place image onto a larger canvas with a uniform background colour.
+    /// Wraps <see cref="Embed"/> with <see cref="VipsExtend.Background"/>.
+    /// </summary>
+    public static VipsImage Pad(VipsImage input, int width, int height,
+        double[]? background = null,
+        VipsCompass position = VipsCompass.Centre)
+    {
+        // Compute where the input should land based on the compass anchor.
+        int x = position switch
+        {
+            VipsCompass.NorthWest or VipsCompass.West or VipsCompass.SouthWest => 0,
+            VipsCompass.NorthEast or VipsCompass.East or VipsCompass.SouthEast => width - input.Width,
+            _ => (width - input.Width) / 2,
+        };
+        int y = position switch
+        {
+            VipsCompass.NorthWest or VipsCompass.North or VipsCompass.NorthEast => 0,
+            VipsCompass.SouthWest or VipsCompass.South or VipsCompass.SouthEast => height - input.Height,
+            _ => (height - input.Height) / 2,
+        };
+        return Embed(input, x, y, width, height, VipsExtend.Background, background);
+    }
+
+    /// <summary>
+    /// Composite an alpha-bearing image onto a uniform background colour
+    /// at the same dimensions. Same as <see cref="Flatten"/> but keeps the
+    /// alpha channel (set to fully opaque) so the output is shape-compatible
+    /// with the input for chaining into alpha-aware ops.
+    /// </summary>
+    public static VipsImage BackgroundColor(VipsImage input, params double[] background)
+    {
+        var flat = Flatten(input, background);
+        if (input.Bands == 2 || input.Bands == 4)
+            return AddAlpha(flat, input.BandFormat == VipsBandFormat.Float ? 1.0 : 255.0);
+        return flat;
+    }
+
+    // From Operations/Analysis/VipsHistLocal.cs
+    /// <summary>
+    /// Contrast Limited Adaptive Histogram Equalization (CLAHE). Per-tile
+    /// equalisation with bilinear interpolation between tile-CDFs, contrast
+    /// limited via histogram clipping + redistribution. UChar only.
+    /// </summary>
+    public static VipsImage HistLocal(VipsImage input, int tileGridSize = 8, double clipLimit = 3.0)
+        => Run(new VipsHistLocal { In = input, TileGridSize = tileGridSize, ClipLimit = clipLimit });
+
     // From Operations/Geometric/VipsEmbed.cs
     /// <summary>
     /// Place <paramref name="input"/> at (<paramref name="x"/>, <paramref name="y"/>)

@@ -77,16 +77,16 @@ flattening, premultiplication. **Major gap area.**
 | `copy` | 🟡 | Implicit via op pipeline; no explicit `Copy(image)` |
 | `extract_area` / `extract_band` | 🟡 | `ExtractArea` ✅; band extraction missing |
 | `embed` (place into larger canvas with extension mode) | ✅ | `Embed` with Black/White/Copy/Repeat/Mirror/Background modes; per-band background colour |
-| `gravity` (positional embed) | ❌ | |
+| `gravity` (positional embed) | ✅ | `Pad(width, height, background, position)` with `VipsCompass` (Centre/N/E/S/W/NE/SE/SW/NW); `BackgroundColor(...)` flattens transparent pixels onto a fill colour while keeping alpha |
 | `flip` | ✅ | |
 | `rot` (orthogonal) / `rot45` | 🟡 | `Rotate(VipsAngle)` ✅; rot45 missing |
 | `autorot` (EXIF-based) | ✅ | `AutoOrient` |
 | `composite`, `composite2` | 🟡 | `Composite` (over-blend only); libvips has 19 PorterDuff modes |
 | `recomb` | ✅ | |
 | `gamma` | ✅ | |
-| `flatten` (alpha-flatten against background) | ❌ | |
+| `flatten` (alpha-flatten against background) | ✅ | `Flatten(r, g, b)` — composes RGBA/GA over an opaque background, drops alpha. UChar + Float branches |
 | `premultiply` / `unpremultiply` | ✅ | `Premultiply` / `Unpremultiply` — UChar normalizes alpha by 255; Float treats alpha as nominal [0,1]. Pass-through on band counts without alpha |
-| `addalpha` | ❌ | |
+| `addalpha` | ✅ | `AddAlpha(alpha=255)` — synthesise constant alpha plane and bandjoin. Pass-through if input already has alpha |
 | `bandbool` (and/or/xor across bands) | ❌ | |
 | `bandfold` / `bandunfold` (W↔W*bands rearrange) | ❌ | |
 | `bandjoin` | ✅ | `Bandjoin(other, …)` — concatenate bands across N images. `bandjoin_const` (fold constants in) still missing |
@@ -265,7 +265,7 @@ Frequency-domain filtering.
 | `hist_cum`, `hist_norm`, `hist_equal` | ✅ |
 | `maplut` | ✅ |
 | `hist_entropy` | ❌ |
-| `hist_local` (CLAHE — contrast-limited adaptive histogram equalization) | ❌ |
+| `hist_local` (CLAHE — contrast-limited adaptive histogram equalization) | ✅ | `HistLocal(tileGridSize=8, clipLimit=3.0)` — Pizer/Zuiderveld 1994. Per-tile clipped+redistributed CDF, bilinear blend across 4 surrounding tile-CDFs at each pixel. UChar only. Per-band (no Lab conversion) |
 | `hist_match` (histogram matching against reference) | ❌ |
 | `hist_plot` (visualise hist as image) | ❌ |
 | `hist_ismonotonic` | ❌ |

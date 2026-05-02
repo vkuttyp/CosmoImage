@@ -106,6 +106,24 @@ public enum VipsAngle
     Last = 4
 }
 
+/// <summary>
+/// Anchor positions for ops that place a smaller image inside a larger
+/// canvas (<see cref="CosmoImage.Operations.Geometric.VipsEmbed"/> via
+/// <c>Pad</c>). Mirrors libvips <c>VipsCompassDirection</c>.
+/// </summary>
+public enum VipsCompass
+{
+    Centre = 0,
+    North = 1,
+    East = 2,
+    South = 3,
+    West = 4,
+    NorthEast = 5,
+    SouthEast = 6,
+    SouthWest = 7,
+    NorthWest = 8,
+}
+
 public enum VipsKernel
 {
     Nearest = 0,

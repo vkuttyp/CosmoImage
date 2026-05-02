@@ -40,15 +40,19 @@ Each lands in a single PR.
 - [x] ~~`bandjoin`~~ (round 26) — `Bandjoin(other, …)` for N inputs.
 - [ ] `bandbool` / `bandfold` / `bandunfold` / `bandjoin_const` /
   `bandmean` / `bandrank` — remaining band-axis ops.
-- [ ] `addalpha` (force alpha channel).
-- [ ] `flatten` (alpha-flatten against background colour).
+- [x] ~~`addalpha`~~ (round 27) — synthesise constant-fill alpha plane and
+  bandjoin. Pass-through if input already has alpha.
+- [x] ~~`flatten`~~ (round 27) — composes RGBA/GA over an opaque background
+  colour, drops alpha. UChar + Float branches.
 - [x] ~~`premultiply` / `unpremultiply`~~ (round 26) — alpha-correct
   compositing primitives. UChar normalizes alpha by 255; Float treats
   alpha as nominal [0,1].
 - [x] ~~`embed`~~ (round 26) — Black/White/Copy/Repeat/Mirror/Background
   extension modes; per-band background colour for the
   `Background` mode.
-- [ ] `gravity` (positional embed).
+- [x] ~~`gravity`~~ (round 27) — `Pad(width, height, background, position)`
+  with `VipsCompass` (Centre/N/E/S/W/NE/SE/SW/NW). Plus `BackgroundColor`
+  for flatten-onto-fill while keeping alpha.
 - [ ] `replicate` (tile to bigger size).
 - [ ] `rot45` (45-degree rotate by lookup).
 - [ ] `byteswap`.
@@ -76,7 +80,9 @@ Each lands in a single PR.
 - [ ] `countlines` (count black-white transitions per scanline).
 
 ### `histogram/`
-- [ ] `hist_local` (CLAHE — high-value adaptive equalisation).
+- [x] ~~`hist_local`~~ (round 27) — CLAHE (Pizer/Zuiderveld 1994).
+  Per-tile clipped+redistributed CDF, bilinear blend across 4
+  surrounding tile-CDFs at each pixel. UChar only, per-band.
 - [ ] `hist_match` (histogram matching against reference).
 - [ ] `hist_entropy`.
 - [ ] `percent` (find threshold for given percentage).
