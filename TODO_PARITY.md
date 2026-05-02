@@ -180,17 +180,23 @@ sRGB↔linear and a few RGB-space matrix manipulations.
 Whole subsystem missing apart from `Text`. Each is a small standalone
 generator that produces an image from parameters.
 
-- [ ] `black` (constant 0).
-- [ ] `xyz` (per-pixel coordinate image — input to `mapim`).
+- [x] ~~`black`~~ (round 38) — all-zero image of any size/bands/format.
+- [x] ~~`xyz`~~ (round 38) — UInt 2-band (or more, with C/D/E sizes)
+  coordinate image; input to `mapim`-style remap.
 - [ ] `eye` / `grey` / `zone` (test-pattern generators).
-- [ ] `gaussmat` / `logmat` / `gaussnoise` (filter-mask generators).
+- [x] ~~`gaussmat`~~ (round 38) — Float matrix kernel image; auto-sized
+  by `min_ampl` cutoff. `logmat` / `gaussnoise` still missing.
 - [ ] Frequency-domain mask generators: `mask_butterworth` /
   `mask_gaussian` / `mask_ideal` × {plain, band, ring} = 9 ops.
 - [ ] `mask_fractal` / `fractsurf` (fractal generators).
-- [ ] `perlin` / `worley` / `sines` (procedural texture).
+- [x] ~~`sines`~~ (round 38) — Float sinusoid pattern; frequencies in
+  cycles per image. `perlin` / `worley` still missing.
 - [ ] `sdf` (signed distance field).
-- [ ] `point` / `tonelut` / `buildlut` / `invertlut` / `identity`
-  (LUT scaffolding).
+- [x] ~~`buildlut`~~ (round 38) — piecewise-linear LUT from anchor
+  points; multi-band when each anchor carries multiple y values.
+- [x] ~~`identity`~~ (round 38) — identity LUT (256-wide UChar; or
+  65536-wide UShort with `ushort_: true`).
+- [ ] `point` / `tonelut` / `invertlut` (remaining LUT scaffolding).
 
 ### Composite mode parity
 - [ ] Extend `VipsComposite` with the 19 PorterDuff modes libvips'

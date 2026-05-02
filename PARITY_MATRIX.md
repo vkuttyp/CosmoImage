@@ -172,20 +172,20 @@ Generators. **Whole subsystem missing** apart from `text`.
 
 | libvips op | Status |
 | :--- | :---: |
-| `black` (constant 0 image) | ❌ |
-| `xyz` (per-pixel x/y coordinate image — useful for mapim) | ❌ |
+| `black` (constant 0 image) | ✅ | `Black(width, height, bands, format)` |
+| `xyz` (per-pixel x/y coordinate image — useful for mapim) | ✅ | `Xyz(width, height, csize, dsize, esize)` — UInt 2-band default; extra dims roll into bands |
 | `eye`, `grey`, `zone` (test-pattern generators) | ❌ |
-| `gaussmat`, `logmat`, `gaussnoise` (filter mask generators) | ❌ |
+| `gaussmat`, `logmat`, `gaussnoise` (filter mask generators) | 🟡 | `Gaussmat(sigma, minAmpl, separable)` ✅; `logmat` and `gaussnoise` still missing |
 | `mask_butterworth`, `mask_butterworth_band`, `mask_butterworth_ring` | ❌ |
 | `mask_gaussian`, `mask_gaussian_band`, `mask_gaussian_ring` | ❌ |
 | `mask_ideal`, `mask_ideal_band`, `mask_ideal_ring` | ❌ |
 | `mask_fractal` | ❌ |
 | `fractsurf` (fractal surface) | ❌ |
-| `perlin`, `worley`, `sines` | ❌ | Procedural texture |
+| `perlin`, `worley`, `sines` | 🟡 | `Sines(width, height, hFreq, vFreq)` ✅; `perlin` / `worley` still missing |
 | `point` (sample image at point) | ❌ |
 | `sdf` (signed distance field generator) | ❌ |
-| `tonelut`, `buildlut`, `invertlut` (LUT builders) | ❌ |
-| `identity` (identity LUT) | ❌ |
+| `tonelut`, `buildlut`, `invertlut` (LUT builders) | 🟡 | `BuildLut(points)` ✅ — piecewise-linear interpolation between anchors; `tonelut` / `invertlut` still missing |
+| `identity` (identity LUT) | ✅ | `Identity(bands, ushort_, size)` |
 | `text` (glyph rendering) | 🟡 `Text` (rudimentary, no proper shaping) |
 
 ---

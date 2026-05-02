@@ -13,6 +13,7 @@ using CosmoImage.Operations.Effects;
 using CosmoImage.Operations.Analysis;
 using CosmoImage.Operations.Misc;
 using CosmoImage.Operations.Mosaicing;
+using CosmoImage.Operations.Create;
 
 namespace CosmoImage.Core;
 
@@ -1200,6 +1201,38 @@ public static partial class VipsImageOps
         => Run(new VipsInsert {
             Base = @base, Sub = sub, X = x, Y = y, Expand = expand, Background = background,
         });
+
+    // From Operations/Create/VipsBlack.cs
+    /// <summary>Synthesise an all-zero image of the requested geometry.</summary>
+    public static VipsImage Black(int width, int height, int bands = 1,
+        VipsBandFormat format = VipsBandFormat.UChar)
+        => Run(new VipsBlack { Width = width, Height = height, Bands = bands, BandFormat = format });
+
+    // From Operations/Create/VipsXyz.cs
+    /// <summary>Synthesise a 2-band UInt image where each pixel = its (x, y) coordinate.</summary>
+    public static VipsImage Xyz(int width, int height, int csize = 1, int dsize = 1, int esize = 1)
+        => Run(new VipsXyz { Width = width, Height = height,
+            Csize = csize, Dsize = dsize, Esize = esize });
+
+    // From Operations/Create/VipsIdentity.cs
+    /// <summary>Synthesise the identity LUT (256-wide UChar by default).</summary>
+    public static VipsImage Identity(int bands = 1, bool ushort_ = false, int size = 0)
+        => Run(new VipsIdentity { Bands = bands, UShort = ushort_, Size = size });
+
+    // From Operations/Create/VipsBuildLut.cs
+    /// <summary>Build a piecewise-linear LUT from anchor points <c>{x, y0[, y1, ...]}</c>.</summary>
+    public static VipsImage BuildLut(double[,] points)
+        => Run(new VipsBuildLut { Points = points });
+
+    // From Operations/Create/VipsGaussmat.cs
+    /// <summary>Synthesise a 2D Gaussian convolution kernel as a Float matrix image.</summary>
+    public static VipsImage Gaussmat(double sigma = 1.0, double minAmpl = 0.1, bool separable = false)
+        => Run(new VipsGaussmat { Sigma = sigma, MinAmpl = minAmpl, Separable = separable });
+
+    // From Operations/Create/VipsSines.cs
+    /// <summary>Synthesise a 2D sinusoid; frequencies in cycles per image.</summary>
+    public static VipsImage Sines(int width, int height, double hFreq = 0.5, double vFreq = 0.5)
+        => Run(new VipsSines { Width = width, Height = height, HFreq = hFreq, VFreq = vFreq });
 
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
