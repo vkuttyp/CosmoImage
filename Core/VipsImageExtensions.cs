@@ -470,6 +470,24 @@ public static class VipsImageExtensions
     /// <summary>16-bit signed-short LabS → Float Lab.</summary>
     public static VipsImage LabS2Lab(this VipsImage image) => VipsImageOps.LabS2Lab(image);
 
+    /// <summary>XYZ (D65) → OkLab (Ottosson 2020).</summary>
+    public static VipsImage XYZ2OkLab(this VipsImage image) => VipsImageOps.XYZ2OkLab(image);
+
+    /// <summary>OkLab → XYZ (D65).</summary>
+    public static VipsImage OkLab2XYZ(this VipsImage image) => VipsImageOps.OkLab2XYZ(image);
+
+    /// <summary>OkLab → OkLCh polar form.</summary>
+    public static VipsImage OkLab2OkLCh(this VipsImage image) => VipsImageOps.OkLab2OkLCh(image);
+
+    /// <summary>OkLCh → OkLab.</summary>
+    public static VipsImage OkLCh2OkLab(this VipsImage image) => VipsImageOps.OkLCh2OkLab(image);
+
+    /// <summary>sRGB UChar → HSV.</summary>
+    public static VipsImage SRGB2HSV(this VipsImage image) => VipsImageOps.SRGB2HSV(image);
+
+    /// <summary>HSV → sRGB UChar.</summary>
+    public static VipsImage HSV2sRGB(this VipsImage image) => VipsImageOps.HSV2sRGB(image);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

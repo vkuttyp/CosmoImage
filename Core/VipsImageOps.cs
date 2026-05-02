@@ -1127,6 +1127,27 @@ public static partial class VipsImageOps
     /// <summary>16-bit signed-short LabS → Float Lab.</summary>
     public static VipsImage LabS2Lab(VipsImage input) => Run(new VipsLabS2Lab { In = input });
 
+    // From Operations/Color/VipsXYZOkLab.cs
+    /// <summary>XYZ (D65) → OkLab (Ottosson 2020). Reference white maps to (1, 0, 0).</summary>
+    public static VipsImage XYZ2OkLab(VipsImage input) => Run(new VipsXYZ2OkLab { In = input });
+
+    /// <summary>OkLab → XYZ (D65).</summary>
+    public static VipsImage OkLab2XYZ(VipsImage input) => Run(new VipsOkLab2XYZ { In = input });
+
+    // From Operations/Color/VipsOkLabOkLCh.cs
+    /// <summary>OkLab → OkLCh polar form.</summary>
+    public static VipsImage OkLab2OkLCh(VipsImage input) => Run(new VipsOkLab2OkLCh { In = input });
+
+    /// <summary>OkLCh → OkLab.</summary>
+    public static VipsImage OkLCh2OkLab(VipsImage input) => Run(new VipsOkLCh2OkLab { In = input });
+
+    // From Operations/Color/VipsHSV.cs
+    /// <summary>sRGB UChar → HSV (libvips packing: H, S, V each 0..255).</summary>
+    public static VipsImage SRGB2HSV(VipsImage input) => Run(new VipsSRGB2HSV { In = input });
+
+    /// <summary>HSV → sRGB UChar.</summary>
+    public static VipsImage HSV2sRGB(VipsImage input) => Run(new VipsHSV2sRGB { In = input });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

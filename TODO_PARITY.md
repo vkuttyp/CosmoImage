@@ -151,9 +151,10 @@ sRGB↔linear and a few RGB-space matrix manipulations.
 - [x] ~~Lab ↔ LabS~~ (round 34) — 3-band Short
   high-precision intermediate (L · 327.67, a/b · 256).
 - [x] ~~XYZ ↔ Yxy~~ (round 34) — chromaticity coordinates.
-- [ ] XYZ ↔ Oklab, Oklab ↔ Oklch — Björn Ottosson's perceptual space.
-- [ ] sRGB ↔ HSV (we use HSV internally for `Lightness` but don't
-  expose the converters).
+- [x] ~~XYZ ↔ Oklab, Oklab ↔ Oklch~~ (round 35) — Ottosson 2020;
+  D65 white maps to (1, 0, 0).
+- [x] ~~sRGB ↔ HSV~~ (round 35) — libvips UChar packing
+  (H ∈ [0, 255] for 0–360°).
 - [ ] XYZ ↔ CMYK (print colourspace).
 - [ ] CICP2scRGB (BT.2100 / Rec.2020 / PQ / HLG transfer functions —
   HDR / wide-gamut interop).

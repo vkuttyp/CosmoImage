@@ -132,8 +132,8 @@ We have only a few corners of it.
 | `Lab2LabQ` / `LabQ2Lab` (8-bit packed Lab) | ✅ | libvips' 4-byte LabQ layout: 10-bit L + 11-bit signed a + 11-bit signed b + extension byte |
 | `Lab2LabS` / `LabS2Lab` (16-bit Lab) | ✅ | 3-band Short LabS — high-precision intermediate (L · 327.67, a/b · 256) |
 | `LabQ2sRGB`, `LabQ2LabS`, `LabS2LabQ` | ❌ | |
-| `XYZ2Oklab`, `Oklab2XYZ`, `Oklab2Oklch`, `Oklch2Oklab` | ❌ | OkLab perceptual space |
-| `sRGB2HSV` / `HSV2sRGB` | 🟡 | Internal use only inside `Lightness` |
+| `XYZ2Oklab`, `Oklab2XYZ`, `Oklab2Oklch`, `Oklch2Oklab` | ✅ | `XYZ2OkLab` / `OkLab2XYZ` / `OkLab2OkLCh` / `OkLCh2OkLab` (Ottosson 2020 — D65 white maps to (1, 0, 0)) |
+| `sRGB2HSV` / `HSV2sRGB` | ✅ | `SRGB2HSV` / `HSV2sRGB` — libvips' UChar packing (H ∈ [0, 255] for 0–360°) |
 | `XYZ2CMYK` / `CMYK2XYZ` | ❌ | Print colourspace |
 | `XYZ2scRGB` / `scRGB2XYZ` | ❌ | |
 | `CICP2scRGB` (ITU-R BT.2100 / Rec.2020 + transfer) | ❌ | HDR / wide-gamut |
