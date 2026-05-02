@@ -396,6 +396,27 @@ public static class VipsImageExtensions
     public static VipsImage Grid(this VipsImage image, int tileHeight, int across, int down)
         => VipsImageOps.Grid(image, tileHeight, across, down);
 
+    /// <summary>Sobel edge-magnitude detector.</summary>
+    public static VipsImage Sobel(this VipsImage image) => VipsImageOps.Sobel(image);
+
+    /// <summary>8-direction Kirsch compass edge detector.</summary>
+    public static VipsImage Compass(this VipsImage image) => VipsImageOps.Compass(image);
+
+    /// <summary>Canny edge detector — binary UChar output.</summary>
+    public static VipsImage Canny(this VipsImage image, double sigma = 1.4, int low = 20, int high = 60)
+        => VipsImageOps.Canny(image, sigma, low, high);
+
+    /// <summary>Tone-aware unsharp on luminance.</summary>
+    public static VipsImage Sharpen(this VipsImage image, double sigma = 1.0,
+        double m1 = 1.0, double m2 = 1.0, int x1 = 2)
+        => VipsImageOps.Sharpen(image, sigma, m1, m2, x1);
+
+    /// <summary>Euclidean distance to nearest non-zero pixel.</summary>
+    public static VipsImage Nearest(this VipsImage image) => VipsImageOps.Nearest(image);
+
+    /// <summary>4-connected component labelling.</summary>
+    public static VipsImage LabelRegions(this VipsImage image) => VipsImageOps.LabelRegions(image);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

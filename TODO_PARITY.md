@@ -79,17 +79,21 @@ Each lands in a single PR.
 - [ ] `arrayjoin` / `join` / `insert` — remaining mosaicing helpers.
 
 ### `convolution/`
-- [ ] `sharpen` — distinct from `UnsharpMask`; libvips' version does
-  Lab-space sharpening with shadow/highlight thresholds.
-- [ ] `canny` (Canny edge detector).
-- [ ] `compass` (compass-pattern edge response).
+- [x] ~~`sharpen`~~ (round 31) — luminance-only unsharp with separate
+  shadow/highlight gains (m1/m2) and dead-band (x1).
+- [x] ~~`sobel`~~ (round 31) — 3×3 Gx/Gy magnitude (UChar in/out).
+- [x] ~~`canny`~~ (round 31) — full pipeline: Gaussian blur, Sobel,
+  non-max suppression, double-threshold, hysteresis.
+- [x] ~~`compass`~~ (round 31) — 8 Kirsch rotations, max absolute
+  response.
 - [ ] `correlation` / `fastcor` / `spcor` (template matching).
 - [ ] `conva` / `convasep` (approximate large-kernel via box-pass).
 
 ### `morphology/`
-- [ ] `nearest` (distance to nearest non-zero pixel — distance transform).
-- [ ] `labelregions` (connected-component labelling — useful for
-  segmentation pipelines).
+- [x] ~~`nearest`~~ (round 31) — exact Euclidean distance transform
+  via Felzenszwalb-Huttenlocher 1D parabola-envelope (separable).
+- [x] ~~`labelregions`~~ (round 31) — 4-connected union-find,
+  two-pass; UInt label image (1..K, 0 = background).
 - [ ] `countlines` (count black-white transitions per scanline).
 
 ### `histogram/`

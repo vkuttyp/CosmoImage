@@ -157,9 +157,10 @@ We have only a few corners of it.
 | `conva` (approximate) | ❌ | `vips_conva` — approximate large-kernel via box-pass |
 | `convasep` (approximate separable) | ❌ | |
 | `gaussblur` | ✅ | Two-pass `Conv1D` |
-| `sharpen` | 🟡 | `UnsharpMask` covers sigma+amount; libvips' `sharpen` does Lab-space with thresholds |
-| `canny` | ❌ | Canny edge detector |
-| `compass` (compass-pattern edge) | ❌ | |
+| `sharpen` | ✅ | `Sharpen(sigma, m1, m2, x1)` — luminance-band unsharp with separate shadow/highlight gains and dead-band threshold |
+| `sobel` | ✅ | `Sobel()` — 3×3 Gx/Gy magnitude (UChar in/out) |
+| `canny` | ✅ | `Canny(sigma, low, high)` — full pipeline: blur, Sobel, NMS, double-threshold, hysteresis |
+| `compass` (compass-pattern edge) | ✅ | `Compass()` — 8 Kirsch rotations, max absolute response |
 | `correlation`, `fastcor`, `spcor` | ❌ | Template matching / cross-correlation |
 | `edge` | ❌ | Generic edge detector wrapper |
 
@@ -281,9 +282,9 @@ Frequency-domain filtering.
 | :--- | :---: |
 | `morph` (dilate/erode dispatcher) | ✅ `Morph` with Float branch |
 | `rank` | ✅ `Rank`/`Median` |
-| `nearest` (distance to nearest non-zero pixel) | ❌ |
+| `nearest` (distance to nearest non-zero pixel) | ✅ | `Nearest()` — exact Euclidean distance via Felzenszwalb-Huttenlocher separable EDT (UChar clamped) |
 | `countlines` (count black-white transitions per scanline) | ❌ |
-| `labelregions` (connected-component labeling) | ❌ |
+| `labelregions` (connected-component labeling) | ✅ | `LabelRegions()` — 4-connected union-find, two-pass; UInt label image (1..K, 0 = background) |
 
 ---
 

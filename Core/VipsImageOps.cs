@@ -1014,6 +1014,37 @@ public static partial class VipsImageOps
     public static VipsImage Grid(VipsImage input, int tileHeight, int across, int down)
         => Run(new VipsGrid { In = input, TileHeight = tileHeight, Across = across, Down = down });
 
+    // From Operations/Convolution/VipsSobel.cs
+    /// <summary>Sobel edge-magnitude detector. UChar in, UChar out (clamped).</summary>
+    public static VipsImage Sobel(VipsImage input)
+        => Run(new VipsSobel { In = input });
+
+    // From Operations/Convolution/VipsCompass.cs
+    /// <summary>8-direction Kirsch edge response — max absolute response across rotated kernels.</summary>
+    public static VipsImage Compass(VipsImage input)
+        => Run(new VipsCompassEdge { In = input });
+
+    // From Operations/Convolution/VipsCanny.cs
+    /// <summary>Canny edge detector. Single-band UChar in → binary UChar edge map.</summary>
+    public static VipsImage Canny(VipsImage input, double sigma = 1.4, int low = 20, int high = 60)
+        => Run(new VipsCanny { In = input, Sigma = sigma, LowThreshold = low, HighThreshold = high });
+
+    // From Operations/Convolution/VipsSharpen.cs
+    /// <summary>Tone-aware unsharp on luminance, scaled by separate shadow/highlight gains.</summary>
+    public static VipsImage Sharpen(VipsImage input, double sigma = 1.0,
+        double m1 = 1.0, double m2 = 1.0, int x1 = 2)
+        => Run(new VipsSharpen { In = input, Sigma = sigma, M1 = m1, M2 = m2, X1 = x1 });
+
+    // From Operations/Convolution/VipsNearest.cs
+    /// <summary>Euclidean distance to nearest non-zero pixel (clamped to UChar).</summary>
+    public static VipsImage Nearest(VipsImage input)
+        => Run(new VipsNearest { In = input });
+
+    // From Operations/Convolution/VipsLabelRegions.cs
+    /// <summary>4-connected component labelling. UChar in → UInt label image (1..K, 0 = background).</summary>
+    public static VipsImage LabelRegions(VipsImage input)
+        => Run(new VipsLabelRegions { In = input });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
