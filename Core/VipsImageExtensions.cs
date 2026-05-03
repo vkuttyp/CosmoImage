@@ -560,6 +560,22 @@ public static class VipsImageExtensions
             = CosmoImage.Operations.Convolution.VipsEdgeMethod.Sobel)
         => VipsImageOps.Edge(image, method);
 
+    /// <summary>Materialise once; downstream consumers reuse the cached pixels.</summary>
+    public static VipsImage Cache(this VipsImage image) => VipsImageOps.Cache(image);
+
+    /// <summary>Force sequential top-to-bottom evaluation.</summary>
+    public static VipsImage Sequential(this VipsImage image) => VipsImageOps.Sequential(image);
+
+    /// <summary>Stream through with optional metadata rewrites.</summary>
+    public static VipsImage Copy(this VipsImage image,
+        VipsInterpretation? interpretation = null,
+        VipsBandFormat? bandFormat = null,
+        int? bands = null,
+        double? xRes = null,
+        double? yRes = null,
+        VipsCoding? coding = null)
+        => VipsImageOps.Copy(image, interpretation, bandFormat, bands, xRes, yRes, coding);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

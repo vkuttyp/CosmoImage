@@ -14,6 +14,7 @@ using CosmoImage.Operations.Analysis;
 using CosmoImage.Operations.Misc;
 using CosmoImage.Operations.Mosaicing;
 using CosmoImage.Operations.Create;
+using CosmoImage.Operations.Iofuncs;
 
 namespace CosmoImage.Core;
 
@@ -1591,6 +1592,35 @@ public static partial class VipsImageOps
     public static VipsImage Edge(VipsImage input, VipsEdgeMethod method = VipsEdgeMethod.Sobel,
         double cannySigma = 1.4, int cannyLow = 20, int cannyHigh = 60)
         => VipsEdge.Apply(input, method, cannySigma, cannyLow, cannyHigh);
+
+    // From Operations/Iofuncs/VipsCache.cs
+    /// <summary>Materialise the input once; downstream consumers reuse the cached pixels.</summary>
+    public static VipsImage Cache(VipsImage input)
+        => Run(new VipsCacheOp { In = input });
+
+    // From Operations/Iofuncs/VipsSequential.cs
+    /// <summary>Force sequential top-to-bottom evaluation. Wrap before a streaming saver.</summary>
+    public static VipsImage Sequential(VipsImage input)
+        => Run(new VipsSequential { In = input });
+
+    // From Operations/Iofuncs/VipsCopy.cs
+    /// <summary>
+    /// Stream the input through unchanged but with optional metadata
+    /// rewrites (interpretation / band-format / band-count / x/y-res / coding).
+    /// Pixel bytes pass through verbatim; format/band rewrites reinterpret.
+    /// </summary>
+    public static VipsImage Copy(VipsImage input,
+        VipsInterpretation? interpretation = null,
+        VipsBandFormat? bandFormat = null,
+        int? bands = null,
+        double? xRes = null,
+        double? yRes = null,
+        VipsCoding? coding = null)
+        => Run(new VipsCopy {
+            In = input,
+            Interpretation = interpretation, BandFormat = bandFormat, Bands = bands,
+            XRes = xRes, YRes = yRes, Coding = coding,
+        });
 
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);

@@ -74,7 +74,7 @@ flattening, premultiplication. **Major gap area.**
 | libvips op | Status | Our equivalent |
 | :--- | :---: | :--- |
 | `cast` (band-format conversion) | ✅ | `Cast`/`CastFloat`/`CastUChar` (UChar↔Float only) |
-| `copy` | 🟡 | Implicit via op pipeline; no explicit `Copy(image)` |
+| `copy` | ✅ | `Copy(interpretation, bandFormat, bands, xRes, yRes, coding)` — pixel pass-through with metadata rewrites; band-format / band-count rewrites reinterpret bytes (pel size must match) |
 | `extract_area` / `extract_band` | ✅ | `ExtractArea(left, top, w, h)` and `ExtractBand(band, n=1)` |
 | `embed` (place into larger canvas with extension mode) | ✅ | `Embed` with Black/White/Copy/Repeat/Mirror/Background modes; per-band background colour |
 | `gravity` (positional embed) | ✅ | `Pad(width, height, background, position)` with `VipsCompass` (Centre/N/E/S/W/NE/SE/SW/NW); `BackgroundColor(...)` flattens transparent pixels onto a fill colour while keeping alpha |
@@ -93,7 +93,7 @@ flattening, premultiplication. **Major gap area.**
 | `bandmean` (average all bands) | ✅ | `Bandmean()` — UChar (with rounding) and Float branches |
 | `bandrank` (rank-statistic across bands) | ✅ | `Bandrank(inputs, index=-1)` — N inputs → per-pixel rank-statistic. Default median; UChar (insertion-sort) + Float branches |
 | `byteswap` | ✅ | `Byteswap()` — reverses every multi-byte sample. UChar pass-through |
-| `cache` (operation result cache) | 🟡 | Internal `VipsCache` only |
+| `cache` (operation result cache) | ✅ | `Cache(input)` materialises once for DAG fan-out; internal op cache also runs |
 | `falsecolour` | ✅ | `Falsecolor()` — built-in jet colour ramp; 1-band UChar → RGB |
 | `grid` (lay tiles into grid) | ✅ | `Grid(tileHeight, across, down)` — tall N×tile stack → 2D grid. Trailing cells zero-filled |
 | `ifthenelse` (per-pixel ternary) | ✅ | `Ifthenelse(then, else)` — UChar condition broadcasts (1-band) or selects per-band (N-band). UChar + Float then/else |
@@ -103,7 +103,7 @@ flattening, premultiplication. **Major gap area.**
 | `msb` (most-significant-byte extraction) | ❌ | |
 | `replicate` (tile to bigger size) | ✅ | `Replicate(across, down)` — scanline-slab copy across tile seams |
 | `scale` (linear stretch to 0..255) | ✅ | `Scale(log=false, exponent=0.25)` — linear or log-scale stretch to UChar; aggregate min/max via `VipsStats` |
-| `sequential` (force sequential read order) | ❌ | |
+| `sequential` (force sequential read order) | ✅ | `Sequential(input)` — sets `DemandHint = FatStrip` for top-to-bottom streaming saves |
 | `subsample` | 🟡 | `Shrink` covers integer subsample |
 | `switch` (case-style multi-image select) | ✅ | `Switch(tests…)` — index of first non-zero test image, N if none |
 | `tilecache` (region cache) | ❌ | |
