@@ -1492,6 +1492,43 @@ public static partial class VipsImageOps
     public static VipsImage CrossPhase(VipsImage left, VipsImage right)
         => Run(new VipsComplex2 { Left = left, Right = right, Op = VipsComplex2Op.CrossPhase });
 
+    // From Operations/Misc/VipsMath.cs (Atan)
+    public static VipsImage Atan(VipsImage input) => MathOp(input, VipsMathOperation.Atan);
+
+    // From Operations/Misc/VipsMath2.cs
+    /// <summary>Per-pixel binary math op on two images.</summary>
+    public static VipsImage Math2(VipsImage left, VipsImage right, VipsMath2Operation op)
+        => Run(new VipsMath2 { Left = left, Right = right, Op = op });
+
+    public static VipsImage Pow(VipsImage left, VipsImage right) => Math2(left, right, VipsMath2Operation.Pow);
+    public static VipsImage Wop(VipsImage left, VipsImage right) => Math2(left, right, VipsMath2Operation.Wop);
+    public static VipsImage Atan2(VipsImage left, VipsImage right) => Math2(left, right, VipsMath2Operation.Atan2);
+
+    // From Operations/Misc/VipsClamp.cs
+    /// <summary>Per-band clamp to [<paramref name="min"/>, <paramref name="max"/>] range.</summary>
+    public static VipsImage Clamp(VipsImage input, double min = 0, double max = 255)
+        => Run(new VipsClamp { In = input, Min = min, Max = max });
+
+    /// <summary>
+    /// Broadcast-scalar variant of <see cref="Linear"/> — apply
+    /// <c>output = a · input + b</c> with single scalars instead of
+    /// per-band arrays.
+    /// </summary>
+    public static VipsImage LinearConst(VipsImage input, double a, double b)
+    {
+        int bands = input.Bands;
+        var aArr = new double[bands];
+        var bArr = new double[bands];
+        for (int i = 0; i < bands; i++) { aArr[i] = a; bArr[i] = b; }
+        return Linear(input, aArr, bArr);
+    }
+
+    // From Operations/Analysis/VipsMeasure.cs
+    /// <summary>Sample patch averages from a regular <paramref name="h"/>×<paramref name="v"/> grid.</summary>
+    public static VipsImage Measure(VipsImage input, int h, int v,
+        int left = 0, int top = 0, int width = 0, int height = 0)
+        => VipsMeasure.Compute(input, h, v, left, top, width, height);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

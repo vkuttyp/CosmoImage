@@ -44,8 +44,8 @@ Pointwise arithmetic, statistics, hough transform, measurement.
 
 | libvips op | Status | Our equivalent |
 | :--- | :---: | :--- |
-| `abs`, `sin`, `cos`, `tan`, `atan`, `log`, `log10`, `exp`, `exp10`, `sqrt`, `sign`, `round`/`floor`/`ceil`/`rint` (math, math2, sign, round, unary) | 🟡 | `Math` suite covers abs/sin/cos/tan/log/log10/exp/exp10/sqrt/pow/sign/floor/ceil/rint. Missing: `atan` / `atan2` / `math2` binary variants |
-| `pow`, `wop` (math2 — y = x^a) | ✅ | `Pow(image, exp)` |
+| `abs`, `sin`, `cos`, `tan`, `atan`, `log`, `log10`, `exp`, `exp10`, `sqrt`, `sign`, `round`/`floor`/`ceil`/`rint` (math, math2, sign, round, unary) | ✅ | Full `Math` suite plus `Atan` (round 46) |
+| `pow`, `wop`, `atan2` (math2 — binary math on two images) | ✅ | `Math2`/`Pow`/`Wop`/`Atan2` (round 46) — pixel-wise binary math; UChar branch clamps |
 | `add`, `subtract`, `multiply`, `divide`, `remainder` (binary) | ✅ | `Add`/`Subtract`/`Multiply`/`Divide`/`Remainder` — UChar branch clamps and treats multiply as fraction-of-255; Float branch unclamped |
 | `linear` (a·x + b per band) | ✅ | `Linear` with SIMD same-coefficient path |
 | `invert` | ✅ | SIMD pointwise; libvips Float convention (`-x`) on Float input |
@@ -57,12 +57,12 @@ Pointwise arithmetic, statistics, hough transform, measurement.
 | `maxpair`, `minpair` (per-pixel max/min of two images) | ✅ | `MinImage(inputs…)` / `MaxImage(inputs…)` accept N inputs; `Sum(inputs…)` for additive composition |
 | `getpoint` (extract single pixel as values) | ❌ | Equivalent: `image.GetPixel<TPixel>(x, y)` |
 | `find_trim` (auto-find non-background bbox) | ✅ | `FindTrim(input, threshold, background)` — top-left pixel = default background; returns `VipsRect(0, 0, 0, 0)` when uniform |
-| `measure` (extract patch averages from grid) | ❌ | Color-chart calibration helper |
+| `measure` (extract patch averages from grid) | ✅ | `Measure(input, h, v, left, top, w, h)` — Float matrix of patch means; samples middle 80% of each cell to dodge edge bleed |
 | `profile` (column/row first/last non-zero) | ❌ | |
 | `project` (sum-along-axis, both axes) | ✅ | `Project(input)` returns (Columns: 1×W Float, Rows: 1×H Float) per-axis sums |
 | `hist_find`, `hist_find_indexed`, `hist_find_ndim` | 🟡 | `HistFind` (per-band UChar). N-dim variants missing. |
 | `hough_circle`, `hough_line` | ❌ | Feature detection — niche |
-| `clamp` | ❌ | Per-band clamp to range |
+| `clamp` | ✅ | `Clamp(input, min, max)` — UChar (byte-clamped) and Float (numeric-clamped) branches |
 
 ---
 

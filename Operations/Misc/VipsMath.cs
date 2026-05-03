@@ -22,6 +22,8 @@ public enum VipsMathOperation
     Ceil = 12,
     /// <summary>Round to nearest integer (banker's rounding for ties).</summary>
     Rint = 13,
+    /// <summary>1-arg arctan. UChar: scale [0, 1] → [-π/2, π/2] mapped back to byte.</summary>
+    Atan = 14,
 }
 
 /// <summary>
@@ -112,6 +114,9 @@ public class VipsMath : VipsOperation
                 VipsMathOperation.Floor => x,
                 VipsMathOperation.Ceil => x,
                 VipsMathOperation.Rint => x,
+                // atan: input fraction [0, 1] → atan in [0, π/4], scale back so
+                // 0 → 0 and 1 → 1 (consistent with the [0, 1] convention here).
+                VipsMathOperation.Atan => Math.Atan(x) / (Math.PI / 4),
                 _ => x
             };
             // Map [-1, 1] (trig) to [0, 255] via (y + 1) / 2; map [0, 1] directly.
@@ -165,6 +170,7 @@ public class VipsMath : VipsOperation
                         VipsMathOperation.Floor => Math.Floor(v),
                         VipsMathOperation.Ceil => Math.Ceiling(v),
                         VipsMathOperation.Rint => Math.Round(v),
+                        VipsMathOperation.Atan => Math.Atan(v),
                         _ => v
                     };
                     BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)y2);

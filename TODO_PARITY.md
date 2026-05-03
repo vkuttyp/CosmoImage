@@ -26,7 +26,8 @@ Each lands in a single PR.
 - [x] ~~`add` / `subtract` / `multiply` / `divide` / `remainder`~~
   (round 26) — `VipsArithmetic2` covers all five. UChar clamps and
   treats multiply as fraction-of-255; Float unclamped, direct multiply.
-- [ ] `linear_const` variant with broadcast scalar (`linear` shipped).
+- [x] ~~`linear_const`~~ (round 46) — broadcast-scalar wrapper around
+  `Linear` for the common single-value case.
 - [x] ~~`sign` / `floor` / `ceil` / `rint`~~ (round 45) — extended
   `VipsMath` enum + UChar / Float branches. Exposed as
   `Sign`/`Floor`/`Ceil`/`Rint` on `VipsImageOps`.
@@ -34,7 +35,13 @@ Each lands in a single PR.
   (round 45) — full DPComplex op surface. `Complex` (Polar / Rect /
   Conj), `CrossPhase` (= `Complex2`), `ComplexForm`(re, im) and
   `ComplexGet` (Real / Imag / Magnitude / Phase).
-- [ ] `clamp` (per-band clamp to range).
+- [x] ~~`clamp`~~ (round 46) — per-band clamp to [min, max] (UChar +
+  Float branches).
+- [x] ~~`atan` / `math2` (Pow / Wop / Atan2)~~ (round 46) — single-arg
+  arctan in `VipsMath`; pixel-wise binary math on two images via
+  `VipsMath2`.
+- [x] ~~`measure`~~ (round 46) — patch-grid mean sampler for
+  colour-chart calibration; samples middle 80% of each cell.
 - [x] ~~`sum`~~ (round 44) — pixel-wise sum across N images; UChar
   branch clamps at 255, Float branch is unclamped.
 - [x] ~~`maxpair` / `minpair`~~ (round 44) — `MinImage` / `MaxImage`
