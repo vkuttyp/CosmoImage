@@ -44,14 +44,14 @@ Pointwise arithmetic, statistics, hough transform, measurement.
 
 | libvips op | Status | Our equivalent |
 | :--- | :---: | :--- |
-| `abs`, `sin`, `cos`, `tan`, `atan`, `log`, `log10`, `exp`, `exp10`, `sqrt`, `sign`, `round`/`floor`/`ceil`/`rint` (math, math2, sign, round, unary) | 🟡 | `Math` suite covers abs/sin/cos/tan/log/log10/exp/exp10/sqrt/pow. Missing: atan/atan2, sign, floor/ceil/rint variants |
+| `abs`, `sin`, `cos`, `tan`, `atan`, `log`, `log10`, `exp`, `exp10`, `sqrt`, `sign`, `round`/`floor`/`ceil`/`rint` (math, math2, sign, round, unary) | 🟡 | `Math` suite covers abs/sin/cos/tan/log/log10/exp/exp10/sqrt/pow/sign/floor/ceil/rint. Missing: `atan` / `atan2` / `math2` binary variants |
 | `pow`, `wop` (math2 — y = x^a) | ✅ | `Pow(image, exp)` |
 | `add`, `subtract`, `multiply`, `divide`, `remainder` (binary) | ✅ | `Add`/`Subtract`/`Multiply`/`Divide`/`Remainder` — UChar branch clamps and treats multiply as fraction-of-255; Float branch unclamped |
 | `linear` (a·x + b per band) | ✅ | `Linear` with SIMD same-coefficient path |
 | `invert` | ✅ | SIMD pointwise; libvips Float convention (`-x`) on Float input |
 | `boolean`, `boolean_const` (and/or/xor/lshift/rshift) | ✅ | `Boolean2`, `BooleanConst` |
 | `relational`, `relational_const` (eq/ne/lt/le/gt/ge) | ✅ | `Relational2`, `RelationalConst` |
-| `complex`, `complex2`, `complexform`, `complexget` | ❌ | No complex-number ops on DPComplex images |
+| `complex`, `complex2`, `complexform`, `complexget` | ✅ | `Complex` (Polar/Rect/Conj), `Complex2`/`CrossPhase`, `ComplexForm`(re, im) → DPComplex, `ComplexGet` (Real/Imag/Magnitude/Phase) |
 | `min`, `max`, `sum` (reductions) | ✅ via `Stats` | Per-band + aggregate min/max/sum/avg/deviate in one pass |
 | `avg`, `deviate`, `stats` | ✅ | `Stats(image)` returns full result; `Avg`/`Min`/`Max`/`Deviate` shortcuts |
 | `maxpair`, `minpair` (per-pixel max/min of two images) | ✅ | `MinImage(inputs…)` / `MaxImage(inputs…)` accept N inputs; `Sum(inputs…)` for additive composition |

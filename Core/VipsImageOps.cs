@@ -1457,6 +1457,41 @@ public static partial class VipsImageOps
     public static VipsRect FindTrim(VipsImage input, int threshold = 10, double[]? background = null)
         => VipsFindTrim.Compute(input, threshold, background);
 
+    // From Operations/Misc/VipsMath.cs (extended ops)
+    public static VipsImage Sign(VipsImage input) => MathOp(input, VipsMathOperation.Sign);
+    public static VipsImage Floor(VipsImage input) => MathOp(input, VipsMathOperation.Floor);
+    public static VipsImage Ceil(VipsImage input) => MathOp(input, VipsMathOperation.Ceil);
+    public static VipsImage Rint(VipsImage input) => MathOp(input, VipsMathOperation.Rint);
+
+    // From Operations/Analysis/VipsComplexForm.cs
+    /// <summary>Build a DPComplex image from two Float (real, imag) inputs.</summary>
+    public static VipsImage ComplexForm(VipsImage real, VipsImage imag)
+        => Run(new VipsComplexForm { Real = real, Imag = imag });
+
+    // From Operations/Analysis/VipsComplexGet.cs
+    /// <summary>Extract a real Float component from a DPComplex image.</summary>
+    public static VipsImage ComplexGet(VipsImage input, VipsComplexGetMode mode)
+        => Run(new VipsComplexGet { In = input, Mode = mode });
+
+    public static VipsImage Real(VipsImage input) => ComplexGet(input, VipsComplexGetMode.Real);
+    public static VipsImage Imag(VipsImage input) => ComplexGet(input, VipsComplexGetMode.Imag);
+    public static VipsImage Magnitude(VipsImage input) => ComplexGet(input, VipsComplexGetMode.Magnitude);
+    public static VipsImage Phase(VipsImage input) => ComplexGet(input, VipsComplexGetMode.Phase);
+
+    // From Operations/Analysis/VipsComplex.cs
+    /// <summary>Per-pixel unary op on a DPComplex image (Polar / Rect / Conj).</summary>
+    public static VipsImage Complex(VipsImage input, VipsComplexOp op)
+        => Run(new VipsComplex { In = input, Op = op });
+
+    public static VipsImage Polar(VipsImage input) => Complex(input, VipsComplexOp.Polar);
+    public static VipsImage Rect(VipsImage input) => Complex(input, VipsComplexOp.Rect);
+    public static VipsImage Conj(VipsImage input) => Complex(input, VipsComplexOp.Conj);
+
+    // From Operations/Analysis/VipsComplex2.cs
+    /// <summary>Per-pixel binary op on two DPComplex images (CrossPhase by default).</summary>
+    public static VipsImage CrossPhase(VipsImage left, VipsImage right)
+        => Run(new VipsComplex2 { Left = left, Right = right, Op = VipsComplex2Op.CrossPhase });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

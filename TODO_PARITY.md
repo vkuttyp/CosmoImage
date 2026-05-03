@@ -27,8 +27,13 @@ Each lands in a single PR.
   (round 26) — `VipsArithmetic2` covers all five. UChar clamps and
   treats multiply as fraction-of-255; Float unclamped, direct multiply.
 - [ ] `linear_const` variant with broadcast scalar (`linear` shipped).
-- [ ] `sign` / `floor` / `ceil` / `rint` — extend `VipsMath` to cover
-  the libvips full set.
+- [x] ~~`sign` / `floor` / `ceil` / `rint`~~ (round 45) — extended
+  `VipsMath` enum + UChar / Float branches. Exposed as
+  `Sign`/`Floor`/`Ceil`/`Rint` on `VipsImageOps`.
+- [x] ~~`complex` / `complex2` / `complexform` / `complexget`~~
+  (round 45) — full DPComplex op surface. `Complex` (Polar / Rect /
+  Conj), `CrossPhase` (= `Complex2`), `ComplexForm`(re, im) and
+  `ComplexGet` (Real / Imag / Magnitude / Phase).
 - [ ] `clamp` (per-band clamp to range).
 - [x] ~~`sum`~~ (round 44) — pixel-wise sum across N images; UChar
   branch clamps at 255, Float branch is unclamped.

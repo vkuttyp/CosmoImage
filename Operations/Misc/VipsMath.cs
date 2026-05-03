@@ -16,6 +16,12 @@ public enum VipsMathOperation
     Exp10 = 7,
     Sqrt = 8,
     Pow = 9,
+    /// <summary>Sign: −1 / 0 / +1. UChar: 0→0, anything else→255.</summary>
+    Sign = 10,
+    Floor = 11,
+    Ceil = 12,
+    /// <summary>Round to nearest integer (banker's rounding for ties).</summary>
+    Rint = 13,
 }
 
 /// <summary>
@@ -99,6 +105,13 @@ public class VipsMath : VipsOperation
                 VipsMathOperation.Exp10 => (Math.Pow(10, x) - 1) / 9,
                 VipsMathOperation.Sqrt => Math.Sqrt(x),
                 VipsMathOperation.Pow => Math.Pow(x, operand),
+                // For UChar inputs ≥ 0, the rounding ops are no-ops on the
+                // [0, 1] mapped value but useful semantically once we cast
+                // from Float.
+                VipsMathOperation.Sign => i == 0 ? 0 : 1,
+                VipsMathOperation.Floor => x,
+                VipsMathOperation.Ceil => x,
+                VipsMathOperation.Rint => x,
                 _ => x
             };
             // Map [-1, 1] (trig) to [0, 255] via (y + 1) / 2; map [0, 1] directly.
@@ -148,6 +161,10 @@ public class VipsMath : VipsOperation
                         VipsMathOperation.Exp10 => Math.Pow(10, v),
                         VipsMathOperation.Sqrt => Math.Sqrt(v),
                         VipsMathOperation.Pow => Math.Pow(v, operand),
+                        VipsMathOperation.Sign => Math.Sign(v),
+                        VipsMathOperation.Floor => Math.Floor(v),
+                        VipsMathOperation.Ceil => Math.Ceiling(v),
+                        VipsMathOperation.Rint => Math.Round(v),
                         _ => v
                     };
                     BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(off, 4), (float)y2);
