@@ -363,7 +363,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
-| Drawing & vector graphics | 🟡 rounds 61–62 shipped path builder + shape factories + 3 brushes + FillPath + VipsPen + StrokePath. AA, clipping, transforms, dashed pens, miter / round joins, advanced brushes still missing |
+| Drawing & vector graphics | 🟡 rounds 61–63 shipped path builder + shape factories + 3 brushes + FillPath + VipsPen + StrokePath + 4× supersample AA (default on, opt-out via `aa: false`). Clipping, transforms, dashed pens, miter / round joins, advanced brushes still missing |
 | Color spaces | 🟡 only sRGB↔linear + RGB-matrix ops |
 | Metadata typed access | ❌ raw bytes only |
 | `MemoryAllocator` integration | 🟡 transient buffers only |

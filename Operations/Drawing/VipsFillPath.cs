@@ -11,12 +11,16 @@ namespace CosmoImage.Operations.Drawing;
 ///
 /// <para>Implementation: classic scanline polygon fill with the
 /// even-odd winding rule. Curves are flattened to line segments
-/// via recursive subdivision (flat-enough threshold = 0.25 px).
-/// No anti-aliasing in this round — supersample-AA is a follow-up.</para>
+/// via recursive subdivision (flat-enough threshold = 0.25 px).</para>
+///
+/// <para><see cref="Antialiased"/> defaults to <c>true</c>: each
+/// output row is supersampled at 4 vertical positions and accumulated
+/// against analytic horizontal coverage, then the brush colour is
+/// alpha-blended with the base using the resulting per-pixel coverage
+/// value. Set to <c>false</c> for the fast hard-edge fill (no AA).</para>
 ///
 /// <para>UChar input only. Output keeps the input's band format and
-/// dimensions; brush samples are written through pixels touched by
-/// the path.</para>
+/// dimensions.</para>
 /// </summary>
 public class VipsFillPath : VipsOperation
 {
@@ -24,6 +28,8 @@ public class VipsFillPath : VipsOperation
     public VipsImage? Out { get; set; }
     public VipsPath? Path { get; set; }
     public IVipsBrush? Brush { get; set; }
+    /// <summary>Apply 4× vertical supersample AA. Default true.</summary>
+    public bool Antialiased { get; set; } = true;
 
     public override int Build()
     {
@@ -40,7 +46,7 @@ public class VipsFillPath : VipsOperation
             Interpretation = In.Interpretation,
             Coding = In.Coding, XRes = In.XRes, YRes = In.YRes,
             StartFn = VipsSeq.StartOne, GenerateFn = Generate, StopFn = VipsSeq.StopOne,
-            ClientA = In, ClientB = (edges, Brush),
+            ClientA = In, ClientB = (edges, Brush, Antialiased),
         };
         Out.CopyMetadataFrom(In);
         Out.SetPipeline(VipsDemandStyle.Any, In);
@@ -56,10 +62,12 @@ public class VipsFillPath : VipsOperation
         return h.ToHashCode();
     }
 
+    private const int AaSubSamples = 4;
+
     private static int Generate(VipsRegion outRegion, object? seq, object? a, object? b, ref bool stop)
     {
         var inReg = (VipsRegion)seq!;
-        var (edges, brush) = ((List<Edge>, IVipsBrush))b!;
+        var (edges, brush, aa) = ((List<Edge>, IVipsBrush, bool))b!;
         VipsImage @in = inReg.Image;
         VipsRect r = outRegion.Valid;
 
@@ -72,27 +80,30 @@ public class VipsFillPath : VipsOperation
             inReg.GetAddress(r.Left, r.Top + y).Slice(0, rowBytes)
                 .CopyTo(outRegion.GetAddress(r.Left, r.Top + y));
 
-        // Per scanline: find x-crossings with all edges, sort, fill spans.
-        // Scanline is at y = pixel-centre = r.Top + y + 0.5.
+        if (aa)
+            FillAntialiased(outRegion, edges, brush, r, pelSize);
+        else
+            FillHard(outRegion, edges, brush, r, pelSize);
+        return 0;
+    }
+
+    /// <summary>Hard-edge fill — one scan per pixel row; fast but stair-stepped.</summary>
+    private static void FillHard(VipsRegion outRegion, List<Edge> edges, IVipsBrush brush,
+        VipsRect r, int pelSize)
+    {
         var crossings = new List<double>();
         for (int yy = 0; yy < r.Height; yy++)
         {
             double scan = r.Top + yy + 0.5;
             crossings.Clear();
             foreach (var e in edges)
-            {
-                // Edge crosses this scanline iff scan is between its
-                // y-extents. Use the "≤ ... <" half-open test so a
-                // shared vertex doesn't count twice.
                 if ((e.Y0 <= scan && e.Y1 > scan) || (e.Y1 <= scan && e.Y0 > scan))
                 {
                     double t = (scan - e.Y0) / (e.Y1 - e.Y0);
                     crossings.Add(e.X0 + t * (e.X1 - e.X0));
                 }
-            }
             if (crossings.Count < 2) continue;
             crossings.Sort();
-            // Even-odd fill: span between every consecutive pair of crossings.
             for (int i = 0; i + 1 < crossings.Count; i += 2)
             {
                 int x0 = (int)Math.Ceiling(crossings[i] - 0.5);
@@ -105,7 +116,74 @@ public class VipsFillPath : VipsOperation
                     brush.SampleAt(xx, r.Top + yy, addr.Slice((xx - x0) * pelSize, pelSize));
             }
         }
-        return 0;
+    }
+
+    /// <summary>
+    /// AA fill: K vertical sub-rows per output row, each with analytic
+    /// horizontal coverage on its pair of crossings. Coverage = (sum
+    /// across sub-rows) / K. Brush is alpha-blended with the existing
+    /// pixel using coverage.
+    /// </summary>
+    private static void FillAntialiased(VipsRegion outRegion, List<Edge> edges, IVipsBrush brush,
+        VipsRect r, int pelSize)
+    {
+        var coverage = new double[r.Width];
+        var crossings = new List<double>();
+        Span<byte> sample = stackalloc byte[pelSize];
+
+        for (int yy = 0; yy < r.Height; yy++)
+        {
+            Array.Clear(coverage, 0, coverage.Length);
+            for (int sub = 0; sub < AaSubSamples; sub++)
+            {
+                double scan = r.Top + yy + (sub + 0.5) / AaSubSamples;
+                crossings.Clear();
+                foreach (var e in edges)
+                    if ((e.Y0 <= scan && e.Y1 > scan) || (e.Y1 <= scan && e.Y0 > scan))
+                    {
+                        double t = (scan - e.Y0) / (e.Y1 - e.Y0);
+                        crossings.Add(e.X0 + t * (e.X1 - e.X0));
+                    }
+                if (crossings.Count < 2) continue;
+                crossings.Sort();
+                for (int i = 0; i + 1 < crossings.Count; i += 2)
+                {
+                    double x0 = crossings[i], x1 = crossings[i + 1];
+                    int firstP = Math.Max((int)Math.Floor(x0), r.Left);
+                    int lastP = Math.Min((int)Math.Floor(x1), r.Left + r.Width - 1);
+                    for (int p = firstP; p <= lastP; p++)
+                    {
+                        double leftEdge = Math.Max(p, x0);
+                        double rightEdge = Math.Min(p + 1, x1);
+                        if (rightEdge > leftEdge)
+                            coverage[p - r.Left] += rightEdge - leftEdge;
+                    }
+                }
+            }
+
+            var rowAddr = outRegion.GetAddress(r.Left, r.Top + yy);
+            for (int xx = 0; xx < r.Width; xx++)
+            {
+                double cov = coverage[xx] / AaSubSamples;
+                if (cov <= 0) continue;
+                int px = r.Left + xx;
+                int dstOff = xx * pelSize;
+                if (cov >= 0.999)
+                {
+                    brush.SampleAt(px, r.Top + yy, rowAddr.Slice(dstOff, pelSize));
+                }
+                else
+                {
+                    brush.SampleAt(px, r.Top + yy, sample);
+                    for (int bnd = 0; bnd < pelSize; bnd++)
+                    {
+                        double baseV = rowAddr[dstOff + bnd];
+                        double brushV = sample[bnd];
+                        rowAddr[dstOff + bnd] = (byte)Math.Round(baseV * (1 - cov) + brushV * cov);
+                    }
+                }
+            }
+        }
     }
 
     private readonly record struct Edge(double X0, double Y0, double X1, double Y1);

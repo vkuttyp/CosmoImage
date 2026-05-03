@@ -1801,18 +1801,18 @@ public static partial class VipsImageOps
     /// Fill a vector <paramref name="path"/> with <paramref name="brush"/>.
     /// Mirrors ImageSharp's <c>Fill(brush, path)</c>.
     /// </summary>
-    public static VipsImage FillPath(VipsImage input, VipsPath path, IVipsBrush brush)
-        => Run(new VipsFillPath { In = input, Path = path, Brush = brush });
+    public static VipsImage FillPath(VipsImage input, VipsPath path, IVipsBrush brush, bool aa = true)
+        => Run(new VipsFillPath { In = input, Path = path, Brush = brush, Antialiased = aa });
 
     /// <summary>Convenience: fill an axis-aligned rectangle.</summary>
     public static VipsImage Fill(VipsImage input, IVipsBrush brush,
-        double x, double y, double w, double h)
-        => FillPath(input, VipsPath.Rectangle(x, y, w, h), brush);
+        double x, double y, double w, double h, bool aa = true)
+        => FillPath(input, VipsPath.Rectangle(x, y, w, h), brush, aa);
 
     /// <summary>Convenience: fill a circle at (cx, cy) with the given radius.</summary>
     public static VipsImage FillCircle(VipsImage input, IVipsBrush brush,
-        double cx, double cy, double radius)
-        => FillPath(input, VipsPath.Circle(cx, cy, radius), brush);
+        double cx, double cy, double radius, bool aa = true)
+        => FillPath(input, VipsPath.Circle(cx, cy, radius), brush, aa);
 
     /// <summary>Convenience: fill a polygon described by a sequence of vertices.</summary>
     public static VipsImage FillPolygon(VipsImage input, IVipsBrush brush,
@@ -1823,18 +1823,18 @@ public static partial class VipsImageOps
     /// Stroke a vector <paramref name="path"/> with <paramref name="pen"/>.
     /// Mirrors ImageSharp's <c>Draw(pen, path)</c>.
     /// </summary>
-    public static VipsImage StrokePath(VipsImage input, VipsPath path, VipsPen pen)
-        => VipsStrokePath.Stroke(input, path, pen);
+    public static VipsImage StrokePath(VipsImage input, VipsPath path, VipsPen pen, bool aa = true)
+        => VipsStrokePath.Stroke(input, path, pen, aa);
 
     /// <summary>Stroke an axis-aligned rectangle outline.</summary>
     public static VipsImage StrokeRectangle(VipsImage input, VipsPen pen,
-        double x, double y, double w, double h)
-        => StrokePath(input, VipsPath.Rectangle(x, y, w, h), pen);
+        double x, double y, double w, double h, bool aa = true)
+        => StrokePath(input, VipsPath.Rectangle(x, y, w, h), pen, aa);
 
     /// <summary>Stroke a circle outline.</summary>
     public static VipsImage StrokeCircle(VipsImage input, VipsPen pen,
-        double cx, double cy, double radius)
-        => StrokePath(input, VipsPath.Circle(cx, cy, radius), pen);
+        double cx, double cy, double radius, bool aa = true)
+        => StrokePath(input, VipsPath.Circle(cx, cy, radius), pen, aa);
 
     /// <summary>Stroke a polygon outline.</summary>
     public static VipsImage StrokePolygon(VipsImage input, VipsPen pen,
@@ -1843,10 +1843,10 @@ public static partial class VipsImageOps
 
     /// <summary>Stroke a single line segment from (x1, y1) to (x2, y2).</summary>
     public static VipsImage StrokeLine(VipsImage input, VipsPen pen,
-        double x1, double y1, double x2, double y2)
+        double x1, double y1, double x2, double y2, bool aa = true)
     {
         var path = new VipsPath().MoveTo(x1, y1).LineTo(x2, y2);
-        return StrokePath(input, path, pen);
+        return StrokePath(input, path, pen, aa);
     }
 
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);

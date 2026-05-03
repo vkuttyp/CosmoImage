@@ -21,24 +21,17 @@ namespace CosmoImage.Operations.Drawing;
 /// </summary>
 public static class VipsStrokePath
 {
-    public static VipsImage Stroke(VipsImage input, VipsPath path, VipsPen pen)
+    public static VipsImage Stroke(VipsImage input, VipsPath path, VipsPen pen, bool aa = true)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (path == null) throw new ArgumentNullException(nameof(path));
         if (pen == null) throw new ArgumentNullException(nameof(pen));
 
-        // Walk the path, collect each sub-path's flattened polyline.
-        // A sub-path starts at MoveTo; Close marks its end (closes
-        // back to start point); the next MoveTo starts a fresh one.
         var subpaths = FlattenToSubPaths(path);
-
-        // Build the stroke outline as a new VipsPath: one closed
-        // outline polygon per sub-path. Then fill via VipsFillPath
-        // — this keeps the rasteriser path single-source.
         var outline = new VipsPath();
         foreach (var (points, closed) in subpaths)
             EmitOutline(outline, points, closed, pen.Width / 2);
-        return VipsImageOps.FillPath(input, outline, pen.Brush);
+        return VipsImageOps.FillPath(input, outline, pen.Brush, aa);
     }
 
     /// <summary>

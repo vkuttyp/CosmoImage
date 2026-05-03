@@ -151,9 +151,11 @@ public class Round62Tests
             .MoveTo(5, 30)
             .QuadraticTo(20, 5, 35, 30);
         var painted = VipsImageOps.StrokePath(bg, path, pen);
-        // Quadratic Bezier passes through (20, 17.5) at t=0.5 (B(0.5) =
-        // ¼·start + ½·ctrl + ¼·end). Probe near that point.
-        var peak = ReadPel(painted, 20, 18);
+        // Quadratic Bezier passes through (20, 17.5) at t=0.5
+        // (B(0.5) = ¼·start + ½·ctrl + ¼·end). Pixel (20, 17) sits
+        // inside the stroked band; centre coverage is close to 1 so
+        // the brush colour comes through strongly even with AA.
+        var peak = ReadPel(painted, 20, 17);
         Assert.True(peak[0] > 200);
     }
 
