@@ -50,8 +50,12 @@ Each lands in a single PR.
   row-sums) → 1D Float images.
 - [x] ~~`find_trim`~~ (round 44) — auto-find non-background bbox;
   defaults to top-left pixel as background.
-- [ ] `getpoint` (extract single pixel as values) — wraps existing
-  `TypedImage<TPixel>.GetPixel`.
+- [x] ~~`getpoint`~~ (round 48) — `Getpoint(input, x, y)` returns
+  `double[]`; supports UChar/UShort/Short/UInt/Int/Float/DPComplex.
+- [x] ~~`hist_find_ndim`~~ (round 48) — N-dim histogram for 1/2/3-band
+  UChar inputs; UInt accumulator output.
+- [x] ~~`profile`~~ (round 48) — per-axis first-non-zero coordinate
+  profile (Columns + Rows UInt images).
 
 ### `conversion/`
 - [x] ~~`bandjoin`~~ (round 26) — `Bandjoin(other, …)` for N inputs.
@@ -217,7 +221,8 @@ generator that produces an image from parameters.
   amplitude ramp.
 - [x] ~~`zone`~~ (round 40) — concentric cos(r²) zone-plate, the
   canonical resize-aliasing diagnostic.
-- [ ] `grey` (uniform grey-ramp test image).
+- [x] ~~`grey`~~ (round 48) — horizontal 0..1 (Float) or 0..255 (UChar)
+  ramp; constant down columns.
 - [x] ~~`gaussmat`~~ (round 38) — Float matrix kernel image; auto-sized
   by `min_ampl` cutoff.
 - [x] ~~`logmat`~~ (round 39) — Laplacian-of-Gaussian Float kernel.

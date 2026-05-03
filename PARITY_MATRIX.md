@@ -55,12 +55,12 @@ Pointwise arithmetic, statistics, hough transform, measurement.
 | `min`, `max`, `sum` (reductions) | ✅ via `Stats` | Per-band + aggregate min/max/sum/avg/deviate in one pass |
 | `avg`, `deviate`, `stats` | ✅ | `Stats(image)` returns full result; `Avg`/`Min`/`Max`/`Deviate` shortcuts |
 | `maxpair`, `minpair` (per-pixel max/min of two images) | ✅ | `MinImage(inputs…)` / `MaxImage(inputs…)` accept N inputs; `Sum(inputs…)` for additive composition |
-| `getpoint` (extract single pixel as values) | ❌ | Equivalent: `image.GetPixel<TPixel>(x, y)` |
+| `getpoint` (extract single pixel as values) | ✅ | `Getpoint(input, x, y)` returns `double[]` of band values (UChar/UShort/Short/UInt/Int/Float/DPComplex) |
 | `find_trim` (auto-find non-background bbox) | ✅ | `FindTrim(input, threshold, background)` — top-left pixel = default background; returns `VipsRect(0, 0, 0, 0)` when uniform |
 | `measure` (extract patch averages from grid) | ✅ | `Measure(input, h, v, left, top, w, h)` — Float matrix of patch means; samples middle 80% of each cell to dodge edge bleed |
-| `profile` (column/row first/last non-zero) | ❌ | |
+| `profile` (column/row first/last non-zero) | ✅ | `Profile(input)` returns (Columns: 1×W, Rows: 1×H) UInt images of first-non-zero coordinates per axis |
 | `project` (sum-along-axis, both axes) | ✅ | `Project(input)` returns (Columns: 1×W Float, Rows: 1×H Float) per-axis sums |
-| `hist_find`, `hist_find_indexed`, `hist_find_ndim` | 🟡 | `HistFind`, `HistFindIndexed(input, index, reduction)` (Sum/Mean/Min/Max). N-dim variant still missing. |
+| `hist_find`, `hist_find_indexed`, `hist_find_ndim` | ✅ | `HistFind`, `HistFindIndexed(input, index, reduction)` (Sum/Mean/Min/Max), `HistFindNDim(input, bins)` for 1/2/3-band UChar |
 | `hough_circle`, `hough_line` | ✅ | `HoughLine(width, height, threshold)` and `HoughCircle(minRadius, maxRadius, threshold)` — UInt accumulator output |
 | `clamp` | ✅ | `Clamp(input, min, max)` — UChar (byte-clamped) and Float (numeric-clamped) branches |
 
@@ -174,7 +174,7 @@ Generators. **Whole subsystem missing** apart from `text`.
 | :--- | :---: |
 | `black` (constant 0 image) | ✅ | `Black(width, height, bands, format)` |
 | `xyz` (per-pixel x/y coordinate image — useful for mapim) | ✅ | `Xyz(width, height, csize, dsize, esize)` — UInt 2-band default; extra dims roll into bands |
-| `eye`, `grey`, `zone` (test-pattern generators) | 🟡 | `Eye(width, height, factor)` and `Zone(width, height)` ✅; `grey` still missing |
+| `eye`, `grey`, `zone` (test-pattern generators) | ✅ | `Eye`, `Zone`, `Grey(width, height, uchar=false)` |
 | `gaussmat`, `logmat`, `gaussnoise` (filter mask generators) | ✅ | `Gaussmat(sigma, minAmpl, separable)`, `Logmat(sigma, minAmpl)`, `Gaussnoise(width, height, mean, sigma, seed)` (Box-Muller) |
 | `mask_butterworth`, `mask_butterworth_band`, `mask_butterworth_ring` | 🟡 | `MaskButterworthLowpass` / `MaskButterworthHighpass` / `MaskButterworthRing` ✅; `_band` (directional) still missing |
 | `mask_gaussian`, `mask_gaussian_band`, `mask_gaussian_ring` | 🟡 | `MaskGaussianLowpass` / `MaskGaussianHighpass` / `MaskGaussianRing` ✅; `_band` (directional) still missing |

@@ -1556,6 +1556,26 @@ public static partial class VipsImageOps
     public static VipsImage HistPlot(VipsImage input, int height = 256)
         => Run(new VipsHistPlot { In = input, Height = height });
 
+    // From Operations/Analysis/VipsHistFindNDim.cs
+    /// <summary>N-dim histogram (1, 2, or 3-band UChar). UInt accumulator output.</summary>
+    public static VipsImage HistFindNDim(VipsImage input, int bins = 10)
+        => Run(new VipsHistFindNDim { In = input, Bins = bins });
+
+    // From Operations/Analysis/VipsGetpoint.cs
+    /// <summary>Read a single pixel as a double[] of band values.</summary>
+    public static double[] Getpoint(VipsImage input, int x, int y)
+        => VipsGetpoint.Compute(input, x, y);
+
+    // From Operations/Analysis/VipsProfile.cs
+    /// <summary>Per-axis first-non-zero profile. Returns (Columns: 1×W, Rows: 1×H) UInt images.</summary>
+    public static (VipsImage Columns, VipsImage Rows) Profile(VipsImage input)
+        => VipsProfile.Compute(input);
+
+    // From Operations/Create/VipsGrey.cs
+    /// <summary>Horizontal grey ramp 0..1 (Float) or 0..255 (UChar).</summary>
+    public static VipsImage Grey(int width, int height, bool uchar = false)
+        => Run(new VipsGrey { Width = width, Height = height, UChar = uchar });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
