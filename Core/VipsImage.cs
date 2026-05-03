@@ -135,7 +135,7 @@ public static class VipsEnumsExtensions
     public static int SizeOf(VipsBandFormat format) => format switch
     {
         VipsBandFormat.UChar or VipsBandFormat.Char => 1,
-        VipsBandFormat.UShort or VipsBandFormat.Short => 2,
+        VipsBandFormat.UShort or VipsBandFormat.Short or VipsBandFormat.Half => 2,
         VipsBandFormat.UInt or VipsBandFormat.Int or VipsBandFormat.Float => 4,
         VipsBandFormat.Double or VipsBandFormat.Complex => 8,
         VipsBandFormat.DPComplex => 16,

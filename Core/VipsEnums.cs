@@ -13,7 +13,9 @@ public enum VipsBandFormat
     Complex = 7,
     Double = 8,
     DPComplex = 9,
-    Last = 10
+    /// <summary>16-bit IEEE 754 float (System.Half). 2 bytes per band.</summary>
+    Half = 10,
+    Last = 11
 }
 
 public enum VipsInterpretation

@@ -470,3 +470,51 @@ public struct Rgba1010102 : IPixel<Rgba1010102>
     public static int BandCount => 1;
     public static VipsBandFormat BandFormat => VipsBandFormat.UInt;
 }
+
+/// <summary>
+/// Single-band 16-bit IEEE 754 float. The .NET <see cref="Half"/>
+/// type is the underlying storage. Used in HDR / wide-gamut pipelines
+/// where Float (32-bit) is overkill but UShort can't represent
+/// negative values or extended range.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct HalfSingle : IPixel<HalfSingle>
+{
+    public Half Value;
+    public HalfSingle(Half value) { Value = value; }
+    public HalfSingle(float value) { Value = (Half)value; }
+    public static int BandCount => 1;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Half;
+}
+
+/// <summary>2-band 16-bit float (X, Y). Common for normalised
+/// derivative / gradient maps with extended range.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct HalfVector2 : IPixel<HalfVector2>
+{
+    public Half X;
+    public Half Y;
+    public HalfVector2(Half x, Half y) { X = x; Y = y; }
+    public HalfVector2(float x, float y) { X = (Half)x; Y = (Half)y; }
+    public static int BandCount => 2;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Half;
+}
+
+/// <summary>4-band 16-bit float RGBA. The HDR-imaging workhorse —
+/// half the storage of <c>RgbaVector</c> with enough range for
+/// linear-light pipelines.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct HalfVector4 : IPixel<HalfVector4>
+{
+    public Half X;
+    public Half Y;
+    public Half Z;
+    public Half W;
+    public HalfVector4(Half x, Half y, Half z, Half w) { X = x; Y = y; Z = z; W = w; }
+    public HalfVector4(float x, float y, float z, float w)
+    {
+        X = (Half)x; Y = (Half)y; Z = (Half)z; W = (Half)w;
+    }
+    public static int BandCount => 4;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Half;
+}
