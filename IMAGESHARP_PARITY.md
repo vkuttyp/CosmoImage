@@ -210,15 +210,15 @@ text. ImageSharp has all of:
 
 | Capability | ImageSharp | CosmoImage |
 | :--- | :--- | :--- |
-| Path construction (move-to / line-to / cubic / quadratic Bezier / arc / close) | ✅ `IPathBuilder`, `Path`, `PathBuilder` | ❌ |
-| Polygon / Ellipse / Circle / Rectangle / Star / RegularPolygon as path objects | ✅ | ❌ |
+| Path construction (move-to / line-to / cubic / quadratic Bezier / arc / close) | ✅ `IPathBuilder`, `Path`, `PathBuilder` | ✅ `VipsPath` builder (round 61) — `MoveTo` / `LineTo` / `CubicTo` / `QuadraticTo` / `Close`. Curves flatten via recursive subdivision (0.25-px tolerance) at fill time. Arc segment still missing |
+| Polygon / Ellipse / Circle / Rectangle / Star / RegularPolygon as path objects | ✅ | ✅ `VipsPath.Rectangle` / `Polygon` / `Ellipse` / `Circle` / `RegularPolygon` / `Star` factory methods (round 61) |
 | Line rendering (Xiaolin Wu / Bresenham / sub-pixel) | ✅ via path-based renderer | 🟡 we have `DrawLine` (Xiaolin Wu antialiased) |
 | Rectangle (fill + outline) | ✅ as Path | 🟡 we have `DrawRect` |
 | Circle / Ellipse | ✅ | ❌ |
 | Polygon / Polyline | ✅ | ❌ |
 | Arc / Bezier curves | ✅ | ❌ |
 | `SolidPen`, dashed pens, `Pen` width, line joins (miter / round / bevel), end caps | ✅ | ❌ |
-| Brushes: `SolidBrush`, `LinearGradientBrush`, `RadialGradientBrush`, `PathGradientBrush`, `ImageBrush`, `PatternBrush` | ✅ | ❌ |
+| Brushes: `SolidBrush`, `LinearGradientBrush`, `RadialGradientBrush`, `PathGradientBrush`, `ImageBrush`, `PatternBrush` | ✅ | 🟡 `VipsSolidBrush` / `VipsLinearGradientBrush` / `VipsRadialGradientBrush` (round 61). `PathGradientBrush` / `ImageBrush` / `PatternBrush` still missing |
 | Clipping regions (intersect / union / difference) | ✅ | ❌ |
 | Affine path transforms | ✅ | ❌ |
 | Tessellation (path → triangles) | ✅ | ❌ |
@@ -363,7 +363,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
-| Drawing & vector graphics | ❌ — major permanent gap |
+| Drawing & vector graphics | 🟡 round 61 shipped path builder + shape factories + 3 brushes + FillPath. Stroking, AA, clipping, transforms, advanced brushes still missing |
 | Color spaces | 🟡 only sRGB↔linear + RGB-matrix ops |
 | Metadata typed access | ❌ raw bytes only |
 | `MemoryAllocator` integration | 🟡 transient buffers only |

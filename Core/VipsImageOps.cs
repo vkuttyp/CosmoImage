@@ -1796,6 +1796,29 @@ public static partial class VipsImageOps
             Base = @base, Overlay = overlay, X = 0, Y = 0, Mode = mode, Opacity = opacity,
         });
 
+    // From Operations/Drawing/VipsFillPath.cs
+    /// <summary>
+    /// Fill a vector <paramref name="path"/> with <paramref name="brush"/>.
+    /// Mirrors ImageSharp's <c>Fill(brush, path)</c>.
+    /// </summary>
+    public static VipsImage FillPath(VipsImage input, VipsPath path, IVipsBrush brush)
+        => Run(new VipsFillPath { In = input, Path = path, Brush = brush });
+
+    /// <summary>Convenience: fill an axis-aligned rectangle.</summary>
+    public static VipsImage Fill(VipsImage input, IVipsBrush brush,
+        double x, double y, double w, double h)
+        => FillPath(input, VipsPath.Rectangle(x, y, w, h), brush);
+
+    /// <summary>Convenience: fill a circle at (cx, cy) with the given radius.</summary>
+    public static VipsImage FillCircle(VipsImage input, IVipsBrush brush,
+        double cx, double cy, double radius)
+        => FillPath(input, VipsPath.Circle(cx, cy, radius), brush);
+
+    /// <summary>Convenience: fill a polygon described by a sequence of vertices.</summary>
+    public static VipsImage FillPolygon(VipsImage input, IVipsBrush brush,
+        params (double x, double y)[] points)
+        => FillPath(input, VipsPath.Polygon(points), brush);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
