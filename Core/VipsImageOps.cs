@@ -1327,6 +1327,61 @@ public static partial class VipsImageOps
             BaseCellSize = baseCellSize, FractalDimension = fractalDimension, Seed = seed,
         });
 
+    // From Operations/Create/VipsMaskGaussian.cs
+    /// <summary>Gaussian-lowpass frequency mask (centred).</summary>
+    public static VipsImage MaskGaussianLowpass(int width, int height, double frequencyCutoff = 0.5)
+        => Run(new VipsMaskGaussian {
+            Width = width, Height = height, Mode = VipsMaskMode.Lowpass,
+            FrequencyCutoff = frequencyCutoff,
+        });
+
+    /// <summary>Gaussian-highpass frequency mask (centred). 1 − lowpass.</summary>
+    public static VipsImage MaskGaussianHighpass(int width, int height, double frequencyCutoff = 0.5)
+        => Run(new VipsMaskGaussian {
+            Width = width, Height = height, Mode = VipsMaskMode.Highpass,
+            FrequencyCutoff = frequencyCutoff,
+        });
+
+    /// <summary>Gaussian band-pass ring at the given centre radius / width.</summary>
+    public static VipsImage MaskGaussianRing(int width, int height,
+        double frequencyCutoff = 0.5, double ringWidth = 0.1)
+        => Run(new VipsMaskGaussian {
+            Width = width, Height = height, Mode = VipsMaskMode.Ring,
+            FrequencyCutoff = frequencyCutoff, RingWidth = ringWidth,
+        });
+
+    // From Operations/Create/VipsMaskButterworth.cs
+    /// <summary>Butterworth-lowpass frequency mask.</summary>
+    public static VipsImage MaskButterworthLowpass(int width, int height,
+        double frequencyCutoff = 0.5, int order = 2)
+        => Run(new VipsMaskButterworth {
+            Width = width, Height = height, Mode = VipsMaskMode.Lowpass,
+            FrequencyCutoff = frequencyCutoff, Order = order,
+        });
+
+    /// <summary>Butterworth-highpass frequency mask.</summary>
+    public static VipsImage MaskButterworthHighpass(int width, int height,
+        double frequencyCutoff = 0.5, int order = 2)
+        => Run(new VipsMaskButterworth {
+            Width = width, Height = height, Mode = VipsMaskMode.Highpass,
+            FrequencyCutoff = frequencyCutoff, Order = order,
+        });
+
+    /// <summary>Butterworth band-pass ring.</summary>
+    public static VipsImage MaskButterworthRing(int width, int height,
+        double frequencyCutoff = 0.5, double ringWidth = 0.1, int order = 2)
+        => Run(new VipsMaskButterworth {
+            Width = width, Height = height, Mode = VipsMaskMode.Ring,
+            FrequencyCutoff = frequencyCutoff, RingWidth = ringWidth, Order = order,
+        });
+
+    // From Operations/Create/VipsMaskFractal.cs
+    /// <summary>1/fᵅ frequency mask for spectral fractal-noise synthesis.</summary>
+    public static VipsImage MaskFractal(int width, int height, double fractalDimension = 2.5)
+        => Run(new VipsMaskFractal {
+            Width = width, Height = height, FractalDimension = fractalDimension,
+        });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

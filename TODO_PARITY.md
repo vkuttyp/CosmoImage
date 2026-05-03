@@ -194,11 +194,17 @@ generator that produces an image from parameters.
 - [x] ~~`gaussnoise`~~ (round 39) — Box-Muller; deterministic seed.
 - [x] ~~`mask_ideal`~~ (round 40) — `MaskIdealLowpass` /
   `MaskIdealHighpass` (centred Float masks for use with `Freqmult`).
-  `mask_butterworth` / `mask_gaussian` and band/ring variants still
-  missing.
+- [x] ~~`mask_gaussian`~~ (round 41) — `MaskGaussianLowpass` /
+  `MaskGaussianHighpass` / `MaskGaussianRing`. Smooth fall-off
+  avoids the spatial-domain ringing of ideal masks.
+- [x] ~~`mask_butterworth`~~ (round 41) — `MaskButterworthLowpass` /
+  `MaskButterworthHighpass` / `MaskButterworthRing`. Adjustable
+  rolloff via the `order` parameter.
+- [x] ~~`mask_fractal`~~ (round 41) — 1/fᵅ centred mask; pair with
+  `Gaussnoise` + `Freqmult` for spectral fractal-noise synthesis.
 - [x] ~~`fractsurf`~~ (round 40) — sum of Perlin octaves at successive
-  frequencies; configurable fractal dimension. `mask_fractal` still
-  missing.
+  frequencies; configurable fractal dimension.
+- [ ] `mask_*_band` (directional band-pass variants).
 - [x] ~~`sines`~~ (round 38) — Float sinusoid pattern; frequencies in
   cycles per image.
 - [x] ~~`perlin`~~ (round 39) — Perlin 2002 fade curve;

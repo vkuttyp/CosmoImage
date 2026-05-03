@@ -176,10 +176,10 @@ Generators. **Whole subsystem missing** apart from `text`.
 | `xyz` (per-pixel x/y coordinate image — useful for mapim) | ✅ | `Xyz(width, height, csize, dsize, esize)` — UInt 2-band default; extra dims roll into bands |
 | `eye`, `grey`, `zone` (test-pattern generators) | 🟡 | `Eye(width, height, factor)` and `Zone(width, height)` ✅; `grey` still missing |
 | `gaussmat`, `logmat`, `gaussnoise` (filter mask generators) | ✅ | `Gaussmat(sigma, minAmpl, separable)`, `Logmat(sigma, minAmpl)`, `Gaussnoise(width, height, mean, sigma, seed)` (Box-Muller) |
-| `mask_butterworth`, `mask_butterworth_band`, `mask_butterworth_ring` | ❌ |
-| `mask_gaussian`, `mask_gaussian_band`, `mask_gaussian_ring` | ❌ |
+| `mask_butterworth`, `mask_butterworth_band`, `mask_butterworth_ring` | 🟡 | `MaskButterworthLowpass` / `MaskButterworthHighpass` / `MaskButterworthRing` ✅; `_band` (directional) still missing |
+| `mask_gaussian`, `mask_gaussian_band`, `mask_gaussian_ring` | 🟡 | `MaskGaussianLowpass` / `MaskGaussianHighpass` / `MaskGaussianRing` ✅; `_band` (directional) still missing |
 | `mask_ideal`, `mask_ideal_band`, `mask_ideal_ring` | 🟡 | `MaskIdealLowpass` / `MaskIdealHighpass` ✅; band / ring variants still missing |
-| `mask_fractal` | ❌ |
+| `mask_fractal` | ✅ | `MaskFractal(width, height, fractalDimension)` — 1/fᵅ centred mask; pair with `Gaussnoise` + `Freqmult` for spectrally-shaped noise |
 | `fractsurf` (fractal surface) | ✅ | `Fractsurf(width, height, octaves, baseCellSize, fractalDimension, seed)` — sum of Perlin octaves at successive frequencies |
 | `perlin`, `worley`, `sines` | ✅ | `Sines`, `Perlin(width, height, cellSize, seed)` (Perlin 2002 fade curve), `Worley` (F1 distance, deterministic per-cell hash) |
 | `point` (sample image at point) | ❌ |
