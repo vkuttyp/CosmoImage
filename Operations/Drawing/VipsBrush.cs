@@ -226,3 +226,90 @@ public sealed class VipsPatternBrush : IVipsBrush
 
     public void SampleAt(int x, int y, Span<byte> dst) => _inner.SampleAt(x, y, dst);
 }
+
+/// <summary>
+/// Brush that interpolates colour across an N-vertex polygon. Mirrors
+/// ImageSharp's <c>PathGradientBrush(points, colours, centerColour)</c>.
+///
+/// <para>The polygon is fan-triangulated from its centroid; each
+/// triangle (centroid, v_i, v_{i+1}) carries barycentric interpolation
+/// between the centre colour and the two adjacent vertex colours.
+/// Pixels outside the polygon fall back to the centre colour.</para>
+///
+/// <para>If <c>centerColour</c> is omitted, the per-band average of
+/// the vertex colours is used.</para>
+/// </summary>
+public sealed class VipsPathGradientBrush : IVipsBrush
+{
+    private readonly (double x, double y)[] _vertices;
+    private readonly byte[][] _colors;
+    private readonly byte[] _centerColor;
+    private readonly double _cx, _cy;
+
+    public VipsPathGradientBrush((double x, double y)[] vertices, byte[][] colors,
+        byte[]? centerColor = null)
+    {
+        if (vertices == null) throw new ArgumentNullException(nameof(vertices));
+        if (colors == null) throw new ArgumentNullException(nameof(colors));
+        if (vertices.Length < 3) throw new ArgumentException("PathGradient needs ≥ 3 vertices");
+        if (colors.Length != vertices.Length)
+            throw new ArgumentException("Vertex count and colour count must match");
+        int bands = colors[0].Length;
+        for (int i = 1; i < colors.Length; i++)
+            if (colors[i].Length != bands)
+                throw new ArgumentException("All vertex colours must have the same band count");
+        if (centerColor != null && centerColor.Length != bands)
+            throw new ArgumentException("Centre colour band count must match vertex colours");
+
+        _vertices = ((double x, double y)[])vertices.Clone();
+        _colors = new byte[colors.Length][];
+        for (int i = 0; i < colors.Length; i++) _colors[i] = (byte[])colors[i].Clone();
+
+        if (centerColor != null) _centerColor = (byte[])centerColor.Clone();
+        else
+        {
+            _centerColor = new byte[bands];
+            var sum = new double[bands];
+            foreach (var c in colors)
+                for (int b = 0; b < bands; b++) sum[b] += c[b];
+            for (int b = 0; b < bands; b++)
+                _centerColor[b] = (byte)Math.Round(sum[b] / colors.Length);
+        }
+
+        double sx = 0, sy = 0;
+        foreach (var v in vertices) { sx += v.x; sy += v.y; }
+        _cx = sx / vertices.Length;
+        _cy = sy / vertices.Length;
+    }
+
+    public void SampleAt(int x, int y, Span<byte> dst)
+    {
+        int n = _vertices.Length;
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            double ax = _cx, ay = _cy;
+            double bx = _vertices[i].x, by = _vertices[i].y;
+            double cx = _vertices[j].x, cy = _vertices[j].y;
+            // Barycentric of (x, y) in triangle (a=centroid, b=v_i, c=v_j).
+            double denom = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+            if (Math.Abs(denom) < 1e-12) continue;
+            double u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / denom;
+            double v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / denom;
+            double w = 1 - u - v;
+            if (u >= -1e-9 && v >= -1e-9 && w >= -1e-9)
+            {
+                int bands = Math.Min(_centerColor.Length, dst.Length);
+                for (int b = 0; b < bands; b++)
+                {
+                    double cVal = u * _centerColor[b] + v * _colors[i][b] + w * _colors[j][b];
+                    dst[b] = (byte)Math.Clamp(Math.Round(cVal), 0, 255);
+                }
+                return;
+            }
+        }
+        // Outside the polygon — fall back to the centre colour.
+        int n2 = Math.Min(_centerColor.Length, dst.Length);
+        _centerColor.AsSpan(0, n2).CopyTo(dst);
+    }
+}
