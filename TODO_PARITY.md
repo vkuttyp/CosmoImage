@@ -134,10 +134,15 @@ Each lands in a single PR.
 - [ ] Edge-preserving interpolators: `nohalo`, `lbb`, `vsqbs`.
 
 ### `draw/`
-- [ ] `draw_circle`.
-- [ ] `draw_flood` (flood fill).
-- [ ] `draw_mask` (draw with alpha mask).
-- [ ] `draw_smudge`.
+- [x] ~~`draw_circle`~~ (round 43) — Bresenham outline or span-fill.
+- [x] ~~`draw_flood`~~ (round 43) — 4-connected scanline flood
+  (Smith 1979).
+- [x] ~~`draw_image`~~ (round 43) — paste sub-image at point, output
+  stays input-sized.
+- [x] ~~`draw_mask`~~ (round 43) — UChar single-band alpha mask;
+  per-pixel blend.
+- [x] ~~`draw_smudge`~~ (round 43) — 3×3 local-average soft erase
+  over a rectangular region.
 
 ---
 

@@ -1406,6 +1406,33 @@ public static partial class VipsImageOps
             Interpolate = interpolate,
         });
 
+    // From Operations/Drawing/VipsDrawCircle.cs
+    /// <summary>Draw a circle (outline or filled) into a copy of <paramref name="input"/>.</summary>
+    public static VipsImage DrawCircle(VipsImage input, int cx, int cy, int radius,
+        byte[] ink, bool fill = false)
+        => Run(new VipsDrawCircle { In = input, Cx = cx, Cy = cy, Radius = radius,
+            Ink = ink, Fill = fill });
+
+    // From Operations/Drawing/VipsDrawFlood.cs
+    /// <summary>4-connected flood-fill from (<paramref name="x"/>, <paramref name="y"/>).</summary>
+    public static VipsImage DrawFlood(VipsImage input, int x, int y, byte[] ink)
+        => Run(new VipsDrawFlood { In = input, X = x, Y = y, Ink = ink });
+
+    // From Operations/Drawing/VipsDrawImage.cs
+    /// <summary>Paste <paramref name="sub"/> into <paramref name="input"/> at (x, y); output stays input-sized.</summary>
+    public static VipsImage DrawImage(VipsImage input, VipsImage sub, int x, int y)
+        => Run(new VipsDrawImage { In = input, Sub = sub, X = x, Y = y });
+
+    // From Operations/Drawing/VipsDrawMask.cs
+    /// <summary>Apply <paramref name="ink"/> through a single-band UChar alpha <paramref name="mask"/>.</summary>
+    public static VipsImage DrawMask(VipsImage input, VipsImage mask, int x, int y, byte[] ink)
+        => Run(new VipsDrawMask { In = input, Mask = mask, X = x, Y = y, Ink = ink });
+
+    // From Operations/Drawing/VipsDrawSmudge.cs
+    /// <summary>Smudge / soft-erase a rectangular region with a 3×3 local average.</summary>
+    public static VipsImage DrawSmudge(VipsImage input, int x, int y, int width, int height)
+        => Run(new VipsDrawSmudge { In = input, X = x, Y = y, Width = width, Height = height });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

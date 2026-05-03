@@ -198,11 +198,11 @@ In-place pixel drawing onto a memory-backed image.
 | :--- | :---: |
 | `draw_line` | ✅ `DrawLine` (Xiaolin Wu antialiased) |
 | `draw_rect` | ✅ `DrawRect` (outline + fill) |
-| `draw_circle` | ❌ |
-| `draw_flood` (flood fill) | ❌ |
-| `draw_image` (paste image at point) | 🟡 covered by `Composite` |
-| `draw_mask` (draw with alpha mask) | ❌ |
-| `draw_smudge` | ❌ |
+| `draw_circle` | ✅ | `DrawCircle(input, cx, cy, radius, ink, fill)` — Bresenham outline or span-fill |
+| `draw_flood` (flood fill) | ✅ | `DrawFlood(input, x, y, ink)` — 4-connected scanline flood (Smith 1979) |
+| `draw_image` (paste image at point) | ✅ | `DrawImage(input, sub, x, y)` — output stays input-sized; clips at edges |
+| `draw_mask` (draw with alpha mask) | ✅ | `DrawMask(input, mask, x, y, ink)` — UChar single-band alpha; per-pixel blend |
+| `draw_smudge` | ✅ | `DrawSmudge(input, x, y, w, h)` — 3×3 local-average soft erase |
 
 ---
 
