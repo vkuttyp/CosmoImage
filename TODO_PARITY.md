@@ -125,10 +125,12 @@ Each lands in a single PR.
   estimation).
 
 ### `resample/`
-- [ ] `mapim` (nonlinear remap via index image — lens correction,
-  warping).
-- [ ] `quadratic` (quadratic transform).
-- [ ] `similarity` (constrained scale + rotate + translate).
+- [x] ~~`mapim`~~ (round 42) — Float 2-band coordinate index image,
+  bilinear sampling, configurable background fill.
+- [x] ~~`quadratic`~~ (round 42) — 2D quadratic-polynomial coordinate
+  warp; coefficients = [a0..a5, b0..b5].
+- [x] ~~`similarity`~~ (round 42) — uniform scale + rotate + translate;
+  thin wrapper over `Affine`.
 - [ ] Edge-preserving interpolators: `nohalo`, `lbb`, `vsqbs`.
 
 ### `draw/`

@@ -515,6 +515,21 @@ public static class VipsImageExtensions
         bool expand = false, double[]? background = null)
         => VipsImageOps.Insert(image, sub, x, y, expand, background);
 
+    /// <summary>Sample this image using a Float 2-band coordinate index.</summary>
+    public static VipsImage Mapim(this VipsImage image, VipsImage index, double[]? background = null)
+        => VipsImageOps.Mapim(image, index, background);
+
+    /// <summary>Apply a 2D quadratic-polynomial coordinate warp.</summary>
+    public static VipsImage Quadratic(this VipsImage image, double[] coefficients,
+        int outWidth = 0, int outHeight = 0)
+        => VipsImageOps.Quadratic(image, coefficients, outWidth, outHeight);
+
+    /// <summary>Similarity transform (uniform scale + rotate + translate).</summary>
+    public static VipsImage Similarity(this VipsImage image,
+        double scale = 1.0, double angle = 0.0, double idx = 0.0, double idy = 0.0,
+        VipsKernel interpolate = VipsKernel.Linear)
+        => VipsImageOps.Similarity(image, scale, angle, idx, idy, interpolate);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

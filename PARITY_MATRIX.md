@@ -315,9 +315,9 @@ luminosity balancing.
 | `shrinkh` / `shrinkv` (axis-specific) | 🟡 covered by `Resize1D` |
 | `reduce` / `reduceh` / `reducev` (non-integer downsample) | ✅ via `Resize` |
 | `thumbnail` | ✅ (composes resize + autoorient + crop) |
-| `similarity` (uniform scale + rotate + translate) | 🟡 covered by `Affine` |
-| `mapim` (nonlinear remap via index image) | ❌ |
-| `quadratic` (quadratic transform — used in lens correction) | ❌ |
+| `similarity` (uniform scale + rotate + translate) | ✅ | `Similarity(scale, angle, idx, idy)` — thin wrapper over `Affine` with the constrained parameter set |
+| `mapim` (nonlinear remap via index image) | ✅ | `Mapim(input, index)` — Float 2-band coordinate image, bilinear sampling, configurable background fill |
+| `quadratic` (quadratic transform — used in lens correction) | ✅ | `Quadratic(input, coefficients[12])` — second-order polynomial coordinate warp, bilinear sampling |
 | `transform` | 🟡 covered by `Affine` |
 | `interpolate` (custom interpolator registration) | ❌ |
 | Built-in kernels: nearest / linear / cubic / mitchell / lanczos2 / lanczos3 | ✅ + lanczos5 / hermite / bicubic-sharper / bicubic-smoother |

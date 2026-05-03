@@ -1382,6 +1382,30 @@ public static partial class VipsImageOps
             Width = width, Height = height, FractalDimension = fractalDimension,
         });
 
+    // From Operations/Geometric/VipsMapim.cs
+    /// <summary>Generic remap: sample <paramref name="input"/> using a Float 2-band coordinate <paramref name="index"/> image.</summary>
+    public static VipsImage Mapim(VipsImage input, VipsImage index, double[]? background = null)
+        => Run(new VipsMapim { In = input, Index = index, Background = background });
+
+    // From Operations/Geometric/VipsQuadratic.cs
+    /// <summary>2D quadratic-polynomial coordinate warp; <paramref name="coefficients"/> = [a0..a5, b0..b5].</summary>
+    public static VipsImage Quadratic(VipsImage input, double[] coefficients,
+        int outWidth = 0, int outHeight = 0)
+        => Run(new VipsQuadratic {
+            In = input, Coefficients = coefficients,
+            OutWidth = outWidth, OutHeight = outHeight,
+        });
+
+    // From Operations/Geometric/VipsSimilarity.cs
+    /// <summary>Similarity transform — uniform scale + rotate + translate.</summary>
+    public static VipsImage Similarity(VipsImage input,
+        double scale = 1.0, double angle = 0.0, double idx = 0.0, double idy = 0.0,
+        VipsKernel interpolate = VipsKernel.Linear)
+        => Run(new VipsSimilarity {
+            In = input, Scale = scale, Angle = angle, Idx = idx, Idy = idy,
+            Interpolate = interpolate,
+        });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
