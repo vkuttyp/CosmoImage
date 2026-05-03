@@ -210,13 +210,13 @@ text. ImageSharp has all of:
 
 | Capability | ImageSharp | CosmoImage |
 | :--- | :--- | :--- |
-| Path construction (move-to / line-to / cubic / quadratic Bezier / arc / close) | ✅ `IPathBuilder`, `Path`, `PathBuilder` | ✅ `VipsPath` builder (round 61) — `MoveTo` / `LineTo` / `CubicTo` / `QuadraticTo` / `Close`. Curves flatten via recursive subdivision (0.25-px tolerance) at fill time. Arc segment still missing |
+| Path construction (move-to / line-to / cubic / quadratic Bezier / arc / close) | ✅ `IPathBuilder`, `Path`, `PathBuilder` | ✅ `VipsPath` builder (round 61) — `MoveTo` / `LineTo` / `CubicTo` / `QuadraticTo` / `Close` + `ArcTo` (round 69, SVG-style elliptical arc converted to cubics at construction). Curves flatten via recursive subdivision (0.25-px tolerance) at fill time |
 | Polygon / Ellipse / Circle / Rectangle / Star / RegularPolygon as path objects | ✅ | ✅ `VipsPath.Rectangle` / `Polygon` / `Ellipse` / `Circle` / `RegularPolygon` / `Star` factory methods (round 61) |
 | Line rendering (Xiaolin Wu / Bresenham / sub-pixel) | ✅ via path-based renderer | ✅ `StrokeLine(pen, x1, y1, x2, y2)` (round 62) on top of path-based renderer; legacy `DrawLine` (Xiaolin Wu) still available |
 | Rectangle (fill + outline) | ✅ as Path | ✅ `Fill(brush, x, y, w, h)` and `StrokeRectangle(pen, x, y, w, h)` (rounds 61–62) |
 | Circle / Ellipse | ✅ | ✅ `FillCircle` / `StrokeCircle` (rounds 61–62); ellipse via `VipsPath.Ellipse` factory |
 | Polygon / Polyline | ✅ | ✅ `FillPolygon` / `StrokePolygon` (rounds 61–62) |
-| Arc / Bezier curves | ✅ | 🟡 cubic + quadratic Bezier in `VipsPath` (round 61); arc segment still missing |
+| Arc / Bezier curves | ✅ | ✅ cubic + quadratic Bezier in `VipsPath` (round 61) + SVG-style elliptical arc via `ArcTo(rx, ry, xRot, largeArc, sweep, x, y)` (round 69) |
 | `SolidPen`, dashed pens, `Pen` width, line joins (miter / round / bevel), end caps | ✅ | ✅ `VipsPen` solid + width + all 3 joins (bevel / miter / round) + all 3 caps (butt / square / round) + miter limit + dashed pens with arc-length cycle and `DashOffset` phase (rounds 62, 64, 65) |
 | Brushes: `SolidBrush`, `LinearGradientBrush`, `RadialGradientBrush`, `PathGradientBrush`, `ImageBrush`, `PatternBrush` | ✅ | 🟡 `VipsSolidBrush` / `VipsLinearGradientBrush` / `VipsRadialGradientBrush` (round 61) + `VipsImageBrush` / `VipsPatternBrush` (round 67) — image brush samples a source image with Clamp / Repeat / Mirror tiling and `(offsetX, offsetY)` origin shift; pattern brush is a Repeat-mode wrapper. 5 of 6 ImageSharp brushes covered; only `PathGradientBrush` still missing |
 | Clipping regions (intersect / union / difference) | ✅ | 🟡 rectangular `clipRect` parameter on FillPath / StrokePath / StrokeLine etc. (round 66) — drawing limited to the rect. Full path-vs-path booleans still missing |
@@ -363,7 +363,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
-| Drawing & vector graphics | 🟡 rounds 61–67 shipped path builder + shape factories + 5 brushes (solid / linear / radial / image / pattern) + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping. Only `PathGradientBrush`, arc segment, and full path-vs-path clipping booleans still missing |
+| Drawing & vector graphics | 🟡 rounds 61–69 shipped path builder (move / line / cubic / quadratic / arc / close) + shape factories + 5 brushes (solid / linear / radial / image / pattern) + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping. Only `PathGradientBrush` and full path-vs-path clipping booleans still missing |
 | Color spaces | 🟡 only sRGB↔linear + RGB-matrix ops |
 | Metadata typed access | ❌ raw bytes only |
 | `MemoryAllocator` integration | 🟡 transient buffers only |

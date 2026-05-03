@@ -75,6 +75,145 @@ public sealed class VipsPath
         return this;
     }
 
+    /// <summary>
+    /// Append an SVG-style elliptical arc segment from the current pen
+    /// position to (<paramref name="x"/>, <paramref name="y"/>). Mirrors
+    /// the SVG <c>A</c> path command and ImageSharp's
+    /// <c>PathBuilder.AddArc</c>.
+    ///
+    /// <para>Internally converted to a sequence of cubic Beziers
+    /// (≤90° per piece) using the standard algorithm from the SVG
+    /// implementation notes. This means transforms, stroking, dashing,
+    /// and clipping all work on arc segments without further code.</para>
+    /// </summary>
+    /// <param name="rx">Ellipse x-radius.</param>
+    /// <param name="ry">Ellipse y-radius.</param>
+    /// <param name="xRotationDegrees">Rotation of the ellipse's x-axis,
+    /// in degrees.</param>
+    /// <param name="largeArc">If <c>true</c>, picks the &gt;180° arc
+    /// (the "long way" around).</param>
+    /// <param name="sweep">If <c>true</c>, sweeps in the positive-angle
+    /// direction (clockwise on screen with y-down).</param>
+    public VipsPath ArcTo(double rx, double ry, double xRotationDegrees,
+        bool largeArc, bool sweep, double x, double y)
+    {
+        var (x0, y0) = CurrentPoint();
+        // SVG: if start == end, the arc is omitted.
+        if (x0 == x && y0 == y) return this;
+        // Degenerate radii → straight line.
+        if (rx == 0 || ry == 0) return LineTo(x, y);
+
+        rx = Math.Abs(rx);
+        ry = Math.Abs(ry);
+        double phi = xRotationDegrees * Math.PI / 180.0;
+        double cosPhi = Math.Cos(phi), sinPhi = Math.Sin(phi);
+
+        // Endpoints in the ellipse-local frame (centred on the chord
+        // midpoint, axis-aligned with the ellipse).
+        double dx = (x0 - x) / 2, dy = (y0 - y) / 2;
+        double x1p = cosPhi * dx + sinPhi * dy;
+        double y1p = -sinPhi * dx + cosPhi * dy;
+
+        // Scale up radii if too small to span the chord.
+        double lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+        if (lam > 1)
+        {
+            double s = Math.Sqrt(lam);
+            rx *= s; ry *= s;
+        }
+
+        // Centre in local frame.
+        double sign = (largeArc == sweep) ? -1 : 1;
+        double num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+        double den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+        double coef = sign * Math.Sqrt(Math.Max(0, num) / den);
+        double cxp = coef * (rx * y1p / ry);
+        double cyp = coef * -(ry * x1p / rx);
+
+        // Centre in user frame.
+        double cx = cosPhi * cxp - sinPhi * cyp + (x0 + x) / 2;
+        double cy = sinPhi * cxp + cosPhi * cyp + (y0 + y) / 2;
+
+        // Start angle and signed sweep.
+        double startVx = (x1p - cxp) / rx, startVy = (y1p - cyp) / ry;
+        double endVx = (-x1p - cxp) / rx, endVy = (-y1p - cyp) / ry;
+        double theta1 = AngleBetween(1, 0, startVx, startVy);
+        double dtheta = AngleBetween(startVx, startVy, endVx, endVy);
+        if (!sweep && dtheta > 0) dtheta -= 2 * Math.PI;
+        else if (sweep && dtheta < 0) dtheta += 2 * Math.PI;
+
+        // Split into ≤90° pieces; each becomes a cubic via the
+        // standard tan(α/4) approximation. (For α=π/2 this reduces to
+        // the same kappa = 0.5523 used in the Ellipse factory.)
+        int n = Math.Max(1, (int)Math.Ceiling(Math.Abs(dtheta) / (Math.PI / 2)));
+        double seg = dtheta / n;
+        double t = 4.0 / 3.0 * Math.Tan(seg / 4);
+
+        double a = theta1;
+        for (int i = 0; i < n; i++)
+        {
+            double b = a + seg;
+            double cosA = Math.Cos(a), sinA = Math.Sin(a);
+            double cosB = Math.Cos(b), sinB = Math.Sin(b);
+
+            // Unit-ellipse control points + endpoint.
+            double c1ux = cosA - t * sinA, c1uy = sinA + t * cosA;
+            double c2ux = cosB + t * sinB, c2uy = sinB - t * cosB;
+
+            // Map unit ellipse → world: scale by (rx, ry), rotate by
+            // phi, translate by (cx, cy).
+            (double mx, double my) Map(double ux, double uy)
+            {
+                double sx = ux * rx, sy = uy * ry;
+                return (cosPhi * sx - sinPhi * sy + cx,
+                        sinPhi * sx + cosPhi * sy + cy);
+            }
+
+            var (c1x, c1y) = Map(c1ux, c1uy);
+            var (c2x, c2y) = Map(c2ux, c2uy);
+            var (ex, ey) = Map(cosB, sinB);
+            CubicTo(c1x, c1y, c2x, c2y, ex, ey);
+            a = b;
+        }
+        return this;
+    }
+
+    private static double AngleBetween(double ux, double uy, double vx, double vy)
+    {
+        double dot = ux * vx + uy * vy;
+        double len = Math.Sqrt((ux * ux + uy * uy) * (vx * vx + vy * vy));
+        double cosAng = Math.Clamp(dot / len, -1, 1);
+        double a = Math.Acos(cosAng);
+        return ux * vy - uy * vx < 0 ? -a : a;
+    }
+
+    /// <summary>
+    /// Look up the current pen position by inspecting the most recent
+    /// segment. Used by <see cref="ArcTo"/> to know where the arc
+    /// should start. After a <see cref="Close"/>, the pen is at the
+    /// sub-path's most recent <see cref="MoveTo"/> point.
+    /// </summary>
+    private (double x, double y) CurrentPoint()
+    {
+        for (int i = Segments.Count - 1; i >= 0; i--)
+        {
+            var s = Segments[i];
+            switch (s.Kind)
+            {
+                case VipsPathSegmentKind.MoveTo: return (s.X1, s.Y1);
+                case VipsPathSegmentKind.LineTo: return (s.X1, s.Y1);
+                case VipsPathSegmentKind.CubicTo: return (s.X3, s.Y3);
+                case VipsPathSegmentKind.QuadraticTo: return (s.X2, s.Y2);
+                case VipsPathSegmentKind.Close:
+                    for (int j = i - 1; j >= 0; j--)
+                        if (Segments[j].Kind == VipsPathSegmentKind.MoveTo)
+                            return (Segments[j].X1, Segments[j].Y1);
+                    return (0, 0);
+            }
+        }
+        return (0, 0);
+    }
+
     // ---- Shape factories ----
 
     public static VipsPath Rectangle(double x, double y, double w, double h)
