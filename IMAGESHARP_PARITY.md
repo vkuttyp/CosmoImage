@@ -218,7 +218,7 @@ text. ImageSharp has all of:
 | Polygon / Polyline | ✅ | ✅ `FillPolygon` / `StrokePolygon` (rounds 61–62) |
 | Arc / Bezier curves | ✅ | 🟡 cubic + quadratic Bezier in `VipsPath` (round 61); arc segment still missing |
 | `SolidPen`, dashed pens, `Pen` width, line joins (miter / round / bevel), end caps | ✅ | ✅ `VipsPen` solid + width + all 3 joins (bevel / miter / round) + all 3 caps (butt / square / round) + miter limit + dashed pens with arc-length cycle and `DashOffset` phase (rounds 62, 64, 65) |
-| Brushes: `SolidBrush`, `LinearGradientBrush`, `RadialGradientBrush`, `PathGradientBrush`, `ImageBrush`, `PatternBrush` | ✅ | 🟡 `VipsSolidBrush` / `VipsLinearGradientBrush` / `VipsRadialGradientBrush` (round 61). `PathGradientBrush` / `ImageBrush` / `PatternBrush` still missing |
+| Brushes: `SolidBrush`, `LinearGradientBrush`, `RadialGradientBrush`, `PathGradientBrush`, `ImageBrush`, `PatternBrush` | ✅ | 🟡 `VipsSolidBrush` / `VipsLinearGradientBrush` / `VipsRadialGradientBrush` (round 61) + `VipsImageBrush` / `VipsPatternBrush` (round 67) — image brush samples a source image with Clamp / Repeat / Mirror tiling and `(offsetX, offsetY)` origin shift; pattern brush is a Repeat-mode wrapper. 5 of 6 ImageSharp brushes covered; only `PathGradientBrush` still missing |
 | Clipping regions (intersect / union / difference) | ✅ | 🟡 rectangular `clipRect` parameter on FillPath / StrokePath / StrokeLine etc. (round 66) — drawing limited to the rect. Full path-vs-path booleans still missing |
 | Affine path transforms | ✅ | ✅ `VipsPath.Transform(a, b, c, d, tx, ty)` + `Translate` / `Scale` / `Rotate` / `RotateAround` (round 66). Returns a new path; transforms endpoints AND Bezier control points |
 | Tessellation (path → triangles) | ✅ | ❌ |
@@ -363,7 +363,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
-| Drawing & vector graphics | 🟡 rounds 61–66 shipped path builder + shape factories + 3 brushes + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping. Advanced brushes (path / image / pattern) and full path-vs-path clipping booleans still missing |
+| Drawing & vector graphics | 🟡 rounds 61–67 shipped path builder + shape factories + 5 brushes (solid / linear / radial / image / pattern) + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping. Only `PathGradientBrush`, arc segment, and full path-vs-path clipping booleans still missing |
 | Color spaces | 🟡 only sRGB↔linear + RGB-matrix ops |
 | Metadata typed access | ❌ raw bytes only |
 | `MemoryAllocator` integration | 🟡 transient buffers only |

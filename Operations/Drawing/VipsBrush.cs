@@ -115,3 +115,114 @@ public sealed class VipsRadialGradientBrush : IVipsBrush
             dst[i] = (byte)Math.Round(_centre[i] + (_edge[i] - _centre[i]) * t);
     }
 }
+
+/// <summary>
+/// How <see cref="VipsImageBrush"/> samples beyond the source image's
+/// bounds. Mirrors ImageSharp's <c>ImageBrush</c> tiling modes.
+/// </summary>
+public enum VipsBrushTiling
+{
+    /// <summary>Sample outside source = clamp to nearest edge pixel.</summary>
+    Clamp = 0,
+    /// <summary>Sample outside source = wrap around (modulo source size).</summary>
+    Repeat = 1,
+    /// <summary>Sample outside source = reflect at edges, then wrap.</summary>
+    Mirror = 2,
+}
+
+/// <summary>
+/// Brush that samples colour from a source image. Mirrors ImageSharp's
+/// <c>ImageBrush(image)</c>. The source is materialised at
+/// construction so per-pixel sampling is just a buffer lookup.
+///
+/// <para><see cref="OffsetX"/> / <see cref="OffsetY"/> shift the
+/// source's origin in destination coordinates: a pixel painted at
+/// (offsetX, offsetY) reads source pixel (0, 0). <see cref="Tiling"/>
+/// chooses what happens outside the source bounds — clamp, repeat,
+/// or mirror.</para>
+///
+/// <para>UChar source only. Source bands &lt; destination bands
+/// behave like the other brushes: only the source's bands are
+/// written, leaving any extra destination bands (typically alpha)
+/// untouched.</para>
+/// </summary>
+public sealed class VipsImageBrush : IVipsBrush
+{
+    private readonly byte[] _pixels;
+    private readonly int _w, _h, _pelSize;
+    private readonly int _offsetX, _offsetY;
+    private readonly VipsBrushTiling _tiling;
+
+    public VipsImageBrush(VipsImage source,
+        int offsetX = 0, int offsetY = 0,
+        VipsBrushTiling tiling = VipsBrushTiling.Clamp)
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (source.BandFormat != VipsBandFormat.UChar)
+            throw new ArgumentException("ImageBrush source must be UChar");
+        if (source.Pixels is { } existing) _pixels = existing;
+        else
+        {
+            var sink = new MemorySink(source);
+            sink.RunAsync().GetAwaiter().GetResult();
+            _pixels = sink.Pixels;
+        }
+        _w = source.Width;
+        _h = source.Height;
+        _pelSize = source.SizeOfPel;
+        _offsetX = offsetX;
+        _offsetY = offsetY;
+        _tiling = tiling;
+    }
+
+    public void SampleAt(int x, int y, Span<byte> dst)
+    {
+        int sx = x - _offsetX;
+        int sy = y - _offsetY;
+        sx = MapCoord(sx, _w, _tiling);
+        sy = MapCoord(sy, _h, _tiling);
+        if (sx < 0 || sy < 0) return; // degenerate empty source
+        int srcOff = (sy * _w + sx) * _pelSize;
+        int n = Math.Min(_pelSize, dst.Length);
+        _pixels.AsSpan(srcOff, n).CopyTo(dst);
+    }
+
+    private static int MapCoord(int v, int size, VipsBrushTiling tiling)
+    {
+        if (size <= 0) return -1;
+        switch (tiling)
+        {
+            case VipsBrushTiling.Clamp:
+                if (v < 0) return 0;
+                if (v >= size) return size - 1;
+                return v;
+            case VipsBrushTiling.Repeat:
+                int mod = v % size;
+                return mod < 0 ? mod + size : mod;
+            case VipsBrushTiling.Mirror:
+                int cycle = size * 2;
+                int m = v % cycle;
+                if (m < 0) m += cycle;
+                return m < size ? m : cycle - 1 - m;
+            default:
+                return v;
+        }
+    }
+}
+
+/// <summary>
+/// Repeating-tile pattern brush. Mirrors ImageSharp's
+/// <c>PatternBrush(tile)</c>. Equivalent to
+/// <see cref="VipsImageBrush"/> with <see cref="VipsBrushTiling.Repeat"/>.
+/// </summary>
+public sealed class VipsPatternBrush : IVipsBrush
+{
+    private readonly VipsImageBrush _inner;
+
+    public VipsPatternBrush(VipsImage tile, int offsetX = 0, int offsetY = 0)
+    {
+        _inner = new VipsImageBrush(tile, offsetX, offsetY, VipsBrushTiling.Repeat);
+    }
+
+    public void SampleAt(int x, int y, Span<byte> dst) => _inner.SampleAt(x, y, dst);
+}
