@@ -42,16 +42,16 @@ ImageSharp ships ~25 pixel structs covering the matrix of:
 | :--- | :---: | :---: | :---: |
 | `A8` | 1 | 8-bit alpha | ❌ |
 | `L8` | 1 | 8-bit grayscale | ✅ `L8` |
-| `L16` | 1 | 16-bit grayscale | ❌ |
+| `L16` | 1 | 16-bit grayscale | ✅ `L16` (round 57) |
 | `La16` | 2 | 8-bit grayscale + alpha | ✅ `La16` |
-| `La32` | 2 | 16-bit grayscale + alpha | ❌ |
+| `La32` | 2 | 16-bit grayscale + alpha | ✅ `La32` (round 57) |
 | `Rgb24` | 3 | 8-bit RGB | ✅ `Rgb24` |
-| `Bgr24` | 3 | 8-bit BGR | ❌ — BMP/TGA loaders convert internally |
-| `Rgb48` | 3 | 16-bit RGB | ❌ |
+| `Bgr24` | 3 | 8-bit BGR | ✅ `Bgr24` (round 57) |
+| `Rgb48` | 3 | 16-bit RGB | ✅ `Rgb48` (round 57) |
 | `Rgba32` | 4 | 8-bit RGBA | ✅ `Rgba32` |
-| `Bgra32` | 4 | 8-bit BGRA | ❌ |
-| `Argb32` | 4 | 8-bit ARGB | ❌ |
-| `Rgba64` | 4 | 16-bit RGBA | ❌ |
+| `Bgra32` | 4 | 8-bit BGRA | ✅ `Bgra32` (round 57) |
+| `Argb32` | 4 | 8-bit ARGB | ✅ `Argb32` (round 57) |
+| `Rgba64` | 4 | 16-bit RGBA | ✅ `Rgba64` (round 57) |
 | `Bgr565` | 1 packed | 16-bit packed RGB (5/6/5) | ❌ |
 | `Bgra4444` | 1 packed | 16-bit packed ARGB (4/4/4/4) | ❌ |
 | `Bgra5551` | 1 packed | 16-bit packed ARGB (5/5/5/1) | ❌ |
@@ -360,7 +360,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Layer | Coverage |
 | :--- | :--- |
 | Core architecture (lazy vs eager — different by design) | n/a — different model |
-| Pixel formats (struct types) | 🟡 4 of ~25 |
+| Pixel formats (struct types) | 🟡 11 of ~25 (round 57 added Bgr24 / Bgra32 / Argb32 / L16 / Rgb48 / Rgba64 / La32) |
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
