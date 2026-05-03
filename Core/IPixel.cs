@@ -168,3 +168,123 @@ public struct La32 : IPixel<La32>
     public static int BandCount => 2;
     public static VipsBandFormat BandFormat => VipsBandFormat.UShort;
 }
+
+/// <summary>
+/// Single-band 8-bit alpha. Same byte layout as <see cref="L8"/>; the
+/// distinct struct lets typed pipelines model "this is alpha, not
+/// luminance" semantically.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct A8 : IPixel<A8>
+{
+    public byte A;
+    public A8(byte a) { A = a; }
+    public static int BandCount => 1;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UChar;
+}
+
+/// <summary>2-band 16-bit (R, G). The standard normal-map / data-texture
+/// channel layout (e.g. derivative maps, height + roughness).</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Rg32 : IPixel<Rg32>
+{
+    public ushort R;
+    public ushort G;
+    public Rg32(ushort r, ushort g) { R = r; G = g; }
+    public static int BandCount => 2;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UShort;
+}
+
+/// <summary>
+/// 16-bit packed BGR with 5/6/5 bit allocation: <c>BBBBB GGGGGG RRRRR</c>
+/// from MSB to LSB. The classic Direct3D / embedded-display format —
+/// 16-bit colour without alpha. Stored as a single <c>ushort</c>;
+/// the per-channel <c>R</c>/<c>G</c>/<c>B</c> properties expand each
+/// field to an 8-bit value via standard bit-replication.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Bgr565 : IPixel<Bgr565>
+{
+    public ushort Packed;
+
+    public Bgr565(ushort packed) { Packed = packed; }
+
+    /// <summary>Build from 8-bit RGB by truncating to 5/6/5.</summary>
+    public Bgr565(byte r, byte g, byte b)
+    {
+        Packed = (ushort)(((b >> 3) << 11) | ((g >> 2) << 5) | (r >> 3));
+    }
+
+    public byte R => Expand5((Packed >> 0) & 0x1F);
+    public byte G => Expand6((Packed >> 5) & 0x3F);
+    public byte B => Expand5((Packed >> 11) & 0x1F);
+
+    /// <summary>5-bit field → 8-bit via bit-replication (val · 255 / 31).</summary>
+    private static byte Expand5(int v) => (byte)((v << 3) | (v >> 2));
+    private static byte Expand6(int v) => (byte)((v << 2) | (v >> 4));
+
+    public static int BandCount => 1;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UShort;
+}
+
+/// <summary>
+/// 16-bit packed ARGB with 4 bits per channel:
+/// <c>AAAA RRRR GGGG BBBB</c> from MSB to LSB. Common in older
+/// Direct3D and Android UI buffers where 4-bit alpha is enough.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Bgra4444 : IPixel<Bgra4444>
+{
+    public ushort Packed;
+
+    public Bgra4444(ushort packed) { Packed = packed; }
+
+    public Bgra4444(byte r, byte g, byte b, byte a)
+    {
+        Packed = (ushort)(
+            ((a >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4));
+    }
+
+    public byte B => Expand4((Packed >> 0) & 0xF);
+    public byte G => Expand4((Packed >> 4) & 0xF);
+    public byte R => Expand4((Packed >> 8) & 0xF);
+    public byte A => Expand4((Packed >> 12) & 0xF);
+
+    /// <summary>4-bit field → 8-bit via duplication (val · 0x11).</summary>
+    private static byte Expand4(int v) => (byte)((v << 4) | v);
+
+    public static int BandCount => 1;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UShort;
+}
+
+/// <summary>
+/// 16-bit packed ARGB with 5/5/5 bits per colour channel + 1 bit
+/// alpha: <c>A RRRRR GGGGG BBBBB</c> from MSB to LSB. The "alpha test"
+/// format from older fixed-function GPU pipelines — alpha is binary
+/// (transparent / opaque), no blending.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Bgra5551 : IPixel<Bgra5551>
+{
+    public ushort Packed;
+
+    public Bgra5551(ushort packed) { Packed = packed; }
+
+    /// <summary>Build from 8-bit RGBA. Alpha &gt;= 128 is treated as opaque.</summary>
+    public Bgra5551(byte r, byte g, byte b, byte a)
+    {
+        Packed = (ushort)(
+            ((a >= 128 ? 1 : 0) << 15) |
+            ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
+    }
+
+    public byte B => Expand5((Packed >> 0) & 0x1F);
+    public byte G => Expand5((Packed >> 5) & 0x1F);
+    public byte R => Expand5((Packed >> 10) & 0x1F);
+    public byte A => (Packed & 0x8000) != 0 ? (byte)255 : (byte)0;
+
+    private static byte Expand5(int v) => (byte)((v << 3) | (v >> 2));
+
+    public static int BandCount => 1;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UShort;
+}

@@ -40,7 +40,7 @@ ImageSharp ships ~25 pixel structs covering the matrix of:
 
 | ImageSharp pixel | Bands | Format | Status |
 | :--- | :---: | :---: | :---: |
-| `A8` | 1 | 8-bit alpha | ❌ |
+| `A8` | 1 | 8-bit alpha | ✅ `A8` (round 58) |
 | `L8` | 1 | 8-bit grayscale | ✅ `L8` |
 | `L16` | 1 | 16-bit grayscale | ✅ `L16` (round 57) |
 | `La16` | 2 | 8-bit grayscale + alpha | ✅ `La16` |
@@ -52,11 +52,11 @@ ImageSharp ships ~25 pixel structs covering the matrix of:
 | `Bgra32` | 4 | 8-bit BGRA | ✅ `Bgra32` (round 57) |
 | `Argb32` | 4 | 8-bit ARGB | ✅ `Argb32` (round 57) |
 | `Rgba64` | 4 | 16-bit RGBA | ✅ `Rgba64` (round 57) |
-| `Bgr565` | 1 packed | 16-bit packed RGB (5/6/5) | ❌ |
-| `Bgra4444` | 1 packed | 16-bit packed ARGB (4/4/4/4) | ❌ |
-| `Bgra5551` | 1 packed | 16-bit packed ARGB (5/5/5/1) | ❌ |
+| `Bgr565` | 1 packed | 16-bit packed RGB (5/6/5) | ✅ `Bgr565` (round 58) — bit-replication R/G/B accessors |
+| `Bgra4444` | 1 packed | 16-bit packed ARGB (4/4/4/4) | ✅ `Bgra4444` (round 58) |
+| `Bgra5551` | 1 packed | 16-bit packed ARGB (5/5/5/1) | ✅ `Bgra5551` (round 58) — binary alpha (≥128 = opaque) |
 | `Rgba1010102` | 1 packed | 32-bit packed (10/10/10/2) | ❌ |
-| `Rg32` | 2 | 16-bit per channel (R, G) | ❌ |
+| `Rg32` | 2 | 16-bit per channel (R, G) | ✅ `Rg32` (round 58) |
 | `HalfSingle` | 1 | 16-bit float | ❌ |
 | `HalfVector2` | 2 | 16-bit float ×2 | ❌ |
 | `HalfVector4` | 4 | 16-bit float ×4 | ❌ |
@@ -360,7 +360,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Layer | Coverage |
 | :--- | :--- |
 | Core architecture (lazy vs eager — different by design) | n/a — different model |
-| Pixel formats (struct types) | 🟡 11 of ~25 (round 57 added Bgr24 / Bgra32 / Argb32 / L16 / Rgb48 / Rgba64 / La32) |
+| Pixel formats (struct types) | 🟡 16 of ~25 (round 58 added A8 / Rg32 + packed Bgr565 / Bgra4444 / Bgra5551) |
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
