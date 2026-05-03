@@ -126,13 +126,13 @@ of theirs we don't have, a few of ours they don't.
 | `Invert()` | ✅ |
 | `Grayscale()` | ✅ `Greyscale` (alias `Grayscale`) |
 | `Sepia(amount)` | ✅ |
-| `Kodachrome()` | ❌ |
-| `Lomograph()` | ❌ |
+| `Kodachrome()` | ✅ stylised film-stock matrix via `Recomb` |
+| `Lomograph()` | ✅ saturated cross-process matrix via `Recomb` |
 | `Polaroid(amount)` | ✅ via Magick.NET wrapper |
 | `BlackWhite()` | ✅ named `BlackWhite()` shortcut over `Saturate(0)` |
 | `Filter(ColorMatrix)` (4×4 matrix incl. alpha mix) | ✅ `ColorMatrix(double[4,5])` — 4 mix rows + translation column, RGBA UChar+Float branches |
 | `Opacity(amount)` | ✅ multiplies alpha by amount (0..1); pass-through for non-alpha images |
-| `ColorBlindness(mode)` (Deuteranopia / Protanopia / Tritanopia / etc.) | ❌ |
+| `ColorBlindness(mode)` (Deuteranopia / Protanopia / Tritanopia / etc.) | ✅ all 8 Brettel-Vienot-Mollon (1997) matrices |
 
 ### Effects
 
@@ -159,7 +159,7 @@ of theirs we don't have, a few of ours they don't.
 | `AutoOrient()` | ✅ |
 | `Flip(FlipMode)` | ✅ |
 | `Transform(matrix, sampler)` | 🟡 covered by `Affine` |
-| `DetectEdges(filter)` (Sobel/Roberts/Prewitt/Kayyali/Kirsch/Laplacian variants) | ❌ |
+| `DetectEdges(filter)` (Sobel/Roberts/Prewitt/Kayyali/Kirsch/Laplacian variants) | 🟡 `Edge(method)` dispatcher: Sobel, Compass (= Kirsch), Canny, Roberts, Prewitt, Laplacian. Kayyali still missing |
 
 ### Convolution / Blur
 
@@ -168,7 +168,7 @@ of theirs we don't have, a few of ours they don't.
 | `BoxBlur(radius)` | ✅ `BoxBlur(radius, passes)` running-sum (round 49) |
 | `GaussianBlur(sigma)` | ✅ `GaussBlur` |
 | `GaussianSharpen(sigma)` | 🟡 covered by `UnsharpMask` |
-| `DetectEdges(EdgeDetectorKernel)` (8+ kernels) | ❌ |
+| `DetectEdges(EdgeDetectorKernel)` (8+ kernels) | 🟡 same as above — Sobel/Compass/Canny/Roberts/Prewitt/Laplacian via the `Edge(method)` dispatcher |
 
 ### Quantization / Dithering
 

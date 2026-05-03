@@ -1663,6 +1663,29 @@ public static partial class VipsImageOps
         return Affine(input, a, bb, c, d, 0, 0, interpolate);
     }
 
+    // From Operations/Color/VipsStylisedFilters.cs
+    /// <summary>Kodachrome film-stock-style colour transform.</summary>
+    public static VipsImage Kodachrome(VipsImage input) => VipsKodachrome.Apply(input);
+
+    /// <summary>Lomograph-style saturated colour transform.</summary>
+    public static VipsImage Lomograph(VipsImage input) => VipsLomograph.Apply(input);
+
+    /// <summary>
+    /// Simulate colour-vision deficiency for accessibility preview.
+    /// Brettel-Vienot-Mollon (1997) dichromacy / anomaly matrices.
+    /// </summary>
+    public static VipsImage ColorBlindness(VipsImage input, VipsColorBlindnessMode mode)
+        => VipsColorBlindness.Apply(input, mode);
+
+    // From Operations/Convolution/VipsEdgeKernel.cs
+    /// <summary>Edge magnitude via a fixed kernel (Roberts / Prewitt / Laplacian).</summary>
+    public static VipsImage EdgeKernel(VipsImage input, VipsEdgeKernel kernel)
+        => Run(new VipsEdgeKernelOp { In = input, Kernel = kernel });
+
+    public static VipsImage Roberts(VipsImage input) => EdgeKernel(input, VipsEdgeKernel.Roberts);
+    public static VipsImage Prewitt(VipsImage input) => EdgeKernel(input, VipsEdgeKernel.Prewitt);
+    public static VipsImage Laplacian(VipsImage input) => EdgeKernel(input, VipsEdgeKernel.Laplacian);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

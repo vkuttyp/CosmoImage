@@ -7,6 +7,9 @@ public enum VipsEdgeMethod
     Sobel = 0,
     Compass = 1,
     Canny = 2,
+    Roberts = 3,
+    Prewitt = 4,
+    Laplacian = 5,
 }
 
 /// <summary>
@@ -30,6 +33,9 @@ public static class VipsEdge
             VipsEdgeMethod.Sobel => VipsImageOps.Sobel(input),
             VipsEdgeMethod.Compass => VipsImageOps.Compass(input),
             VipsEdgeMethod.Canny => VipsImageOps.Canny(input, cannySigma, cannyLow, cannyHigh),
+            VipsEdgeMethod.Roberts => VipsImageOps.EdgeKernel(input, VipsEdgeKernel.Roberts),
+            VipsEdgeMethod.Prewitt => VipsImageOps.EdgeKernel(input, VipsEdgeKernel.Prewitt),
+            VipsEdgeMethod.Laplacian => VipsImageOps.EdgeKernel(input, VipsEdgeKernel.Laplacian),
             _ => throw new ArgumentOutOfRangeException(nameof(method)),
         };
     }
