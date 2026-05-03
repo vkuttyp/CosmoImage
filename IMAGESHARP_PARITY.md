@@ -175,17 +175,17 @@ of theirs we don't have, a few of ours they don't.
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
 | `Quantize(IQuantizer)` — Octree / Wu / Werner / Webby / Palette | 🟡 `Quantize(colors, dither)` via Magick (Wu/median-cut); no quantizer interface |
-| `Dither(IDither, threshold)` — Floyd-Steinberg / Stevenson-Arce / Burkes / Bayer / Ordered | ❌ |
-| `BinaryThreshold(threshold)` | ❌ |
-| `BinaryDither(...)` | ❌ |
-| `BinaryInvert()` | ❌ |
+| `Dither(IDither, threshold)` — Floyd-Steinberg / Stevenson-Arce / Burkes / Bayer / Ordered | ✅ `Dither(method, levels)` — FS / Atkinson / Burkes / Stevenson-Arce / Sierra error-diffusion + Bayer4×4 / Bayer8×8 ordered |
+| `BinaryThreshold(threshold)` | ✅ `Threshold(value)` from round 51 |
+| `BinaryDither(...)` | ✅ `BinaryDither(method)` — alias for `Dither(method, levels=2)` |
+| `BinaryInvert()` | ✅ alias for `Invert` |
 
 ### Histogram / Tone
 
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
 | `HistogramEqualization(LuminanceLevels)` | ✅ `HistEqual` |
-| `AdaptiveHistogramEqualization(...)` (CLAHE) | ❌ |
+| `AdaptiveHistogramEqualization(...)` (CLAHE) | ✅ `AdaptiveHistogramEqualization(tileGridSize, clipLimit)` — alias for libvips-named `HistLocal` |
 | `Threshold(amount)` | ✅ `Threshold(value)` per-band binary; UChar + Float |
 | `Gamma(gamma)` | ✅ `Gamma` |
 

@@ -600,6 +600,24 @@ public static class VipsImageExtensions
         VipsKernel interpolate = VipsKernel.Linear)
         => VipsImageOps.Skew(image, degreesX, degreesY, interpolate);
 
+    /// <summary>Quantise to N levels per band using the chosen dither method.</summary>
+    public static VipsImage Dither(this VipsImage image,
+        CosmoImage.Operations.Color.VipsDitherMethod method
+            = CosmoImage.Operations.Color.VipsDitherMethod.FloydSteinberg,
+        int levels = 2)
+        => VipsImageOps.Dither(image, method, levels);
+
+    /// <summary>1-bit dither (binary output).</summary>
+    public static VipsImage BinaryDither(this VipsImage image,
+        CosmoImage.Operations.Color.VipsDitherMethod method
+            = CosmoImage.Operations.Color.VipsDitherMethod.FloydSteinberg)
+        => VipsImageOps.BinaryDither(image, method);
+
+    /// <summary>Adaptive histogram equalisation — ImageSharp-named alias for `HistLocal`.</summary>
+    public static VipsImage AdaptiveHistogramEqualization(this VipsImage image,
+        int tileGridSize = 8, double clipLimit = 3.0)
+        => VipsImageOps.AdaptiveHistogramEqualization(image, tileGridSize, clipLimit);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

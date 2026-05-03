@@ -1686,6 +1686,31 @@ public static partial class VipsImageOps
     public static VipsImage Prewitt(VipsImage input) => EdgeKernel(input, VipsEdgeKernel.Prewitt);
     public static VipsImage Laplacian(VipsImage input) => EdgeKernel(input, VipsEdgeKernel.Laplacian);
 
+    // From Operations/Color/VipsDither.cs
+    /// <summary>
+    /// Quantise to <paramref name="levels"/> per band using the chosen
+    /// dither method (default Floyd-Steinberg, 2 levels = 1-bit-per-band).
+    /// </summary>
+    public static VipsImage Dither(VipsImage input,
+        VipsDitherMethod method = VipsDitherMethod.FloydSteinberg, int levels = 2)
+        => Run(new VipsDither { In = input, Method = method, Levels = levels });
+
+    /// <summary>Specialised 1-bit dither (alias for <c>Dither(method, levels=2)</c>).</summary>
+    public static VipsImage BinaryDither(VipsImage input,
+        VipsDitherMethod method = VipsDitherMethod.FloydSteinberg)
+        => Dither(input, method, levels: 2);
+
+    /// <summary>Invert a binary image — alias for <see cref="Invert"/>.</summary>
+    public static VipsImage BinaryInvert(VipsImage input) => Invert(input);
+
+    /// <summary>
+    /// Adaptive histogram equalisation — ImageSharp-named alias for
+    /// libvips' <see cref="HistLocal"/> (CLAHE).
+    /// </summary>
+    public static VipsImage AdaptiveHistogramEqualization(VipsImage input,
+        int tileGridSize = 8, double clipLimit = 3.0)
+        => HistLocal(input, tileGridSize, clipLimit);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
