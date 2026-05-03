@@ -62,7 +62,7 @@ ImageSharp ships ~25 pixel structs covering the matrix of:
 | `HalfVector4` | 4 | 16-bit float ×4 | ❌ |
 | `RgbaVector` | 4 | 32-bit float per channel | 🟡 covered functionally by `BandFormat=Float` + 4 bands, but no typed struct |
 | `Byte4`, `Short2`, `Short4`, `NormalizedByte2/4`, `NormalizedShort2/4` | 2/4 | various integer | ❌ |
-| `PixelOperations<TPixel>` (bulk format conversion) | — | — | ❌ — we have only `VipsCast` (UChar↔Float) |
+| `PixelOperations<TPixel>` (bulk format conversion) | — | — | 🟡 named conversions: `ToL8` / `ToLa16` / `ToRgb24` / `ToRgba32` / `SwapRb` / `ToArgb` (round 55). Generic `From<TFromPixel>` still missing — needs the typed-pixel surface to mature first |
 
 CosmoImage gap: **~21 of 25 pixel formats missing.** This is the most
 visible "ImageSharp parity" gap. Closing it would mean adding pixel

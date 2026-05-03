@@ -1731,6 +1731,47 @@ public static partial class VipsImageOps
         LoadAsync(System.IO.Stream stream, System.Threading.CancellationToken ct = default)
         => CosmoImage.Loaders.VipsIdentify.LoadAsync(stream, ct);
 
+    // From Operations/Color/VipsPixelOperations.cs
+    /// <summary>Convert to single-band UChar via BT.601 luminance.</summary>
+    public static VipsImage ToL8(VipsImage input)
+        => Run(new VipsPixelOperations { In = input, TargetBands = 1 });
+
+    /// <summary>Convert to 2-band UChar (luminance + alpha; opaque if input has none).</summary>
+    public static VipsImage ToLa16(VipsImage input)
+        => Run(new VipsPixelOperations { In = input, TargetBands = 2 });
+
+    /// <summary>Convert to 3-band UChar RGB. 1-band replicates; 4-band drops alpha.</summary>
+    public static VipsImage ToRgb24(VipsImage input)
+        => Run(new VipsPixelOperations { In = input, TargetBands = 3 });
+
+    /// <summary>Convert to 4-band UChar RGBA. 1/2/3-band synthesises opaque alpha.</summary>
+    public static VipsImage ToRgba32(VipsImage input)
+        => Run(new VipsPixelOperations { In = input, TargetBands = 4 });
+
+    /// <summary>Swap R and B channels (RGB↔BGR or RGBA↔BGRA). Pass-through for 1- / 2-band.</summary>
+    public static VipsImage SwapRb(VipsImage input)
+    {
+        if (input == null) return null!;
+        if (input.Bands == 3)
+            return Run(new VipsPixelOperations {
+                In = input, TargetBands = 3, Permutation = new[] { 2, 1, 0 },
+            });
+        if (input.Bands == 4)
+            return Run(new VipsPixelOperations {
+                In = input, TargetBands = 4, Permutation = new[] { 2, 1, 0, 3 },
+            });
+        return input;
+    }
+
+    /// <summary>Rotate RGBA → ARGB (move alpha from band 3 to band 0).</summary>
+    public static VipsImage ToArgb(VipsImage input)
+    {
+        if (input == null || input.Bands != 4) return input!;
+        return Run(new VipsPixelOperations {
+            In = input, TargetBands = 4, Permutation = new[] { 3, 0, 1, 2 },
+        });
+    }
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

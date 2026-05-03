@@ -618,6 +618,19 @@ public static class VipsImageExtensions
         int tileGridSize = 8, double clipLimit = 3.0)
         => VipsImageOps.AdaptiveHistogramEqualization(image, tileGridSize, clipLimit);
 
+    /// <summary>Convert to single-band UChar (BT.601 luminance).</summary>
+    public static VipsImage ToL8(this VipsImage image) => VipsImageOps.ToL8(image);
+    /// <summary>Convert to 2-band UChar (luminance + alpha).</summary>
+    public static VipsImage ToLa16(this VipsImage image) => VipsImageOps.ToLa16(image);
+    /// <summary>Convert to 3-band UChar RGB.</summary>
+    public static VipsImage ToRgb24(this VipsImage image) => VipsImageOps.ToRgb24(image);
+    /// <summary>Convert to 4-band UChar RGBA (opaque alpha if missing).</summary>
+    public static VipsImage ToRgba32(this VipsImage image) => VipsImageOps.ToRgba32(image);
+    /// <summary>Swap R and B (RGB↔BGR / RGBA↔BGRA).</summary>
+    public static VipsImage SwapRb(this VipsImage image) => VipsImageOps.SwapRb(image);
+    /// <summary>RGBA → ARGB band rotation.</summary>
+    public static VipsImage ToArgb(this VipsImage image) => VipsImageOps.ToArgb(image);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to
