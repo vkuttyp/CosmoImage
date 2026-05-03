@@ -129,9 +129,9 @@ of theirs we don't have, a few of ours they don't.
 | `Kodachrome()` | ❌ |
 | `Lomograph()` | ❌ |
 | `Polaroid(amount)` | ✅ via Magick.NET wrapper |
-| `BlackWhite()` | 🟡 covered by `Saturate(0)` |
-| `Filter(ColorMatrix)` (4×4 matrix incl. alpha mix) | 🟡 we have `Recomb` (3×3 RGB matrix); ImageSharp's mixes alpha too |
-| `Opacity(amount)` | ❌ |
+| `BlackWhite()` | ✅ named `BlackWhite()` shortcut over `Saturate(0)` |
+| `Filter(ColorMatrix)` (4×4 matrix incl. alpha mix) | ✅ `ColorMatrix(double[4,5])` — 4 mix rows + translation column, RGBA UChar+Float branches |
+| `Opacity(amount)` | ✅ multiplies alpha by amount (0..1); pass-through for non-alpha images |
 | `ColorBlindness(mode)` (Deuteranopia / Protanopia / Tritanopia / etc.) | ❌ |
 
 ### Effects
@@ -151,11 +151,11 @@ of theirs we don't have, a few of ours they don't.
 | `Resize(size, sampler, options)` with Pad/Crop/BoxPad/Max/Min/Stretch modes + anchor | 🟡 `Resize(scale)` + `Thumbnail(w, h, crop)`; full mode/anchor matrix not exposed |
 | `Resize(size, sampler)` | ✅ — we have 10 kernels (Nearest, Linear, Cubic, Mitchell, Lanczos2/3/5, Hermite, BicubicSharper/Smoother) |
 | `Rotate(degrees, sampler)` | ✅ `Rotate` |
-| `Skew(degreesX, degreesY)` | 🟡 covered by `Affine`, no named convenience |
+| `Skew(degreesX, degreesY)` | ✅ named `Skew(dx, dy)` over `Affine` |
 | `Crop(rect)` | ✅ `Crop` / `ExtractArea` |
 | `EntropyCrop(threshold)` | ✅ |
-| `Pad(width, height, color)` | ❌ |
-| `BackgroundColor(color)` | ❌ |
+| `Pad(width, height, color)` | ✅ `Pad(width, height, background, position)` with VipsCompass anchor |
+| `BackgroundColor(color)` | ✅ `BackgroundColor(...)` flattens transparent pixels onto fill colour |
 | `AutoOrient()` | ✅ |
 | `Flip(FlipMode)` | ✅ |
 | `Transform(matrix, sampler)` | 🟡 covered by `Affine` |
@@ -165,7 +165,7 @@ of theirs we don't have, a few of ours they don't.
 
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
-| `BoxBlur(radius)` | 🟡 covered by `Conv` with box mask (no named convenience) |
+| `BoxBlur(radius)` | ✅ `BoxBlur(radius, passes)` running-sum (round 49) |
 | `GaussianBlur(sigma)` | ✅ `GaussBlur` |
 | `GaussianSharpen(sigma)` | 🟡 covered by `UnsharpMask` |
 | `DetectEdges(EdgeDetectorKernel)` (8+ kernels) | ❌ |
@@ -186,7 +186,7 @@ of theirs we don't have, a few of ours they don't.
 | :--- | :--- |
 | `HistogramEqualization(LuminanceLevels)` | ✅ `HistEqual` |
 | `AdaptiveHistogramEqualization(...)` (CLAHE) | ❌ |
-| `Threshold(amount)` | ❌ |
+| `Threshold(amount)` | ✅ `Threshold(value)` per-band binary; UChar + Float |
 | `Gamma(gamma)` | ✅ `Gamma` |
 
 ### Compositing / Drawing-on-image
@@ -195,7 +195,7 @@ of theirs we don't have, a few of ours they don't.
 | :--- | :--- |
 | `DrawImage(source, location, opacity, blendMode)` (full PorterDuff: Normal, Multiply, Add, Subtract, Screen, Darken, Lighten, Overlay, HardLight, …) | 🟡 `Composite` does over-blend only; no PorterDuff modes |
 | `Fill(color, region)` | 🟡 covered by `DrawRect(... fill: true)` for rect; no general region fill |
-| `Clear(color)` | ❌ |
+| `Clear(color)` | ✅ `Clear(input, color…)` fills the entire canvas |
 
 CosmoImage extras not in ImageSharp:
 - `Charcoal`, `Sketch` artistic effects

@@ -1622,6 +1622,47 @@ public static partial class VipsImageOps
             XRes = xRes, YRes = yRes, Coding = coding,
         });
 
+    // From Operations/Color/VipsOpacity.cs
+    /// <summary>Multiply the alpha channel by <paramref name="amount"/> (0..1).</summary>
+    public static VipsImage Opacity(VipsImage input, double amount)
+        => Run(new VipsOpacity { In = input, Amount = amount });
+
+    // From Operations/Color/VipsThreshold.cs
+    /// <summary>Per-band binary threshold: ≥ <paramref name="value"/> → 255, else 0.</summary>
+    public static VipsImage Threshold(VipsImage input, double value = 128)
+        => Run(new VipsThreshold { In = input, Value = value });
+
+    /// <summary>Alias for <c>Saturate(0)</c>; ImageSharp `BlackWhite()` parity.</summary>
+    public static VipsImage BlackWhite(VipsImage input) => Saturate(input, 0);
+
+    // From Operations/Drawing/VipsClear.cs
+    /// <summary>Fill the entire image with <paramref name="color"/>.</summary>
+    public static VipsImage Clear(VipsImage input, params double[] color)
+        => Run(new VipsClear { In = input, Color = color });
+
+    // From Operations/Color/VipsColorMatrix.cs
+    /// <summary>4×5 colour-matrix transform on RGBA. ImageSharp `Filter(ColorMatrix)` parity.</summary>
+    public static VipsImage ColorMatrix(VipsImage input, double[,] matrix)
+        => Run(new VipsColorMatrix { In = input, Matrix = matrix });
+
+    /// <summary>
+    /// Skew (shear) the image by the given X / Y degrees. Composes
+    /// the shear matrix and dispatches to <see cref="Affine"/>.
+    /// </summary>
+    public static VipsImage Skew(VipsImage input, double degreesX, double degreesY,
+        VipsKernel interpolate = VipsKernel.Linear)
+    {
+        double tanX = Math.Tan(degreesX * Math.PI / 180.0);
+        double tanY = Math.Tan(degreesY * Math.PI / 180.0);
+        // Affine reads source coords from output, so invert: the inverse of
+        // [[1, tanX], [tanY, 1]] is [[1, -tanX], [-tanY, 1]] / (1 - tanX*tanY).
+        double det = 1 - tanX * tanY;
+        if (Math.Abs(det) < 1e-12) return input; // degenerate
+        double a = 1.0 / det, bb = -tanX / det;
+        double c = -tanY / det, d = 1.0 / det;
+        return Affine(input, a, bb, c, d, 0, 0, interpolate);
+    }
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

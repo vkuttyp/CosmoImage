@@ -576,6 +576,30 @@ public static class VipsImageExtensions
         VipsCoding? coding = null)
         => VipsImageOps.Copy(image, interpretation, bandFormat, bands, xRes, yRes, coding);
 
+    /// <summary>Multiply alpha by <paramref name="amount"/> (0..1).</summary>
+    public static VipsImage Opacity(this VipsImage image, double amount)
+        => VipsImageOps.Opacity(image, amount);
+
+    /// <summary>Per-band binary threshold.</summary>
+    public static VipsImage Threshold(this VipsImage image, double value = 128)
+        => VipsImageOps.Threshold(image, value);
+
+    /// <summary>Alias for <c>Saturate(0)</c>.</summary>
+    public static VipsImage BlackWhite(this VipsImage image) => VipsImageOps.BlackWhite(image);
+
+    /// <summary>Fill the image with a constant colour.</summary>
+    public static VipsImage Clear(this VipsImage image, params double[] color)
+        => VipsImageOps.Clear(image, color);
+
+    /// <summary>4×5 colour-matrix transform on RGBA.</summary>
+    public static VipsImage ColorMatrix(this VipsImage image, double[,] matrix)
+        => VipsImageOps.ColorMatrix(image, matrix);
+
+    /// <summary>Skew (shear) by X/Y degrees.</summary>
+    public static VipsImage Skew(this VipsImage image, double degreesX, double degreesY,
+        VipsKernel interpolate = VipsKernel.Linear)
+        => VipsImageOps.Skew(image, degreesX, degreesY, interpolate);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to
