@@ -627,6 +627,21 @@ public static partial class VipsImageOps
         return vipsImage;
     }
 
+    /// <summary>
+    /// Draw shaped text onto <paramref name="canvas"/> using
+    /// SixLabors.Fonts (kerning + ligatures). Mirrors ImageSharp's
+    /// <c>image.Mutate(c =&gt; c.DrawText(text, font, color, point))</c>.
+    /// </summary>
+    public static VipsImage DrawText(VipsImage canvas, VipsTextOptions opts, bool aa = true)
+        => VipsTextOps.DrawText(canvas, opts, aa);
+
+    /// <summary>
+    /// Shape text into a fillable <see cref="VipsPath"/> without
+    /// rasterising — useful for combining the text outline with
+    /// transforms / boolean ops / outline expansion before drawing.
+    /// </summary>
+    public static VipsPath TextToPath(VipsTextOptions opts) => VipsTextOps.TextToPath(opts);
+
     // From Operations/Drawing/VipsDrawRect.cs
     public static VipsImage DrawRect(VipsImage input, int left, int top, int width, int height, byte[] ink, bool fill = false)
     {
