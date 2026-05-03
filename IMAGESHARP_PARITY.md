@@ -193,7 +193,7 @@ of theirs we don't have, a few of ours they don't.
 
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
-| `DrawImage(source, location, opacity, blendMode)` (full PorterDuff: Normal, Multiply, Add, Subtract, Screen, Darken, Lighten, Overlay, HardLight, …) | 🟡 `Composite` does over-blend only; no PorterDuff modes |
+| `DrawImage(source, location, opacity, blendMode)` (full PorterDuff: Normal, Multiply, Add, Subtract, Screen, Darken, Lighten, Overlay, HardLight, …) | ✅ `DrawImage(base, overlay, x, y, mode, opacity)` and `CompositeBlend(base, overlay, mode, opacity)` — 13 modes (Normal/Multiply/Screen/Overlay/Darken/Lighten/HardLight/SoftLight/Difference/Exclusion/Add/Subtract/ColorDodge) |
 | `Fill(color, region)` | 🟡 covered by `DrawRect(... fill: true)` for rect; no general region fill |
 | `Clear(color)` | ✅ `Clear(input, color…)` fills the entire canvas |
 

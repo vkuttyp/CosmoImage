@@ -1772,6 +1772,30 @@ public static partial class VipsImageOps
         });
     }
 
+    // From Operations/Drawing/VipsBlend.cs
+    /// <summary>
+    /// Composite <paramref name="overlay"/> onto <paramref name="base"/> at
+    /// (<paramref name="x"/>, <paramref name="y"/>) using the chosen blend
+    /// <paramref name="mode"/> and <paramref name="opacity"/>. Mirrors
+    /// ImageSharp's <c>DrawImage(source, location, opacity, blendMode)</c>.
+    /// </summary>
+    public static VipsImage DrawImage(VipsImage @base, VipsImage overlay, int x, int y,
+        VipsBlendMode mode, double opacity = 1.0)
+        => Run(new VipsBlend {
+            Base = @base, Overlay = overlay, X = x, Y = y, Mode = mode, Opacity = opacity,
+        });
+
+    /// <summary>
+    /// Composite <paramref name="overlay"/> onto <paramref name="base"/> at the
+    /// origin with the chosen PorterDuff blend mode. Renamed from the
+    /// over-blend `Composite` to disambiguate at the call site.
+    /// </summary>
+    public static VipsImage CompositeBlend(VipsImage @base, VipsImage overlay,
+        VipsBlendMode mode, double opacity = 1.0)
+        => Run(new VipsBlend {
+            Base = @base, Overlay = overlay, X = 0, Y = 0, Mode = mode, Opacity = opacity,
+        });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
