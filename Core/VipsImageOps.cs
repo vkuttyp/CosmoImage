@@ -1819,6 +1819,36 @@ public static partial class VipsImageOps
         params (double x, double y)[] points)
         => FillPath(input, VipsPath.Polygon(points), brush);
 
+    /// <summary>
+    /// Stroke a vector <paramref name="path"/> with <paramref name="pen"/>.
+    /// Mirrors ImageSharp's <c>Draw(pen, path)</c>.
+    /// </summary>
+    public static VipsImage StrokePath(VipsImage input, VipsPath path, VipsPen pen)
+        => VipsStrokePath.Stroke(input, path, pen);
+
+    /// <summary>Stroke an axis-aligned rectangle outline.</summary>
+    public static VipsImage StrokeRectangle(VipsImage input, VipsPen pen,
+        double x, double y, double w, double h)
+        => StrokePath(input, VipsPath.Rectangle(x, y, w, h), pen);
+
+    /// <summary>Stroke a circle outline.</summary>
+    public static VipsImage StrokeCircle(VipsImage input, VipsPen pen,
+        double cx, double cy, double radius)
+        => StrokePath(input, VipsPath.Circle(cx, cy, radius), pen);
+
+    /// <summary>Stroke a polygon outline.</summary>
+    public static VipsImage StrokePolygon(VipsImage input, VipsPen pen,
+        params (double x, double y)[] points)
+        => StrokePath(input, VipsPath.Polygon(points), pen);
+
+    /// <summary>Stroke a single line segment from (x1, y1) to (x2, y2).</summary>
+    public static VipsImage StrokeLine(VipsImage input, VipsPen pen,
+        double x1, double y1, double x2, double y2)
+    {
+        var path = new VipsPath().MoveTo(x1, y1).LineTo(x2, y2);
+        return StrokePath(input, path, pen);
+    }
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
