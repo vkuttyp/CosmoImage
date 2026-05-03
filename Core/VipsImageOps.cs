@@ -1576,6 +1576,22 @@ public static partial class VipsImageOps
     public static VipsImage Grey(int width, int height, bool uchar = false)
         => Run(new VipsGrey { Width = width, Height = height, UChar = uchar });
 
+    // From Operations/Convolution/VipsConvSep.cs
+    /// <summary>Separable 1D convolution — applies <paramref name="kernel"/> horizontally then vertically.</summary>
+    public static VipsImage ConvSep(VipsImage input, double[] kernel)
+        => Run(new VipsConvSep { In = input, Kernel = kernel });
+
+    // From Operations/Convolution/VipsBoxBlur.cs
+    /// <summary>N-pass box blur via running-sum (O(W·H) per pass regardless of radius).</summary>
+    public static VipsImage BoxBlur(VipsImage input, int radius = 3, int passes = 3)
+        => Run(new VipsBoxBlur { In = input, Radius = radius, Passes = passes });
+
+    // From Operations/Convolution/VipsEdge.cs
+    /// <summary>Generic edge-detector dispatcher (Sobel / Compass / Canny).</summary>
+    public static VipsImage Edge(VipsImage input, VipsEdgeMethod method = VipsEdgeMethod.Sobel,
+        double cannySigma = 1.4, int cannyLow = 20, int cannyHigh = 60)
+        => VipsEdge.Apply(input, method, cannySigma, cannyLow, cannyHigh);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

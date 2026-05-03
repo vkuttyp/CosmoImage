@@ -115,7 +115,14 @@ Each lands in a single PR.
   response.
 - [x] ~~`spcor`~~ (round 32) — Pearson NCC (UChar 1-band), result mapped
   [-1, 1] → [0, 255]. FFT-accelerated `fastcor` still missing.
-- [ ] `conva` / `convasep` (approximate large-kernel via box-pass).
+- [x] ~~box-pass approximation~~ (round 49) — `BoxBlur(radius, passes)`
+  via running-sum: O(W·H) per pass regardless of radius; 3+ passes
+  approximate a Gaussian (central-limit theorem). Arbitrary-mask
+  `conva` line-segment approximation still missing.
+- [x] ~~`convsep`~~ (round 49) — separable two-axis convolution
+  via composed Conv1D.
+- [x] ~~`edge`~~ (round 49) — generic edge-detector dispatcher
+  (Sobel / Compass / Canny).
 
 ### `morphology/`
 - [x] ~~`nearest`~~ (round 31) — exact Euclidean distance transform

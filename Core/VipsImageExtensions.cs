@@ -546,6 +546,20 @@ public static class VipsImageExtensions
             = CosmoImage.Operations.Analysis.VipsHistIndexedReduction.Sum)
         => VipsImageOps.HistFindIndexed(image, index, reduction);
 
+    /// <summary>Separable 1D convolution.</summary>
+    public static VipsImage ConvSep(this VipsImage image, double[] kernel)
+        => VipsImageOps.ConvSep(image, kernel);
+
+    /// <summary>N-pass running-sum box blur.</summary>
+    public static VipsImage BoxBlur(this VipsImage image, int radius = 3, int passes = 3)
+        => VipsImageOps.BoxBlur(image, radius, passes);
+
+    /// <summary>Generic edge-detector dispatcher.</summary>
+    public static VipsImage Edge(this VipsImage image,
+        CosmoImage.Operations.Convolution.VipsEdgeMethod method
+            = CosmoImage.Operations.Convolution.VipsEdgeMethod.Sobel)
+        => VipsImageOps.Edge(image, method);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

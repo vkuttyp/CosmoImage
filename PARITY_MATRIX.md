@@ -153,16 +153,15 @@ We have only a few corners of it.
 | `conv` (general 2D mask) | ✅ | `Conv` with Float branch |
 | `convf` (float-only fast path) | ✅ via dispatch | Single Conv with Float dispatch |
 | `convi` (int-only fast path) | ✅ via dispatch | Same |
-| `convsep` (separable mask) | ✅ | `Conv1D` (X+Y composed by `GaussBlur`) |
-| `conva` (approximate) | ❌ | `vips_conva` — approximate large-kernel via box-pass |
-| `convasep` (approximate separable) | ❌ | |
+| `convsep` (separable mask) | ✅ | `Conv1D` (single-axis) and `ConvSep(kernel)` (composed two-axis) |
+| `conva` / `convasep` (approximate large-kernel) | 🟡 | `BoxBlur(radius, passes)` covers the practical large-sigma case via running-sum box passes (3+ passes ≈ Gaussian); arbitrary-mask `conva` line-segment approximation still missing |
 | `gaussblur` | ✅ | Two-pass `Conv1D` |
 | `sharpen` | ✅ | `Sharpen(sigma, m1, m2, x1)` — luminance-band unsharp with separate shadow/highlight gains and dead-band threshold |
 | `sobel` | ✅ | `Sobel()` — 3×3 Gx/Gy magnitude (UChar in/out) |
 | `canny` | ✅ | `Canny(sigma, low, high)` — full pipeline: blur, Sobel, NMS, double-threshold, hysteresis |
 | `compass` (compass-pattern edge) | ✅ | `Compass()` — 8 Kirsch rotations, max absolute response |
 | `correlation`, `fastcor`, `spcor` | ✅ `spcor`, ❌ `fastcor` | `Spcor(reference)` — Pearson NCC (UChar 1-band), result mapped [-1, 1] → [0, 255]; FFT-accelerated `fastcor` still missing |
-| `edge` | ❌ | Generic edge detector wrapper |
+| `edge` | ✅ | `Edge(input, method)` dispatcher (Sobel / Compass / Canny) |
 
 ---
 
