@@ -357,4 +357,178 @@ public sealed partial class VipsPath
             cx - cos * cx + sin * cy,
             cy - sin * cx - cos * cy);
     }
+
+    // ---- Path operations ----
+
+    /// <summary>
+    /// Build the outline polygon for stroking this path with the given
+    /// width / cap / join settings, returned as a fillable
+    /// <see cref="VipsPath"/>. Mirrors ImageSharp's
+    /// <c>IPath.GenerateOutline(width)</c>. Equivalent to running
+    /// <c>StrokePath</c> internally but stops short of rasterising —
+    /// useful when you want to fill the outline with a different brush
+    /// or feed it back into another path operation.
+    /// </summary>
+    public VipsPath Outline(double width,
+        VipsLineCap cap = VipsLineCap.Butt,
+        VipsLineJoin join = VipsLineJoin.Bevel,
+        double miterLimit = 4.0)
+    {
+        // Brush is irrelevant for outline geometry; use a placeholder.
+        var pen = new VipsPen(new VipsSolidBrush(0, 0, 0), width, cap, join, miterLimit);
+        return VipsStrokePath.BuildOutline(this, pen);
+    }
+
+    /// <summary>
+    /// Simplify each sub-path's polyline using the Douglas-Peucker
+    /// algorithm. Bezier segments are flattened first; result is a
+    /// pure polyline path. <paramref name="tolerance"/> is the maximum
+    /// perpendicular distance a removed vertex may have from the chord
+    /// connecting its surviving neighbours. Higher = more aggressive
+    /// reduction.
+    /// </summary>
+    public VipsPath Simplify(double tolerance)
+    {
+        if (tolerance < 0) throw new ArgumentException("tolerance must be ≥ 0", nameof(tolerance));
+        var subpaths = FlattenForSimplify();
+        var result = new VipsPath();
+        foreach (var (points, closed) in subpaths)
+        {
+            var reduced = DouglasPeucker(points, tolerance);
+            if (reduced.Count < 2) continue;
+            result.MoveTo(reduced[0].x, reduced[0].y);
+            for (int i = 1; i < reduced.Count; i++)
+                result.LineTo(reduced[i].x, reduced[i].y);
+            if (closed) result.Close();
+        }
+        return result;
+    }
+
+    private List<(List<(double x, double y)> Points, bool Closed)> FlattenForSimplify()
+    {
+        var result = new List<(List<(double, double)>, bool)>();
+        var current = new List<(double, double)>();
+        double cx = 0, cy = 0;
+        bool started = false, closed = false;
+
+        void Flush()
+        {
+            if (current.Count >= 2) result.Add((current, closed));
+            current = new List<(double, double)>();
+            closed = false;
+        }
+
+        foreach (var seg in Segments)
+        {
+            switch (seg.Kind)
+            {
+                case VipsPathSegmentKind.MoveTo:
+                    if (started) Flush();
+                    cx = seg.X1; cy = seg.Y1;
+                    current.Add((cx, cy));
+                    started = true;
+                    break;
+                case VipsPathSegmentKind.LineTo:
+                    cx = seg.X1; cy = seg.Y1;
+                    current.Add((cx, cy));
+                    break;
+                case VipsPathSegmentKind.CubicTo:
+                    SimplifyCubic(current, cx, cy, seg.X1, seg.Y1, seg.X2, seg.Y2, seg.X3, seg.Y3);
+                    cx = seg.X3; cy = seg.Y3;
+                    break;
+                case VipsPathSegmentKind.QuadraticTo:
+                    SimplifyQuadratic(current, cx, cy, seg.X1, seg.Y1, seg.X2, seg.Y2);
+                    cx = seg.X2; cy = seg.Y2;
+                    break;
+                case VipsPathSegmentKind.Close:
+                    closed = true;
+                    Flush();
+                    started = false;
+                    break;
+            }
+        }
+        if (started) Flush();
+        return result;
+    }
+
+    private static void SimplifyCubic(List<(double x, double y)> dst,
+        double x0, double y0, double x1, double y1, double x2, double y2, double x3, double y3,
+        int depth = 0)
+    {
+        double ux = 3 * x1 - 2 * x0 - x3, uy = 3 * y1 - 2 * y0 - y3;
+        double vx = 3 * x2 - 2 * x3 - x0, vy = 3 * y2 - 2 * y3 - y0;
+        double max = Math.Max(ux * ux, vx * vx) + Math.Max(uy * uy, vy * vy);
+        if (max <= 0.25 * 0.25 || depth > 16) { dst.Add((x3, y3)); return; }
+        double mx0 = (x0 + x1) / 2, my0 = (y0 + y1) / 2;
+        double mx1 = (x1 + x2) / 2, my1 = (y1 + y2) / 2;
+        double mx2 = (x2 + x3) / 2, my2 = (y2 + y3) / 2;
+        double m01x = (mx0 + mx1) / 2, m01y = (my0 + my1) / 2;
+        double m12x = (mx1 + mx2) / 2, m12y = (my1 + my2) / 2;
+        double mx = (m01x + m12x) / 2, my = (m01y + m12y) / 2;
+        SimplifyCubic(dst, x0, y0, mx0, my0, m01x, m01y, mx, my, depth + 1);
+        SimplifyCubic(dst, mx, my, m12x, m12y, mx2, my2, x3, y3, depth + 1);
+    }
+
+    private static void SimplifyQuadratic(List<(double x, double y)> dst,
+        double x0, double y0, double x1, double y1, double x2, double y2, int depth = 0)
+    {
+        double dx = (x0 + x2) / 2 - x1, dy = (y0 + y2) / 2 - y1;
+        double max = dx * dx + dy * dy;
+        if (max <= 0.25 * 0.25 || depth > 16) { dst.Add((x2, y2)); return; }
+        double mx0 = (x0 + x1) / 2, my0 = (y0 + y1) / 2;
+        double mx1 = (x1 + x2) / 2, my1 = (y1 + y2) / 2;
+        double mx = (mx0 + mx1) / 2, my = (my0 + my1) / 2;
+        SimplifyQuadratic(dst, x0, y0, mx0, my0, mx, my, depth + 1);
+        SimplifyQuadratic(dst, mx, my, mx1, my1, x2, y2, depth + 1);
+    }
+
+    /// <summary>
+    /// Standard Douglas-Peucker polyline simplification: recursively
+    /// keep the point furthest from the chord between segment endpoints
+    /// while that distance exceeds <paramref name="tolerance"/>.
+    /// </summary>
+    private static List<(double x, double y)> DouglasPeucker(
+        List<(double x, double y)> points, double tolerance)
+    {
+        int n = points.Count;
+        if (n < 3) return new List<(double, double)>(points);
+        var keep = new bool[n];
+        keep[0] = keep[n - 1] = true;
+        var stack = new Stack<(int lo, int hi)>();
+        stack.Push((0, n - 1));
+        while (stack.Count > 0)
+        {
+            var (lo, hi) = stack.Pop();
+            if (hi - lo < 2) continue;
+            double maxDist = 0;
+            int maxIdx = -1;
+            var (x0, y0) = points[lo];
+            var (x1, y1) = points[hi];
+            for (int i = lo + 1; i < hi; i++)
+            {
+                double d = PerpDistanceToLine(points[i].x, points[i].y, x0, y0, x1, y1);
+                if (d > maxDist) { maxDist = d; maxIdx = i; }
+            }
+            if (maxDist > tolerance && maxIdx > 0)
+            {
+                keep[maxIdx] = true;
+                stack.Push((lo, maxIdx));
+                stack.Push((maxIdx, hi));
+            }
+        }
+        var result = new List<(double, double)>();
+        for (int i = 0; i < n; i++)
+            if (keep[i]) result.Add(points[i]);
+        return result;
+    }
+
+    private static double PerpDistanceToLine(double px, double py,
+        double ax, double ay, double bx, double by)
+    {
+        double dx = bx - ax, dy = by - ay;
+        double len = Math.Sqrt(dx * dx + dy * dy);
+        if (len < 1e-12)
+            return Math.Sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+        return Math.Abs((py - ay) * dx - (px - ax) * dy) / len;
+    }
 }

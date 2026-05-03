@@ -25,9 +25,20 @@ public static class VipsStrokePath
         bool aa = true, VipsRect? clipRect = null)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
+        var outline = BuildOutline(path, pen);
+        return VipsImageOps.FillPath(input, outline, pen.Brush, aa, clipRect);
+    }
+
+    /// <summary>
+    /// Build the outline polygon(s) for stroking <paramref name="path"/>
+    /// with <paramref name="pen"/>, without rasterising. The returned
+    /// <see cref="VipsPath"/> is what the renderer fills internally —
+    /// useful as a standalone path-offset operation.
+    /// </summary>
+    public static VipsPath BuildOutline(VipsPath path, VipsPen pen)
+    {
         if (path == null) throw new ArgumentNullException(nameof(path));
         if (pen == null) throw new ArgumentNullException(nameof(pen));
-
         var subpaths = FlattenToSubPaths(path);
         var outline = new VipsPath();
         foreach (var (points, closed) in subpaths)
@@ -42,7 +53,7 @@ public static class VipsStrokePath
                 EmitOutline(outline, points, closed, pen);
             }
         }
-        return VipsImageOps.FillPath(input, outline, pen.Brush, aa, clipRect);
+        return outline;
     }
 
     /// <summary>

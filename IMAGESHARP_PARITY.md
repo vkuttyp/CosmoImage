@@ -222,7 +222,7 @@ text. ImageSharp has all of:
 | Clipping regions (intersect / union / difference) | ✅ | ✅ rectangular `clipRect` parameter on FillPath / StrokePath / StrokeLine etc. (round 66) AND full path-vs-path booleans via `VipsPath.Intersect` / `Union` / `Subtract` (round 68 — Greiner-Hormann polygon clipping; curves flattened first; non-degenerate inputs only) |
 | Affine path transforms | ✅ | ✅ `VipsPath.Transform(a, b, c, d, tx, ty)` + `Translate` / `Scale` / `Rotate` / `RotateAround` (round 66). Returns a new path; transforms endpoints AND Bezier control points |
 | Tessellation (path → triangles) | ✅ | ❌ |
-| Path operations: outline expansion, offset, simplify | ✅ | ❌ |
+| Path operations: outline expansion, offset, simplify | ✅ | 🟡 `VipsPath.Outline(width, cap, join, miterLimit)` (round 71 — exposes the stroke outline as a fillable path) + `VipsPath.Simplify(tolerance)` (round 71 — Douglas-Peucker; flattens curves first, returns polyline path). Independent path-offset (offset by N without producing a closed band) not yet exposed |
 | Text rendering with full glyph shaping (via `SixLabors.Fonts`) | ✅ HarfBuzz-equivalent shaping, ligatures, kerning, RTL/LTR/BiDi | 🟡 `Text` op via Magick.NET — rudimentary, no proper shaping |
 | Text on path | ✅ | ❌ |
 | Text wrapping / measuring | ✅ | ❌ |
