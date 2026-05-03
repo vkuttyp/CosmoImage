@@ -54,12 +54,12 @@ Pointwise arithmetic, statistics, hough transform, measurement.
 | `complex`, `complex2`, `complexform`, `complexget` | ❌ | No complex-number ops on DPComplex images |
 | `min`, `max`, `sum` (reductions) | ✅ via `Stats` | Per-band + aggregate min/max/sum/avg/deviate in one pass |
 | `avg`, `deviate`, `stats` | ✅ | `Stats(image)` returns full result; `Avg`/`Min`/`Max`/`Deviate` shortcuts |
-| `maxpair`, `minpair` (per-pixel max/min of two images) | ❌ | |
+| `maxpair`, `minpair` (per-pixel max/min of two images) | ✅ | `MinImage(inputs…)` / `MaxImage(inputs…)` accept N inputs; `Sum(inputs…)` for additive composition |
 | `getpoint` (extract single pixel as values) | ❌ | Equivalent: `image.GetPixel<TPixel>(x, y)` |
-| `find_trim` (auto-find non-background bbox) | ❌ | |
+| `find_trim` (auto-find non-background bbox) | ✅ | `FindTrim(input, threshold, background)` — top-left pixel = default background; returns `VipsRect(0, 0, 0, 0)` when uniform |
 | `measure` (extract patch averages from grid) | ❌ | Color-chart calibration helper |
 | `profile` (column/row first/last non-zero) | ❌ | |
-| `project` (sum-along-axis, both axes) | ❌ | |
+| `project` (sum-along-axis, both axes) | ✅ | `Project(input)` returns (Columns: 1×W Float, Rows: 1×H Float) per-axis sums |
 | `hist_find`, `hist_find_indexed`, `hist_find_ndim` | 🟡 | `HistFind` (per-band UChar). N-dim variants missing. |
 | `hough_circle`, `hough_line` | ❌ | Feature detection — niche |
 | `clamp` | ❌ | Per-band clamp to range |

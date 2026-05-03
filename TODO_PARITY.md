@@ -30,9 +30,14 @@ Each lands in a single PR.
 - [ ] `sign` / `floor` / `ceil` / `rint` — extend `VipsMath` to cover
   the libvips full set.
 - [ ] `clamp` (per-band clamp to range).
-- [ ] `min` / `max` / `sum` reductions exposed as standalone ops
-  (currently only via `Stats`).
-- [ ] `maxpair` / `minpair` (per-pixel max/min of two images).
+- [x] ~~`sum`~~ (round 44) — pixel-wise sum across N images; UChar
+  branch clamps at 255, Float branch is unclamped.
+- [x] ~~`maxpair` / `minpair`~~ (round 44) — `MinImage` / `MaxImage`
+  accept N inputs, not just two. Per-band, per-pixel reduction.
+- [x] ~~`project`~~ (round 44) — per-axis sum reduction (column-sums,
+  row-sums) → 1D Float images.
+- [x] ~~`find_trim`~~ (round 44) — auto-find non-background bbox;
+  defaults to top-left pixel as background.
 - [ ] `getpoint` (extract single pixel as values) — wraps existing
   `TypedImage<TPixel>.GetPixel`.
 

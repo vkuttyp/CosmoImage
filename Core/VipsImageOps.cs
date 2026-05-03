@@ -1433,6 +1433,30 @@ public static partial class VipsImageOps
     public static VipsImage DrawSmudge(VipsImage input, int x, int y, int width, int height)
         => Run(new VipsDrawSmudge { In = input, X = x, Y = y, Width = width, Height = height });
 
+    // From Operations/Misc/VipsSum.cs
+    /// <summary>Pixel-wise sum across N inputs. UChar branch clamps; cast to Float for un-clamped sum.</summary>
+    public static VipsImage Sum(params VipsImage[] inputs)
+        => Run(new VipsSum { Inputs = inputs });
+
+    // From Operations/Misc/VipsImageMinMax.cs
+    /// <summary>Pixel-wise minimum across N inputs.</summary>
+    public static VipsImage MinImage(params VipsImage[] inputs)
+        => Run(new VipsImageMin { Inputs = inputs });
+
+    /// <summary>Pixel-wise maximum across N inputs.</summary>
+    public static VipsImage MaxImage(params VipsImage[] inputs)
+        => Run(new VipsImageMax { Inputs = inputs });
+
+    // From Operations/Analysis/VipsProject.cs
+    /// <summary>Project image to (column-sum 1×W image, row-sum 1×H image).</summary>
+    public static (VipsImage Columns, VipsImage Rows) Project(VipsImage input)
+        => VipsProject.Compute(input);
+
+    // From Operations/Analysis/VipsFindTrim.cs
+    /// <summary>Find the bounding box of non-background pixels (defaults to top-left as background).</summary>
+    public static VipsRect FindTrim(VipsImage input, int threshold = 10, double[]? background = null)
+        => VipsFindTrim.Compute(input, threshold, background);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
