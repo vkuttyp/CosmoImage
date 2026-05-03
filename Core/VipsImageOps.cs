@@ -1711,6 +1711,26 @@ public static partial class VipsImageOps
         int tileGridSize = 8, double clipLimit = 3.0)
         => HistLocal(input, tileGridSize, clipLimit);
 
+    // From Loaders/VipsIdentify.cs
+    /// <summary>
+    /// Sniff <paramref name="stream"/> and return the detected
+    /// <see cref="CosmoImage.Loaders.VipsImageFormat"/> + a
+    /// header-only <see cref="VipsImage"/> when supported. Mirrors
+    /// ImageSharp's <c>Image.IdentifyAsync</c>.
+    /// </summary>
+    public static System.Threading.Tasks.ValueTask<CosmoImage.Loaders.VipsIdentifyResult>
+        IdentifyAsync(System.IO.Stream stream, System.Threading.CancellationToken ct = default)
+        => CosmoImage.Loaders.VipsIdentify.IdentifyAsync(stream, ct);
+
+    /// <summary>
+    /// Sniff <paramref name="stream"/>, dispatch to the right loader,
+    /// and return the loaded <see cref="VipsImage"/>. Mirrors
+    /// ImageSharp's <c>Image.LoadAsync</c>.
+    /// </summary>
+    public static System.Threading.Tasks.ValueTask<VipsImage?>
+        LoadAsync(System.IO.Stream stream, System.Threading.CancellationToken ct = default)
+        => CosmoImage.Loaders.VipsIdentify.LoadAsync(stream, ct);
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

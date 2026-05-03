@@ -25,7 +25,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing.
 | Op-chain idiom | `image.Mutate(ctx => ctx.Resize(...).Sepia())` block | `image.Mutate(im => im.Resize(...).Sepia())` block (mirrors ImageSharp); also fluent `image.Resize(...).Sepia()` |
 | `MemoryAllocator` | Pluggable everywhere; `ArrayPoolMemoryAllocator` default | `IVipsAllocator` plumbed through transient buffers (`VipsRegion`, `OrderedStripSink`); long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) bypass the pool |
 | `Configuration` registry | Global + per-image `Configuration` — registers decoders/encoders/allocator | ❌ no equivalent — decoders/encoders are static classes |
-| Auto-format detect (`Image.IdentifyAsync`) | Single entry point detects format + reads header | 🟡 per-format `LoadHeaderAsync` / `Is{Format}Async`; no unified `Identify` |
+| Auto-format detect (`Image.IdentifyAsync`) | Single entry point detects format + reads header | ✅ `VipsImageOps.IdentifyAsync(stream)` returns `{Format, Header}`; sniffs across 19 formats (round 54) |
 | Streaming load | Native — every decoder consumes `Stream` incrementally | 🟡 opt-in `LoadStreamingAsync` on every Stream-capable format; PNG/PDF still byte-buffer |
 | Async API | Every entry point has `Async` variant | ✅ all loaders / savers / sinks are async |
 | Cross-platform | Pure managed, no native deps | 🟡 Magick.NET-Q8 still required for several formats (WebP/HEIF/AVIF/TIFF/SVG/GIF) |
@@ -297,7 +297,7 @@ profile API ImageSharp ships is a meaningful gap.
 | `ArrayPool` integration | ✅ — `ArrayPoolMemoryAllocator` default | ✅ — `ArrayPoolAllocator.Shared` default |
 | Per-image allocator override | ✅ via `Configuration` | ✅ via `VipsImage.Allocator` |
 | Pool-rented decoded pixel buffers | ✅ | ❌ — decoded buffers are `new byte[]` |
-| `Image.IdentifyAsync` (header-only without decode) | ✅ — single entry point | 🟡 per-format `LoadHeaderAsync` |
+| `Image.IdentifyAsync` (header-only without decode) | ✅ — single entry point | ✅ `IdentifyAsync(stream)` (round 54) — sniffs format, returns header where the loader supports it |
 
 ---
 
@@ -305,13 +305,17 @@ profile API ImageSharp ships is a meaningful gap.
 
 | Capability | ImageSharp | CosmoImage |
 | :--- | :--- | :--- |
-| Auto-detect format from magic bytes | ✅ `Image.DetectFormatAsync` | 🟡 each loader has `Is{Format}Async` sniff; no unified detector |
+| Auto-detect format from magic bytes | ✅ `Image.DetectFormatAsync` | ✅ `IdentifyAsync` returns `Format` enum across all 19 formats (round 54) |
 | Magic-byte registry | ✅ via `Configuration` | ❌ — implicit, format-by-format |
 | Custom format plugin registration | ✅ — register decoder/encoder pair via `Configuration` | ❌ — would need to add a static loader + saver pair |
 
-Adding a unified `VipsImageOps.IdentifyAsync` and `VipsImageOps.LoadAsync`
-that auto-dispatches by sniffing each loader's `Is*Async` would close a
-real ergonomic gap.
+**Closed (round 54)**: `VipsImageOps.IdentifyAsync(stream)` and
+`VipsImageOps.LoadAsync(stream)` sniff every known format's magic
+bytes and dispatch automatically. Sniff order favours distinctive
+formats (PNG / JPEG / WebP / HEIF first) so magic-less formats (TGA,
+PNM) only match as last resort. JXL / JP2K return `Format` correctly
+but `LoadAsync` throws `NotSupportedException` since we ship only
+header-only readers for them.
 
 ---
 
@@ -365,7 +369,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Metadata typed access | ❌ raw bytes only |
 | `MemoryAllocator` integration | 🟡 transient buffers only |
 | Streaming load | 🟢 opt-in on every Stream-capable format |
-| Image.IdentifyAsync (single entry point) | ❌ per-format only |
+| Image.IdentifyAsync (single entry point) | ✅ `IdentifyAsync(stream)` + `LoadAsync(stream)` (round 54) |
 | Configuration registry | ❌ |
 
 The headline conclusion: CosmoImage covers the **mainline web-image
