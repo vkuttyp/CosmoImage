@@ -183,14 +183,22 @@ generator that produces an image from parameters.
 - [x] ~~`black`~~ (round 38) — all-zero image of any size/bands/format.
 - [x] ~~`xyz`~~ (round 38) — UInt 2-band (or more, with C/D/E sizes)
   coordinate image; input to `mapim`-style remap.
-- [ ] `eye` / `grey` / `zone` (test-pattern generators).
+- [x] ~~`eye`~~ (round 40) — horizontal frequency chirp × vertical
+  amplitude ramp.
+- [x] ~~`zone`~~ (round 40) — concentric cos(r²) zone-plate, the
+  canonical resize-aliasing diagnostic.
+- [ ] `grey` (uniform grey-ramp test image).
 - [x] ~~`gaussmat`~~ (round 38) — Float matrix kernel image; auto-sized
   by `min_ampl` cutoff.
 - [x] ~~`logmat`~~ (round 39) — Laplacian-of-Gaussian Float kernel.
 - [x] ~~`gaussnoise`~~ (round 39) — Box-Muller; deterministic seed.
-- [ ] Frequency-domain mask generators: `mask_butterworth` /
-  `mask_gaussian` / `mask_ideal` × {plain, band, ring} = 9 ops.
-- [ ] `mask_fractal` / `fractsurf` (fractal generators).
+- [x] ~~`mask_ideal`~~ (round 40) — `MaskIdealLowpass` /
+  `MaskIdealHighpass` (centred Float masks for use with `Freqmult`).
+  `mask_butterworth` / `mask_gaussian` and band/ring variants still
+  missing.
+- [x] ~~`fractsurf`~~ (round 40) — sum of Perlin octaves at successive
+  frequencies; configurable fractal dimension. `mask_fractal` still
+  missing.
 - [x] ~~`sines`~~ (round 38) — Float sinusoid pattern; frequencies in
   cycles per image.
 - [x] ~~`perlin`~~ (round 39) — Perlin 2002 fade curve;
@@ -203,7 +211,9 @@ generator that produces an image from parameters.
 - [x] ~~`identity`~~ (round 38) — identity LUT (256-wide UChar; or
   65536-wide UShort with `ushort_: true`).
 - [x] ~~`invertlut`~~ (round 39) — invert a monotonic 1D LUT.
-- [ ] `point` / `tonelut` (remaining LUT scaffolding).
+- [x] ~~`tonelut`~~ (round 40) — three-knob photographer-friendly tone
+  curve (shadows / midtones / highlights).
+- [ ] `point` (remaining LUT scaffolding).
 
 ### Composite mode parity
 - [ ] Extend `VipsComposite` with the 19 PorterDuff modes libvips'

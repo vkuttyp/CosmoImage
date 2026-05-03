@@ -1287,6 +1287,46 @@ public static partial class VipsImageOps
     public static VipsImage Invertlut(VipsImage input, int size = 0)
         => Run(new VipsInvertlut { In = input, Size = size });
 
+    // From Operations/Create/VipsEye.cs
+    /// <summary>Eye-test pattern — horizontal frequency chirp × vertical amplitude ramp.</summary>
+    public static VipsImage Eye(int width, int height, double factor = 0.5)
+        => Run(new VipsEye { Width = width, Height = height, Factor = factor });
+
+    // From Operations/Create/VipsZone.cs
+    /// <summary>Zone-plate pattern — concentric cos(r²) rings, the canonical resize-aliasing diagnostic.</summary>
+    public static VipsImage Zone(int width, int height)
+        => Run(new VipsZone { Width = width, Height = height });
+
+    // From Operations/Create/VipsTonelut.cs
+    /// <summary>
+    /// Build a tone-curve LUT from shadow lift, midtone gamma, and highlight compression.
+    /// Output is a 256-wide UChar single-band LUT for use with <c>Maplut</c>.
+    /// </summary>
+    public static VipsImage Tonelut(double shadows = 0, double midtones = 1.0, double highlights = 0)
+        => Run(new VipsTonelut { Shadows = shadows, Midtones = midtones, Highlights = highlights });
+
+    // From Operations/Create/VipsMaskIdeal.cs
+    /// <summary>Ideal-lowpass frequency-domain mask (centred). Float; 1 inside disc, 0 outside.</summary>
+    public static VipsImage MaskIdealLowpass(int width, int height, double frequencyCutoff = 0.5)
+        => Run(new VipsMaskIdealLowpass {
+            Width = width, Height = height, FrequencyCutoff = frequencyCutoff,
+        });
+
+    /// <summary>Ideal-highpass frequency-domain mask (centred). Float; 0 inside disc, 1 outside.</summary>
+    public static VipsImage MaskIdealHighpass(int width, int height, double frequencyCutoff = 0.5)
+        => Run(new VipsMaskIdealHighpass {
+            Width = width, Height = height, FrequencyCutoff = frequencyCutoff,
+        });
+
+    // From Operations/Create/VipsFractsurf.cs
+    /// <summary>Fractal-surface noise — sum of Perlin octaves at successive frequencies.</summary>
+    public static VipsImage Fractsurf(int width, int height, int octaves = 6,
+        int baseCellSize = 256, double fractalDimension = 2.5, int seed = 0)
+        => Run(new VipsFractsurf {
+            Width = width, Height = height, Octaves = octaves,
+            BaseCellSize = baseCellSize, FractalDimension = fractalDimension, Seed = seed,
+        });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);
