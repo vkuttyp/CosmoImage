@@ -133,7 +133,13 @@ Each lands in a single PR.
   of the aggregate histogram lies.
 - [x] ~~`stdif`~~ (round 32) — local-contrast renormalisation via
   summed-area tables; targets a configurable mean and sigma.
-- [ ] `hist_plot` (visualise hist as image).
+- [x] ~~`hist_plot`~~ (round 47) — bar-chart visualisation; per-band
+  rendering for multi-band histograms.
+- [x] ~~`hist_find_indexed`~~ (round 47) — per-bin reduction
+  (Sum / Mean / Min / Max) keyed by an index image.
+- [x] ~~`hough_line` / `hough_circle`~~ (round 47) — line / circle
+  Hough transforms; Bresenham-pre-computed circle offsets share work
+  across edge pixels.
 
 ### `freqfilt/`
 - [x] ~~`freqmult`~~ (round 32) — FwFft → real-mask multiply → InvFft;

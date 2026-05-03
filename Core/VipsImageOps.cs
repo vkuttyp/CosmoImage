@@ -1529,6 +1529,33 @@ public static partial class VipsImageOps
         int left = 0, int top = 0, int width = 0, int height = 0)
         => VipsMeasure.Compute(input, h, v, left, top, width, height);
 
+    // From Operations/Analysis/VipsHoughLine.cs
+    /// <summary>Line Hough transform (votes in (ρ, θ) space).</summary>
+    public static VipsImage HoughLine(VipsImage input,
+        int width = 256, int height = 256, int threshold = 128)
+        => Run(new VipsHoughLine {
+            In = input, Width = width, Height = height, Threshold = threshold,
+        });
+
+    // From Operations/Analysis/VipsHoughCircle.cs
+    /// <summary>Circle Hough transform for a fixed (or banded) radius.</summary>
+    public static VipsImage HoughCircle(VipsImage input,
+        int minRadius = 10, int maxRadius = 20, int threshold = 128)
+        => Run(new VipsHoughCircle {
+            In = input, MinRadius = minRadius, MaxRadius = maxRadius, Threshold = threshold,
+        });
+
+    // From Operations/Analysis/VipsHistFindIndexed.cs
+    /// <summary>Per-bin reduction of <paramref name="input"/> keyed by <paramref name="index"/>.</summary>
+    public static VipsImage HistFindIndexed(VipsImage input, VipsImage index,
+        VipsHistIndexedReduction reduction = VipsHistIndexedReduction.Sum)
+        => Run(new VipsHistFindIndexed { In = input, Index = index, Reduction = reduction });
+
+    // From Operations/Analysis/VipsHistPlot.cs
+    /// <summary>Render a 1-row histogram as a bar-chart image of the given height.</summary>
+    public static VipsImage HistPlot(VipsImage input, int height = 256)
+        => Run(new VipsHistPlot { In = input, Height = height });
+
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);
     public static VipsImage NotEqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.NotEqual, c);
     public static VipsImage LessConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Less, c);

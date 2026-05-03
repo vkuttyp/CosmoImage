@@ -530,6 +530,22 @@ public static class VipsImageExtensions
         VipsKernel interpolate = VipsKernel.Linear)
         => VipsImageOps.Similarity(image, scale, angle, idx, idy, interpolate);
 
+    /// <summary>Line Hough transform (votes in (ρ, θ) space).</summary>
+    public static VipsImage HoughLine(this VipsImage image,
+        int width = 256, int height = 256, int threshold = 128)
+        => VipsImageOps.HoughLine(image, width, height, threshold);
+
+    /// <summary>Circle Hough transform.</summary>
+    public static VipsImage HoughCircle(this VipsImage image,
+        int minRadius = 10, int maxRadius = 20, int threshold = 128)
+        => VipsImageOps.HoughCircle(image, minRadius, maxRadius, threshold);
+
+    /// <summary>Per-bin reduction of this image keyed by an index image.</summary>
+    public static VipsImage HistFindIndexed(this VipsImage image, VipsImage index,
+        CosmoImage.Operations.Analysis.VipsHistIndexedReduction reduction
+            = CosmoImage.Operations.Analysis.VipsHistIndexedReduction.Sum)
+        => VipsImageOps.HistFindIndexed(image, index, reduction);
+
     /// <summary>
     /// Block-scoped fluent wrapper. ImageSharp users prefer this style:
     /// <c>image.Mutate(im => im.Resize(0.5).Sepia())</c>. Equivalent to

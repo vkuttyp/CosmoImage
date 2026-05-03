@@ -60,8 +60,8 @@ Pointwise arithmetic, statistics, hough transform, measurement.
 | `measure` (extract patch averages from grid) | ✅ | `Measure(input, h, v, left, top, w, h)` — Float matrix of patch means; samples middle 80% of each cell to dodge edge bleed |
 | `profile` (column/row first/last non-zero) | ❌ | |
 | `project` (sum-along-axis, both axes) | ✅ | `Project(input)` returns (Columns: 1×W Float, Rows: 1×H Float) per-axis sums |
-| `hist_find`, `hist_find_indexed`, `hist_find_ndim` | 🟡 | `HistFind` (per-band UChar). N-dim variants missing. |
-| `hough_circle`, `hough_line` | ❌ | Feature detection — niche |
+| `hist_find`, `hist_find_indexed`, `hist_find_ndim` | 🟡 | `HistFind`, `HistFindIndexed(input, index, reduction)` (Sum/Mean/Min/Max). N-dim variant still missing. |
+| `hough_circle`, `hough_line` | ✅ | `HoughLine(width, height, threshold)` and `HoughCircle(minRadius, maxRadius, threshold)` — UInt accumulator output |
 | `clamp` | ✅ | `Clamp(input, min, max)` — UChar (byte-clamped) and Float (numeric-clamped) branches |
 
 ---
@@ -268,7 +268,7 @@ Frequency-domain filtering.
 | `hist_entropy` | ✅ | `HistEntropy()` returns per-band Shannon entropy plus aggregate (bits) |
 | `hist_local` (CLAHE — contrast-limited adaptive histogram equalization) | ✅ | `HistLocal(tileGridSize=8, clipLimit=3.0)` — Pizer/Zuiderveld 1994. Per-tile clipped+redistributed CDF, bilinear blend across 4 surrounding tile-CDFs at each pixel. UChar only. Per-band (no Lab conversion) |
 | `hist_match` (histogram matching against reference) | ✅ | `HistMatch(reference)` — per-band CDF remap. Computes both histograms and the matching LUT, applies in one pass |
-| `hist_plot` (visualise hist as image) | ❌ |
+| `hist_plot` (visualise hist as image) | ✅ | `HistPlot(input, height)` — bar-chart visualisation; multi-band per-band rendering |
 | `hist_ismonotonic` | ❌ |
 | `case` (per-pixel select from band of LUTs) | ✅ | `Case(index, cases…)` — picks <c>cases[index]</c> per pixel; out-of-range falls back to last source |
 | `percent` (find threshold for given percentage) | ✅ | `Percent(percent)` — bin at which percentile of aggregate histogram is reached |
