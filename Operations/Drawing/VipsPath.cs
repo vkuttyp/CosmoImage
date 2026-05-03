@@ -41,7 +41,7 @@ public readonly record struct VipsPathSegment(
 /// <see cref="Ellipse"/>, <see cref="RegularPolygon"/>,
 /// <see cref="Star"/>.</para>
 /// </summary>
-public sealed class VipsPath
+public sealed partial class VipsPath
 {
     internal readonly List<VipsPathSegment> Segments = new();
 

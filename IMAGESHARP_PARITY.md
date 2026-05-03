@@ -219,7 +219,7 @@ text. ImageSharp has all of:
 | Arc / Bezier curves | ✅ | ✅ cubic + quadratic Bezier in `VipsPath` (round 61) + SVG-style elliptical arc via `ArcTo(rx, ry, xRot, largeArc, sweep, x, y)` (round 69) |
 | `SolidPen`, dashed pens, `Pen` width, line joins (miter / round / bevel), end caps | ✅ | ✅ `VipsPen` solid + width + all 3 joins (bevel / miter / round) + all 3 caps (butt / square / round) + miter limit + dashed pens with arc-length cycle and `DashOffset` phase (rounds 62, 64, 65) |
 | Brushes: `SolidBrush`, `LinearGradientBrush`, `RadialGradientBrush`, `PathGradientBrush`, `ImageBrush`, `PatternBrush` | ✅ | 🟡 `VipsSolidBrush` / `VipsLinearGradientBrush` / `VipsRadialGradientBrush` (round 61) + `VipsImageBrush` / `VipsPatternBrush` (round 67) — image brush samples a source image with Clamp / Repeat / Mirror tiling and `(offsetX, offsetY)` origin shift; pattern brush is a Repeat-mode wrapper. 5 of 6 ImageSharp brushes covered; only `PathGradientBrush` still missing |
-| Clipping regions (intersect / union / difference) | ✅ | 🟡 rectangular `clipRect` parameter on FillPath / StrokePath / StrokeLine etc. (round 66) — drawing limited to the rect. Full path-vs-path booleans still missing |
+| Clipping regions (intersect / union / difference) | ✅ | ✅ rectangular `clipRect` parameter on FillPath / StrokePath / StrokeLine etc. (round 66) AND full path-vs-path booleans via `VipsPath.Intersect` / `Union` / `Subtract` (round 68 — Greiner-Hormann polygon clipping; curves flattened first; non-degenerate inputs only) |
 | Affine path transforms | ✅ | ✅ `VipsPath.Transform(a, b, c, d, tx, ty)` + `Translate` / `Scale` / `Rotate` / `RotateAround` (round 66). Returns a new path; transforms endpoints AND Bezier control points |
 | Tessellation (path → triangles) | ✅ | ❌ |
 | Path operations: outline expansion, offset, simplify | ✅ | ❌ |
@@ -363,7 +363,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
-| Drawing & vector graphics | 🟡 rounds 61–69 shipped path builder (move / line / cubic / quadratic / arc / close) + shape factories + 5 brushes (solid / linear / radial / image / pattern) + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping. Only `PathGradientBrush` and full path-vs-path clipping booleans still missing |
+| Drawing & vector graphics | 🟡 rounds 61–69 shipped path builder (move / line / cubic / quadratic / arc / close) + shape factories + 5 brushes (solid / linear / radial / image / pattern) + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping + path-vs-path booleans (intersect / union / subtract via Greiner-Hormann). Only `PathGradientBrush` still missing |
 | Color spaces | 🟡 only sRGB↔linear + RGB-matrix ops |
 | Metadata typed access | ❌ raw bytes only |
 | `MemoryAllocator` integration | 🟡 transient buffers only |
