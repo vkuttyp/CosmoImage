@@ -217,7 +217,7 @@ text. ImageSharp has all of:
 | Circle / Ellipse | ✅ | ✅ `FillCircle` / `StrokeCircle` (rounds 61–62); ellipse via `VipsPath.Ellipse` factory |
 | Polygon / Polyline | ✅ | ✅ `FillPolygon` / `StrokePolygon` (rounds 61–62) |
 | Arc / Bezier curves | ✅ | 🟡 cubic + quadratic Bezier in `VipsPath` (round 61); arc segment still missing |
-| `SolidPen`, dashed pens, `Pen` width, line joins (miter / round / bevel), end caps | ✅ | 🟡 `VipsPen` (round 62) — solid + width, bevel joins + butt caps. Dashed pens / miter / round joins / square / round caps still missing |
+| `SolidPen`, dashed pens, `Pen` width, line joins (miter / round / bevel), end caps | 🟡 | ✅ `VipsPen` solid + width + all 3 joins (bevel / miter / round) + all 3 caps (butt / square / round) + miter limit (rounds 62, 64). Dashed pens still missing — coming in round 65 |
 | Brushes: `SolidBrush`, `LinearGradientBrush`, `RadialGradientBrush`, `PathGradientBrush`, `ImageBrush`, `PatternBrush` | ✅ | 🟡 `VipsSolidBrush` / `VipsLinearGradientBrush` / `VipsRadialGradientBrush` (round 61). `PathGradientBrush` / `ImageBrush` / `PatternBrush` still missing |
 | Clipping regions (intersect / union / difference) | ✅ | ❌ |
 | Affine path transforms | ✅ | ❌ |
@@ -363,7 +363,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
-| Drawing & vector graphics | 🟡 rounds 61–63 shipped path builder + shape factories + 3 brushes + FillPath + VipsPen + StrokePath + 4× supersample AA (default on, opt-out via `aa: false`). Clipping, transforms, dashed pens, miter / round joins, advanced brushes still missing |
+| Drawing & vector graphics | 🟡 rounds 61–64 shipped path builder + shape factories + 3 brushes + FillPath + VipsPen + StrokePath + AA + all 3 joins (bevel / miter / round) + all 3 caps (butt / square / round) + miter limit. Clipping, transforms, dashed pens, advanced brushes still missing |
 | Color spaces | 🟡 only sRGB↔linear + RGB-matrix ops |
 | Metadata typed access | ❌ raw bytes only |
 | `MemoryAllocator` integration | 🟡 transient buffers only |
