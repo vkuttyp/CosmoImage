@@ -6,6 +6,35 @@ using SixLabors.Fonts;
 
 namespace CosmoImage.Operations.Drawing;
 
+/// <summary>Horizontal alignment within the wrap box.</summary>
+public enum VipsTextHAlign
+{
+    Left = 0,
+    Center = 1,
+    Right = 2,
+}
+
+/// <summary>Where to break lines when text overflows the wrap width.</summary>
+public enum VipsTextWordBreak
+{
+    /// <summary>Standard Unicode line-breaking (UAX #14).</summary>
+    Standard = 0,
+    /// <summary>Break between any two characters.</summary>
+    BreakAll = 1,
+    /// <summary>Disallow breaks within words.</summary>
+    KeepAll = 2,
+    /// <summary>Standard rules; otherwise break mid-word as a last resort.</summary>
+    BreakWord = 3,
+}
+
+/// <summary>Inter-word / inter-character spacing strategy for justified text.</summary>
+public enum VipsTextJustify
+{
+    None = 0,
+    InterWord = 1,
+    InterCharacter = 2,
+}
+
 /// <summary>
 /// Layout + style options for shaped text rendering. Mirrors the
 /// per-call shape of ImageSharp's <c>RichTextOptions</c> / Cairo's
@@ -13,7 +42,7 @@ namespace CosmoImage.Operations.Drawing;
 /// </summary>
 public sealed class VipsTextOptions
 {
-    /// <summary>Text to render.</summary>
+    /// <summary>Text to render. May contain <c>\n</c> for explicit line breaks.</summary>
     public string Text { get; init; } = "";
     /// <summary>System font family name (e.g., "Helvetica"). Ignored if <see cref="FontFile"/> set.</summary>
     public string FontFamily { get; init; } = "";
@@ -27,6 +56,22 @@ public sealed class VipsTextOptions
     public double X { get; init; }
     /// <summary>Layout origin y — top edge of the text bounding box in destination coords.</summary>
     public double Y { get; init; }
+
+    // ---- Round 73: multi-line layout ----
+
+    /// <summary>
+    /// Maximum line width in pixels before wrapping. <c>null</c> = no
+    /// wrapping (text only breaks on explicit <c>\n</c>).
+    /// </summary>
+    public double? WrappingLength { get; init; }
+    /// <summary>Line height multiplier. 1.0 = font's default; 2.0 = double-spaced.</summary>
+    public double LineSpacing { get; init; } = 1.0;
+    /// <summary>How wrapped lines align horizontally within the wrap box.</summary>
+    public VipsTextHAlign HAlign { get; init; } = VipsTextHAlign.Left;
+    /// <summary>Word-breaking rule for line wrapping.</summary>
+    public VipsTextWordBreak WordBreak { get; init; } = VipsTextWordBreak.Standard;
+    /// <summary>Justification — distribute extra space across each line to fill the wrap width.</summary>
+    public VipsTextJustify Justify { get; init; } = VipsTextJustify.None;
 }
 
 /// <summary>
@@ -73,10 +118,39 @@ public static class VipsTextOps
         if (string.IsNullOrEmpty(opts.Text)) return new VipsPath();
         var font = LoadFont(opts);
         var renderer = new VipsGlyphRenderer();
+        // Note: SL.Fonts' HorizontalAlignment enum order differs from
+        // the natural Left/Center/Right — explicit map.
+        var hAlign = opts.HAlign switch
+        {
+            VipsTextHAlign.Left => HorizontalAlignment.Left,
+            VipsTextHAlign.Center => HorizontalAlignment.Center,
+            VipsTextHAlign.Right => HorizontalAlignment.Right,
+            _ => HorizontalAlignment.Left,
+        };
+        // SL.Fonts' HorizontalAlignment is anchor-style (positions text
+        // relative to Origin). Users with a wrap box typically expect
+        // "align within box" — shift the effective origin so opts.X
+        // always means the wrap box's LEFT edge regardless of HAlign.
+        double effectiveX = opts.X;
+        if (opts.WrappingLength is double wrap)
+        {
+            effectiveX += opts.HAlign switch
+            {
+                VipsTextHAlign.Center => wrap / 2,
+                VipsTextHAlign.Right => wrap,
+                _ => 0,
+            };
+        }
         var textOptions = new TextOptions(font)
         {
-            Origin = new Vector2((float)opts.X, (float)opts.Y),
+            Origin = new Vector2((float)effectiveX, (float)opts.Y),
+            LineSpacing = (float)opts.LineSpacing,
+            HorizontalAlignment = hAlign,
+            WordBreaking = (WordBreaking)opts.WordBreak,
+            TextJustification = (TextJustification)opts.Justify,
         };
+        if (opts.WrappingLength is double w)
+            textOptions.WrappingLength = (float)w;
         TextRenderer.RenderTextTo(renderer, opts.Text, textOptions);
         return renderer.Path;
     }
