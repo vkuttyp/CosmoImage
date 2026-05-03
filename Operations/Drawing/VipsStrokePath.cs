@@ -30,8 +30,114 @@ public static class VipsStrokePath
         var subpaths = FlattenToSubPaths(path);
         var outline = new VipsPath();
         foreach (var (points, closed) in subpaths)
-            EmitOutline(outline, points, closed, pen);
+        {
+            if (pen.Dashes != null)
+            {
+                // Walk arc-length, split into "on" sub-pieces, stroke
+                // each as a fresh open sub-path with caps.
+                foreach (var piece in DashSplit(points, closed, pen.Dashes, pen.DashOffset))
+                    EmitOutline(outline, piece, closed: false, pen);
+            }
+            else
+            {
+                EmitOutline(outline, points, closed, pen);
+            }
+        }
         return VipsImageOps.FillPath(input, outline, pen.Brush, aa);
+    }
+
+    /// <summary>
+    /// Walk the polyline by arc-length, slicing it where the dash
+    /// cycle transitions on→off / off→on. Returns one polyline per
+    /// "on" interval. For closed input the cycle continues across
+    /// the closing edge from <c>points[^1]</c> back to
+    /// <c>points[0]</c>.
+    /// </summary>
+    private static IEnumerable<List<(double x, double y)>> DashSplit(
+        List<(double x, double y)> points, bool closed,
+        double[] dashes, double dashOffset)
+    {
+        // Build the walk polyline (with the closing edge if applicable).
+        var walk = new List<(double x, double y)>(points);
+        if (closed) walk.Add(points[0]);
+
+        // Sum of dash cycle.
+        double cycle = 0;
+        foreach (var d in dashes) cycle += d;
+
+        // Initial state — phase the offset into the cycle.
+        double phase = dashOffset % cycle;
+        if (phase < 0) phase += cycle;
+        // Find which dash element we're starting in, and how much
+        // distance is left in it.
+        int dashIdx = 0;
+        double consumedInCycle = 0;
+        while (consumedInCycle + dashes[dashIdx] <= phase + 1e-12)
+        {
+            consumedInCycle += dashes[dashIdx];
+            dashIdx = (dashIdx + 1) % dashes.Length;
+        }
+        double distLeft = (consumedInCycle + dashes[dashIdx]) - phase;
+        bool inOn = (dashIdx % 2) == 0;
+
+        var current = new List<(double x, double y)>();
+        if (inOn) current.Add(walk[0]);
+
+        for (int i = 0; i < walk.Count - 1; i++)
+        {
+            double sx = walk[i].x, sy = walk[i].y;
+            double ex = walk[i + 1].x, ey = walk[i + 1].y;
+            double dx = ex - sx, dy = ey - sy;
+            double segLen = Math.Sqrt(dx * dx + dy * dy);
+            if (segLen < 1e-12) continue;
+            double consumed = 0;
+
+            while (consumed < segLen)
+            {
+                double available = segLen - consumed;
+                if (distLeft >= available - 1e-12)
+                {
+                    // Whole remainder of this segment fits in the
+                    // current dash element.
+                    if (inOn) current.Add(walk[i + 1]);
+                    distLeft -= available;
+                    consumed = segLen;
+                }
+                else
+                {
+                    // Dash boundary lands inside this segment.
+                    double t = (consumed + distLeft) / segLen;
+                    double bx = sx + dx * t;
+                    double by = sy + dy * t;
+                    if (inOn)
+                    {
+                        current.Add((bx, by));
+                        if (current.Count >= 2) yield return current;
+                        current = new List<(double, double)>();
+                    }
+                    else
+                    {
+                        // Off → on transition: start a fresh polyline
+                        // at the boundary point.
+                        current.Add((bx, by));
+                    }
+                    consumed += distLeft;
+                    // Advance to next dash element.
+                    dashIdx = (dashIdx + 1) % dashes.Length;
+                    inOn = !inOn;
+                    distLeft = dashes[dashIdx];
+                    // Skip zero-length dash entries (they cycle
+                    // through immediately).
+                    while (distLeft <= 1e-12)
+                    {
+                        dashIdx = (dashIdx + 1) % dashes.Length;
+                        inOn = !inOn;
+                        distLeft = dashes[dashIdx];
+                    }
+                }
+            }
+        }
+        if (inOn && current.Count >= 2) yield return current;
     }
 
     /// <summary>
