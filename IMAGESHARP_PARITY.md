@@ -55,20 +55,20 @@ ImageSharp ships ~25 pixel structs covering the matrix of:
 | `Bgr565` | 1 packed | 16-bit packed RGB (5/6/5) | ✅ `Bgr565` (round 58) — bit-replication R/G/B accessors |
 | `Bgra4444` | 1 packed | 16-bit packed ARGB (4/4/4/4) | ✅ `Bgra4444` (round 58) |
 | `Bgra5551` | 1 packed | 16-bit packed ARGB (5/5/5/1) | ✅ `Bgra5551` (round 58) — binary alpha (≥128 = opaque) |
-| `Rgba1010102` | 1 packed | 32-bit packed (10/10/10/2) | ❌ |
+| `Rgba1010102` | 1 packed | 32-bit packed (10/10/10/2) | ✅ `Rgba1010102` (round 59) — UInt-stored, 10-bit RGB / 2-bit A bit-replication accessors |
 | `Rg32` | 2 | 16-bit per channel (R, G) | ✅ `Rg32` (round 58) |
 | `HalfSingle` | 1 | 16-bit float | ❌ |
 | `HalfVector2` | 2 | 16-bit float ×2 | ❌ |
 | `HalfVector4` | 4 | 16-bit float ×4 | ❌ |
 | `RgbaVector` | 4 | 32-bit float per channel | 🟡 covered functionally by `BandFormat=Float` + 4 bands, but no typed struct |
-| `Byte4`, `Short2`, `Short4`, `NormalizedByte2/4`, `NormalizedShort2/4` | 2/4 | various integer | ❌ |
+| `Byte4`, `Short2`, `Short4`, `NormalizedByte2/4`, `NormalizedShort2/4` | 2/4 | various integer | ✅ all 7 added round 59. `Byte4` = 4-band UChar tuple, `Short2/4` = 2/4-band Short, `NormalizedByte*` reinterpret raw byte as `sbyte` for `[-1, 1]` access, `NormalizedShort*` use Short with /32767 normalisation |
 | `PixelOperations<TPixel>` (bulk format conversion) | — | — | 🟡 named conversions: `ToL8` / `ToLa16` / `ToRgb24` / `ToRgba32` / `SwapRb` / `ToArgb` (round 55). Generic `From<TFromPixel>` still missing — needs the typed-pixel surface to mature first |
 
-CosmoImage gap: **~21 of 25 pixel formats missing.** This is the most
-visible "ImageSharp parity" gap. Closing it would mean adding pixel
-structs and threading them through the typed-pixel layer; the lazy op
-pipeline doesn't need them since ops dispatch on `BandFormat` at
-runtime.
+CosmoImage gap: **1 of ~25 pixel formats missing** (rounds 57–59
+closed everything except the `Half`-precision family). Adding
+`HalfSingle` / `HalfVector2` / `HalfVector4` would need a new
+`BandFormat.Half` enum value plus plumbing through `SizeOf`,
+`Cast`, and the materialise paths — saved for a later round.
 
 ---
 
@@ -360,7 +360,7 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | Layer | Coverage |
 | :--- | :--- |
 | Core architecture (lazy vs eager — different by design) | n/a — different model |
-| Pixel formats (struct types) | 🟡 16 of ~25 (round 58 added A8 / Rg32 + packed Bgr565 / Bgra4444 / Bgra5551) |
+| Pixel formats (struct types) | 🟢 24 of ~25 (round 59 added Byte4 / Short2 / Short4 / NormalizedByte2 / NormalizedByte4 / NormalizedShort2 / NormalizedShort4 / Rgba1010102). Only the `Half`-precision family (`HalfSingle` / `HalfVector2` / `HalfVector4`) remains, blocked on adding a `BandFormat.Half` enum value |
 | Codecs (modern web formats) | 🟢 most covered, often via Magick |
 | Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |

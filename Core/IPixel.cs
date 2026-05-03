@@ -288,3 +288,185 @@ public struct Bgra5551 : IPixel<Bgra5551>
     public static int BandCount => 1;
     public static VipsBandFormat BandFormat => VipsBandFormat.UShort;
 }
+
+/// <summary>
+/// 4 unsigned bytes — same layout as <see cref="Rgba32"/> but
+/// semantically a generic <c>byte4</c> tuple (no R/G/B/A meaning).
+/// What ImageSharp calls <c>Byte4</c>; appears in raw GPU vertex /
+/// instance buffers.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Byte4 : IPixel<Byte4>
+{
+    public byte X;
+    public byte Y;
+    public byte Z;
+    public byte W;
+    public Byte4(byte x, byte y, byte z, byte w) { X = x; Y = y; Z = z; W = w; }
+    public static int BandCount => 4;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UChar;
+}
+
+/// <summary>2 signed 16-bit ints. GPU mesh-attribute / data-buffer format.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Short2 : IPixel<Short2>
+{
+    public short X;
+    public short Y;
+    public Short2(short x, short y) { X = x; Y = y; }
+    public static int BandCount => 2;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Short;
+}
+
+/// <summary>4 signed 16-bit ints.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Short4 : IPixel<Short4>
+{
+    public short X;
+    public short Y;
+    public short Z;
+    public short W;
+    public Short4(short x, short y, short z, short w) { X = x; Y = y; Z = z; W = w; }
+    public static int BandCount => 4;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Short;
+}
+
+/// <summary>
+/// 2 signed bytes with normalised <see cref="X"/> / <see cref="Y"/>
+/// accessors in <c>[-1, 1]</c>. The raw bytes are reinterpreted as
+/// <c>sbyte</c>; <c>−128</c> maps to <c>−1</c>, <c>0</c> to <c>0</c>,
+/// <c>127</c> to <c>+1</c>. ImageSharp <c>NormalizedByte2</c> parity.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct NormalizedByte2 : IPixel<NormalizedByte2>
+{
+    public byte RawX;
+    public byte RawY;
+
+    public NormalizedByte2(float x, float y)
+    {
+        RawX = (byte)(sbyte)Math.Clamp((int)Math.Round(x * 127), -128, 127);
+        RawY = (byte)(sbyte)Math.Clamp((int)Math.Round(y * 127), -128, 127);
+    }
+
+    public float X => (sbyte)RawX / 127.0f;
+    public float Y => (sbyte)RawY / 127.0f;
+
+    public static int BandCount => 2;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UChar;
+}
+
+/// <summary>4 signed bytes normalised to <c>[-1, 1]</c>.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct NormalizedByte4 : IPixel<NormalizedByte4>
+{
+    public byte RawX;
+    public byte RawY;
+    public byte RawZ;
+    public byte RawW;
+
+    public NormalizedByte4(float x, float y, float z, float w)
+    {
+        RawX = (byte)(sbyte)Math.Clamp((int)Math.Round(x * 127), -128, 127);
+        RawY = (byte)(sbyte)Math.Clamp((int)Math.Round(y * 127), -128, 127);
+        RawZ = (byte)(sbyte)Math.Clamp((int)Math.Round(z * 127), -128, 127);
+        RawW = (byte)(sbyte)Math.Clamp((int)Math.Round(w * 127), -128, 127);
+    }
+
+    public float X => (sbyte)RawX / 127.0f;
+    public float Y => (sbyte)RawY / 127.0f;
+    public float Z => (sbyte)RawZ / 127.0f;
+    public float W => (sbyte)RawW / 127.0f;
+
+    public static int BandCount => 4;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UChar;
+}
+
+/// <summary>2 signed shorts normalised to <c>[-1, 1]</c>.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct NormalizedShort2 : IPixel<NormalizedShort2>
+{
+    public short RawX;
+    public short RawY;
+
+    public NormalizedShort2(float x, float y)
+    {
+        RawX = (short)Math.Clamp((int)Math.Round(x * 32767), -32768, 32767);
+        RawY = (short)Math.Clamp((int)Math.Round(y * 32767), -32768, 32767);
+    }
+
+    public float X => RawX / 32767.0f;
+    public float Y => RawY / 32767.0f;
+
+    public static int BandCount => 2;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Short;
+}
+
+/// <summary>4 signed shorts normalised to <c>[-1, 1]</c>.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct NormalizedShort4 : IPixel<NormalizedShort4>
+{
+    public short RawX;
+    public short RawY;
+    public short RawZ;
+    public short RawW;
+
+    public NormalizedShort4(float x, float y, float z, float w)
+    {
+        RawX = (short)Math.Clamp((int)Math.Round(x * 32767), -32768, 32767);
+        RawY = (short)Math.Clamp((int)Math.Round(y * 32767), -32768, 32767);
+        RawZ = (short)Math.Clamp((int)Math.Round(z * 32767), -32768, 32767);
+        RawW = (short)Math.Clamp((int)Math.Round(w * 32767), -32768, 32767);
+    }
+
+    public float X => RawX / 32767.0f;
+    public float Y => RawY / 32767.0f;
+    public float Z => RawZ / 32767.0f;
+    public float W => RawW / 32767.0f;
+
+    public static int BandCount => 4;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Short;
+}
+
+/// <summary>
+/// 32-bit packed RGBA with 10/10/10/2 bit allocation: 10 bits each
+/// for R, G, B and 2 bits for A. The "wide-gamut HDR-lite" format —
+/// keeps higher colour precision than 8-bit channels at the same
+/// bandwidth.
+///
+/// <para>Layout (matches ImageSharp): bits 0..9 = R, 10..19 = G,
+/// 20..29 = B, 30..31 = A. Channel range R/G/B = 0..1023, A = 0..3.
+/// 8-bit accessors expand each field via bit-replication.</para>
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct Rgba1010102 : IPixel<Rgba1010102>
+{
+    public uint Packed;
+
+    public Rgba1010102(uint packed) { Packed = packed; }
+
+    /// <summary>Build from 8-bit RGBA — RGB scaled to 10 bits, A truncated to 2.</summary>
+    public Rgba1010102(byte r, byte g, byte b, byte a)
+    {
+        uint r10 = (uint)((r << 2) | (r >> 6));   // 8-bit → 10-bit by bit-replication
+        uint g10 = (uint)((g << 2) | (g >> 6));
+        uint b10 = (uint)((b << 2) | (b >> 6));
+        uint a2 = (uint)(a >> 6);                 // 8-bit → 2-bit truncation
+        Packed = r10 | (g10 << 10) | (b10 << 20) | (a2 << 30);
+    }
+
+    /// <summary>Get the 10-bit red field expanded to 8 bits.</summary>
+    public byte R => Expand10((int)((Packed >> 0) & 0x3FF));
+    public byte G => Expand10((int)((Packed >> 10) & 0x3FF));
+    public byte B => Expand10((int)((Packed >> 20) & 0x3FF));
+    /// <summary>Get the 2-bit alpha field expanded to 8 bits.</summary>
+    public byte A => Expand2((int)((Packed >> 30) & 0x3));
+
+    /// <summary>10-bit field → 8-bit (drop low 2 bits).</summary>
+    private static byte Expand10(int v) => (byte)(v >> 2);
+    /// <summary>2-bit field → 8-bit via duplication: 0/85/170/255.</summary>
+    private static byte Expand2(int v) => (byte)((v << 6) | (v << 4) | (v << 2) | v);
+
+    public static int BandCount => 1;
+    public static VipsBandFormat BandFormat => VipsBandFormat.UInt;
+}
