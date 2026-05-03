@@ -1801,8 +1801,11 @@ public static partial class VipsImageOps
     /// Fill a vector <paramref name="path"/> with <paramref name="brush"/>.
     /// Mirrors ImageSharp's <c>Fill(brush, path)</c>.
     /// </summary>
-    public static VipsImage FillPath(VipsImage input, VipsPath path, IVipsBrush brush, bool aa = true)
-        => Run(new VipsFillPath { In = input, Path = path, Brush = brush, Antialiased = aa });
+    public static VipsImage FillPath(VipsImage input, VipsPath path, IVipsBrush brush,
+        bool aa = true, VipsRect? clipRect = null)
+        => Run(new VipsFillPath {
+            In = input, Path = path, Brush = brush, Antialiased = aa, ClipRect = clipRect,
+        });
 
     /// <summary>Convenience: fill an axis-aligned rectangle.</summary>
     public static VipsImage Fill(VipsImage input, IVipsBrush brush,
@@ -1823,8 +1826,9 @@ public static partial class VipsImageOps
     /// Stroke a vector <paramref name="path"/> with <paramref name="pen"/>.
     /// Mirrors ImageSharp's <c>Draw(pen, path)</c>.
     /// </summary>
-    public static VipsImage StrokePath(VipsImage input, VipsPath path, VipsPen pen, bool aa = true)
-        => VipsStrokePath.Stroke(input, path, pen, aa);
+    public static VipsImage StrokePath(VipsImage input, VipsPath path, VipsPen pen,
+        bool aa = true, VipsRect? clipRect = null)
+        => VipsStrokePath.Stroke(input, path, pen, aa, clipRect);
 
     /// <summary>Stroke an axis-aligned rectangle outline.</summary>
     public static VipsImage StrokeRectangle(VipsImage input, VipsPen pen,
@@ -1843,10 +1847,11 @@ public static partial class VipsImageOps
 
     /// <summary>Stroke a single line segment from (x1, y1) to (x2, y2).</summary>
     public static VipsImage StrokeLine(VipsImage input, VipsPen pen,
-        double x1, double y1, double x2, double y2, bool aa = true)
+        double x1, double y1, double x2, double y2,
+        bool aa = true, VipsRect? clipRect = null)
     {
         var path = new VipsPath().MoveTo(x1, y1).LineTo(x2, y2);
-        return StrokePath(input, path, pen, aa);
+        return StrokePath(input, path, pen, aa, clipRect);
     }
 
     public static VipsImage EqualConst(VipsImage input, params double[] c) => RelationalConst(input, VipsRelationalOperation.Equal, c);

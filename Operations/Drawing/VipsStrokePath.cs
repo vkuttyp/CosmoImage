@@ -21,7 +21,8 @@ namespace CosmoImage.Operations.Drawing;
 /// </summary>
 public static class VipsStrokePath
 {
-    public static VipsImage Stroke(VipsImage input, VipsPath path, VipsPen pen, bool aa = true)
+    public static VipsImage Stroke(VipsImage input, VipsPath path, VipsPen pen,
+        bool aa = true, VipsRect? clipRect = null)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (path == null) throw new ArgumentNullException(nameof(path));
@@ -33,8 +34,6 @@ public static class VipsStrokePath
         {
             if (pen.Dashes != null)
             {
-                // Walk arc-length, split into "on" sub-pieces, stroke
-                // each as a fresh open sub-path with caps.
                 foreach (var piece in DashSplit(points, closed, pen.Dashes, pen.DashOffset))
                     EmitOutline(outline, piece, closed: false, pen);
             }
@@ -43,7 +42,7 @@ public static class VipsStrokePath
                 EmitOutline(outline, points, closed, pen);
             }
         }
-        return VipsImageOps.FillPath(input, outline, pen.Brush, aa);
+        return VipsImageOps.FillPath(input, outline, pen.Brush, aa, clipRect);
     }
 
     /// <summary>

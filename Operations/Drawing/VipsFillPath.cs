@@ -30,6 +30,12 @@ public class VipsFillPath : VipsOperation
     public IVipsBrush? Brush { get; set; }
     /// <summary>Apply 4× vertical supersample AA. Default true.</summary>
     public bool Antialiased { get; set; } = true;
+    /// <summary>
+    /// Optional rectangular clip — drawing is restricted to this rect
+    /// (in image coords). <c>null</c> means no clipping (paint
+    /// everywhere the path covers).
+    /// </summary>
+    public VipsRect? ClipRect { get; set; }
 
     public override int Build()
     {
@@ -46,7 +52,7 @@ public class VipsFillPath : VipsOperation
             Interpretation = In.Interpretation,
             Coding = In.Coding, XRes = In.XRes, YRes = In.YRes,
             StartFn = VipsSeq.StartOne, GenerateFn = Generate, StopFn = VipsSeq.StopOne,
-            ClientA = In, ClientB = (edges, Brush, Antialiased),
+            ClientA = In, ClientB = (edges, Brush, Antialiased, ClipRect),
         };
         Out.CopyMetadataFrom(In);
         Out.SetPipeline(VipsDemandStyle.Any, In);
@@ -67,7 +73,7 @@ public class VipsFillPath : VipsOperation
     private static int Generate(VipsRegion outRegion, object? seq, object? a, object? b, ref bool stop)
     {
         var inReg = (VipsRegion)seq!;
-        var (edges, brush, aa) = ((List<Edge>, IVipsBrush, bool))b!;
+        var (edges, brush, aa, clip) = ((List<Edge>, IVipsBrush, bool, VipsRect?))b!;
         VipsImage @in = inReg.Image;
         VipsRect r = outRegion.Valid;
 
@@ -80,10 +86,20 @@ public class VipsFillPath : VipsOperation
             inReg.GetAddress(r.Left, r.Top + y).Slice(0, rowBytes)
                 .CopyTo(outRegion.GetAddress(r.Left, r.Top + y));
 
+        // If a clip rect is provided, intersect with the request rect
+        // and only paint within that region. Otherwise paint freely
+        // throughout the request.
+        VipsRect paintRect = r;
+        if (clip is VipsRect cr)
+        {
+            paintRect = VipsRect.Intersect(r, cr);
+            if (paintRect.IsEmpty) return 0;
+        }
+
         if (aa)
-            FillAntialiased(outRegion, edges, brush, r, pelSize);
+            FillAntialiased(outRegion, edges, brush, paintRect, pelSize);
         else
-            FillHard(outRegion, edges, brush, r, pelSize);
+            FillHard(outRegion, edges, brush, paintRect, pelSize);
         return 0;
     }
 

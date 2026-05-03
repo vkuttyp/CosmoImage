@@ -145,4 +145,77 @@ public sealed class VipsPath
         }
         return p.Close();
     }
+
+    // ---- Affine transforms ----
+
+    /// <summary>
+    /// Apply a 2D affine transform to every coordinate in the path
+    /// (endpoints and Bezier control points alike). Returns a new
+    /// path; the receiver is unchanged. Matrix form:
+    /// <code>
+    /// x' = a · x + b · y + tx
+    /// y' = c · x + d · y + ty
+    /// </code>
+    /// </summary>
+    public VipsPath Transform(double a, double b, double c, double d, double tx, double ty)
+    {
+        var result = new VipsPath();
+        foreach (var seg in Segments)
+        {
+            switch (seg.Kind)
+            {
+                case VipsPathSegmentKind.MoveTo:
+                    result.MoveTo(a * seg.X1 + b * seg.Y1 + tx, c * seg.X1 + d * seg.Y1 + ty);
+                    break;
+                case VipsPathSegmentKind.LineTo:
+                    result.LineTo(a * seg.X1 + b * seg.Y1 + tx, c * seg.X1 + d * seg.Y1 + ty);
+                    break;
+                case VipsPathSegmentKind.CubicTo:
+                    result.CubicTo(
+                        a * seg.X1 + b * seg.Y1 + tx, c * seg.X1 + d * seg.Y1 + ty,
+                        a * seg.X2 + b * seg.Y2 + tx, c * seg.X2 + d * seg.Y2 + ty,
+                        a * seg.X3 + b * seg.Y3 + tx, c * seg.X3 + d * seg.Y3 + ty);
+                    break;
+                case VipsPathSegmentKind.QuadraticTo:
+                    result.QuadraticTo(
+                        a * seg.X1 + b * seg.Y1 + tx, c * seg.X1 + d * seg.Y1 + ty,
+                        a * seg.X2 + b * seg.Y2 + tx, c * seg.X2 + d * seg.Y2 + ty);
+                    break;
+                case VipsPathSegmentKind.Close:
+                    result.Close();
+                    break;
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Translate the path by (<paramref name="dx"/>, <paramref name="dy"/>).</summary>
+    public VipsPath Translate(double dx, double dy)
+        => Transform(1, 0, 0, 1, dx, dy);
+
+    /// <summary>Scale about the origin.</summary>
+    public VipsPath Scale(double sx, double sy)
+        => Transform(sx, 0, 0, sy, 0, 0);
+
+    /// <summary>Rotate by <paramref name="degrees"/> about the origin
+    /// (positive = counter-clockwise in math coords, clockwise on
+    /// screen with y-down).</summary>
+    public VipsPath Rotate(double degrees)
+    {
+        double rad = degrees * Math.PI / 180.0;
+        double cos = Math.Cos(rad), sin = Math.Sin(rad);
+        return Transform(cos, -sin, sin, cos, 0, 0);
+    }
+
+    /// <summary>Rotate by <paramref name="degrees"/> about
+    /// (<paramref name="cx"/>, <paramref name="cy"/>).</summary>
+    public VipsPath RotateAround(double degrees, double cx, double cy)
+    {
+        double rad = degrees * Math.PI / 180.0;
+        double cos = Math.Cos(rad), sin = Math.Sin(rad);
+        // (x − cx)·cos − (y − cy)·sin + cx, etc.
+        return Transform(cos, -sin, sin, cos,
+            cx - cos * cx + sin * cy,
+            cy - sin * cx - cos * cy);
+    }
 }
