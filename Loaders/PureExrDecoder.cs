@@ -53,7 +53,10 @@ internal static class PureExrDecoder
         if (!header.IsValid()) return null;
 
         // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PXR24.
-        // PIZ / B44 / DWA come in later rounds.
+        // PIZ primitives exist in ExrPiz and are validated in isolation,
+        // but the integration against libimf-encoded bitstreams has
+        // residual issues (likely in the demux step or in the W16 wavelet
+        // wrap path) — leaving PIZ unwired for now.
         int scanlinesPerBlock = header.Compression switch
         {
             0 or 1 or 2 => 1,
@@ -386,6 +389,9 @@ internal static class PureExrDecoder
             int rowBytes = expected / Math.Max(1, rows);
             return DecompressPxr24Geom(src, srcOff, srcLen, dst, rows, rowBytes, channels, width);
         }
+        // PIZ (compression == 4) goes through ExrPiz.Decompress, but the
+        // integration is currently disabled at the dispatcher above —
+        // resumed once the bitstream/wavelet integration is fixed.
 
         var scratch = new byte[expected];
         bool ok = compression switch
