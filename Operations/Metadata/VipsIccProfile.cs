@@ -253,6 +253,124 @@ public sealed class VipsIccProfile
         SetTagData(signature, data);
     }
 
+    /// <summary>
+    /// Decode a <c>para</c>-type tag (parametricCurveType, ICC v4
+    /// section 10.16). Returns <c>(functionType, params)</c> where
+    /// <c>functionType</c> is 0..4 and <c>params</c> contains the
+    /// transmitted s15Fixed16 values (1, 3, 4, 5, or 7 entries
+    /// respectively for each functionType). Returns <c>null</c> for
+    /// missing tags or unrecognised forms.
+    ///
+    /// <para>Function definitions:</para>
+    /// <list type="bullet">
+    ///   <item>0: Y = X^g (1 param: g)</item>
+    ///   <item>1: Y = (a*X + b)^g for X &#x2265; -b/a, else 0 (3: g, a, b)</item>
+    ///   <item>2: Y = (a*X + b)^g + c for X &#x2265; -b/a, else c (4: g, a, b, c)</item>
+    ///   <item>3: Y = (a*X + b)^g for X &#x2265; d, else c*X (5: g, a, b, c, d)</item>
+    ///   <item>4: Y = (a*X + b)^g + e for X &#x2265; d, else c*X + f (7: g, a, b, c, d, e, f)</item>
+    /// </list>
+    /// </summary>
+    public (int FunctionType, double[] Params)? GetTagParametricCurve(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 12) return null;
+        if (Encoding.ASCII.GetString(data, 0, 4) != "para") return null;
+        int functionType = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(8, 2));
+        // bytes 10-11 are reserved.
+        int paramCount = functionType switch
+        {
+            0 => 1, 1 => 3, 2 => 4, 3 => 5, 4 => 7,
+            _ => -1,
+        };
+        if (paramCount < 0) return null;
+        if (data.Length < 12 + paramCount * 4) return null;
+        var pars = new double[paramCount];
+        for (int i = 0; i < paramCount; i++)
+            pars[i] = ReadS15Fixed16(data, 12 + i * 4);
+        return (functionType, pars);
+    }
+
+    /// <summary>
+    /// Build a forward evaluator for the curve tag at <paramref name="signature"/>:
+    /// maps input <c>x</c> in [0, 1] to output in [0, 1] regardless of
+    /// whether the underlying tag is <c>curv</c> (gamma or LUT) or
+    /// <c>para</c> (parametric). Returns <c>null</c> when no curve is
+    /// stored under that signature.
+    /// </summary>
+    public Func<double, double>? GetTagCurveEvaluator(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 8) return null;
+        string type = Encoding.ASCII.GetString(data, 0, 4);
+        if (type == "curv")
+        {
+            var gamma = GetTagCurveGamma(signature);
+            if (gamma.HasValue)
+            {
+                double g = gamma.Value;
+                return x => x <= 0 ? 0 : Math.Pow(x, g);
+            }
+            var table = GetTagCurveTable(signature);
+            if (table == null) return null;
+            return BuildLutEvaluator(table);
+        }
+        if (type == "para")
+        {
+            var p = GetTagParametricCurve(signature);
+            if (p == null) return null;
+            var (fn, pars) = p.Value;
+            return BuildParametricEvaluator(fn, pars);
+        }
+        return null;
+    }
+
+    private static Func<double, double> BuildLutEvaluator(ushort[] table)
+    {
+        int n = table.Length;
+        return x =>
+        {
+            if (x <= 0) return table[0] / 65535.0;
+            if (x >= 1) return table[n - 1] / 65535.0;
+            double pos = x * (n - 1);
+            int i = (int)pos;
+            double frac = pos - i;
+            double a = table[i] / 65535.0;
+            double b = table[Math.Min(i + 1, n - 1)] / 65535.0;
+            return a + (b - a) * frac;
+        };
+    }
+
+    private static Func<double, double> BuildParametricEvaluator(int fn, double[] p)
+    {
+        return fn switch
+        {
+            0 => x => x <= 0 ? 0 : Math.Pow(x, p[0]),
+            1 => x =>
+            {
+                double thresh = -p[2] / p[1];
+                if (x < thresh) return 0;
+                return Math.Pow(p[1] * x + p[2], p[0]);
+            },
+            2 => x =>
+            {
+                double thresh = -p[2] / p[1];
+                if (x < thresh) return p[3];
+                return Math.Pow(p[1] * x + p[2], p[0]) + p[3];
+            },
+            3 => x =>
+            {
+                if (x < p[4]) return p[3] * x;
+                return Math.Pow(p[1] * x + p[2], p[0]);
+            },
+            4 => x =>
+            {
+                if (x < p[4]) return p[3] * x + p[6];
+                return Math.Pow(p[1] * x + p[2], p[0]) + p[5];
+            },
+            _ => x => x,
+        };
+    }
+
     // ---- Convenience properties for common tags ----
 
     /// <summary>The profile's human-readable description ("desc" tag).</summary>

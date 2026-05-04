@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.CompilerServices;
+using CosmoImage.Operations.Metadata;
 using ImageMagick;
 
 namespace CosmoImage.Operations.Color;
@@ -17,6 +18,20 @@ public class VipsIccTransform : VipsOperation
     {
         if (In == null || OutputProfile == null) return -1;
 
+        // Pre-build the pure CMM if both profiles are Matrix/TRC RGB
+        // (the 90% case: sRGB / AdobeRGB / Display-P3 / etc.). This is
+        // a one-time cost paid in Build, so the per-pixel inner loop
+        // in Generate stays tight. Returns null for LUT-based or
+        // CMYK/Lab profiles — those fall back to Magick below.
+        VipsIccCmm? cmm = null;
+        if (InputProfile != null)
+        {
+            var srcParsed = VipsIccProfile.TryParse(InputProfile);
+            var dstParsed = VipsIccProfile.TryParse(OutputProfile);
+            if (srcParsed != null && dstParsed != null)
+                cmm = VipsIccCmm.TryBuild(srcParsed, dstParsed);
+        }
+
         Out = new VipsImage
         {
             Width = In.Width,
@@ -31,12 +46,19 @@ public class VipsIccTransform : VipsOperation
             GenerateFn = Generate,
             StopFn = VipsSeq.StopOne,
             ClientA = In,
-            ClientB = new { InputProfile, OutputProfile }
+            ClientB = new TransformContext { InputProfile = InputProfile, OutputProfile = OutputProfile, Cmm = cmm },
         };
         Out.CopyMetadataFrom(In);
         Out.SetPipeline(VipsDemandStyle.Any, In);
 
         return 0;
+    }
+
+    private sealed class TransformContext
+    {
+        public byte[]? InputProfile;
+        public byte[]? OutputProfile;
+        public VipsIccCmm? Cmm;
     }
 
     public override int GetCacheKey()
@@ -54,18 +76,47 @@ public class VipsIccTransform : VipsOperation
     {
         var inRegion = (VipsRegion)seq!;
         VipsImage @in = inRegion.Image;
-        dynamic profiles = b!;
-        byte[]? inputProfile = profiles.InputProfile;
-        byte[] outputProfile = profiles.OutputProfile;
+        var ctx = (TransformContext)b!;
         VipsRect r = outRegion.Valid;
 
         if (inRegion.Prepare(r) != 0) return -1;
 
-        // Convert current region to MagickImage for profile transform
-        // This is inefficient (re-encoding/decoding) but works without LittleCMS
-        // A better way would be to use MagickImage.SetPixels but it's complex for regions.
-        
         int bands = @in.Bands;
+        if (ctx.Cmm != null && (bands == 3 || bands == 4))
+            return GeneratePureCmm(inRegion, outRegion, r, bands, ctx.Cmm);
+
+        return GenerateMagick(inRegion, outRegion, r, bands, ctx.InputProfile, ctx.OutputProfile!);
+    }
+
+    /// <summary>
+    /// Pure-CMM path: copy the source region row-by-row into a tight
+    /// buffer, run <see cref="VipsIccCmm.Apply"/>, then write it back.
+    /// Avoids the costly Magick decode/encode round-trip used by the
+    /// fallback path.
+    /// </summary>
+    private static int GeneratePureCmm(VipsRegion inRegion, VipsRegion outRegion,
+        VipsRect r, int bands, VipsIccCmm cmm)
+    {
+        int rowBytes = r.Width * bands;
+        var rowBuf = new byte[rowBytes];
+        var dstBuf = new byte[rowBytes];
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inLine = inRegion.GetAddress(r.Left, r.Top + y);
+            inLine.Slice(0, rowBytes).CopyTo(rowBuf);
+            cmm.Apply(rowBuf, 0, dstBuf, 0, r.Width, bands);
+            var outLine = outRegion.GetAddress(r.Left, r.Top + y);
+            dstBuf.AsSpan(0, rowBytes).CopyTo(outLine);
+        }
+        return 0;
+    }
+
+    private static int GenerateMagick(VipsRegion inRegion, VipsRegion outRegion,
+        VipsRect r, int bands, byte[]? inputProfile, byte[] outputProfile)
+    {
+        // Magick fallback for LUT-based / Lab / CMYK / grayscale profiles.
+        // Re-encodes the region through MagickImage to apply the transform —
+        // slow but correct for profile types the pure CMM doesn't model.
         byte[] pix = new byte[r.Width * r.Height * bands];
         for (int y = 0; y < r.Height; y++)
         {
@@ -78,18 +129,16 @@ public class VipsIccTransform : VipsOperation
         {
             Width = (uint)r.Width,
             Height = (uint)r.Height,
-            Format = bands == 3 ? MagickFormat.Rgb : (bands == 1 ? MagickFormat.Gray : MagickFormat.Rgba)
+            Format = bands == 3 ? MagickFormat.Rgb : (bands == 1 ? MagickFormat.Gray : MagickFormat.Rgba),
         };
         magickImage.Read(pix, settings);
 
         if (inputProfile != null)
             magickImage.SetProfile(new ColorProfile(inputProfile));
-        
         magickImage.SetProfile(new ColorProfile(outputProfile));
 
         using var outPixels = magickImage.GetPixels();
         var outData = outPixels.ToByteArray(0, 0, (uint)r.Width, (uint)r.Height, "RGB");
-
         if (outData == null) return -1;
 
         int outBands = 3;
@@ -98,7 +147,6 @@ public class VipsIccTransform : VipsOperation
             var destLine = outRegion.GetAddress(r.Left, r.Top + y);
             outData.AsSpan(y * r.Width * outBands, r.Width * outBands).CopyTo(destLine);
         }
-
         return 0;
     }
 }
