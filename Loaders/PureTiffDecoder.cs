@@ -199,17 +199,27 @@ internal static class PureTiffDecoder
         if (predictor != 1 && predictor != 2) return null;
 
         int bps = (int)bitsPerSample[0];
-        if (bps != 8 && bps != 16) return null;
         for (int i = 0; i < bitsPerSample.Length; i++)
             if (bitsPerSample[i] != bps) return null;
 
+        // Validate sample format: 1 = unsigned int, 3 = IEEE float.
+        // All channels must agree; the existing code only checks the
+        // first when only one entry is present.
+        int sampleFmt = sampleFormat.Length == 0 ? 1 : (int)sampleFormat[0];
         for (int i = 0; i < sampleFormat.Length; i++)
-            if (sampleFormat[i] != 1) return null;
+            if (sampleFormat[i] != sampleFmt) return null;
+        if (sampleFmt != 1 && sampleFmt != 3) return null;
+        if (sampleFmt == 1 && bps != 8 && bps != 16) return null;
+        if (sampleFmt == 3 && bps != 32) return null;
+        if (sampleFmt == 3 && predictor != 1) return null;
 
         int spp = (int)samplesPerPixel;
         if (spp < 1 || spp > 4) return null;
 
         if (photometric != 0 && photometric != 1 && photometric != 2 && photometric != 3) return null;
+        // Float samples don't have a meaningful "invert" or palette
+        // interpretation — restrict to plain BlackIsZero / RGB.
+        if (sampleFmt == 3 && photometric != 1 && photometric != 2) return null;
         if (photometric == 0 || photometric == 1)
         {
             if (spp != 1 && spp != 2) return null;
@@ -218,7 +228,7 @@ internal static class PureTiffDecoder
         {
             if (spp != 3 && spp != 4) return null;
         }
-        else  // palette
+        else  // palette — int-only
         {
             if (spp != 1) return null;
             int expected = 3 * (1 << bps);
@@ -259,7 +269,9 @@ internal static class PureTiffDecoder
         // Apply photometric transformation.
         byte[] outPixels;
         int outBands;
-        VipsBandFormat bandFormat = bps == 16 ? VipsBandFormat.UShort : VipsBandFormat.UChar;
+        VipsBandFormat bandFormat = sampleFmt == 3
+            ? VipsBandFormat.Float
+            : (bps == 16 ? VipsBandFormat.UShort : VipsBandFormat.UChar);
         VipsInterpretation interp;
 
         if (photometric == 0)
@@ -332,7 +344,11 @@ internal static class PureTiffDecoder
         }
         if (y != height) return false;
 
-        if (bps == 16 && !le) ByteSwap16InPlace(raw);
+        if (!le)
+        {
+            if (bps == 16) ByteSwap16InPlace(raw);
+            else if (bps == 32) ByteSwap32InPlace(raw);
+        }
         if (predictor == 2) ApplyHorizontalUnpredictor(raw, width, height, spp, bps);
         return true;
     }
@@ -371,7 +387,11 @@ internal static class PureTiffDecoder
                 if (!Decompress(bytes, (int)off, (int)enc, tile, 0, (int)tileSize, compression))
                     return false;
 
-                if (bps == 16 && !le) ByteSwap16InPlace(tile);
+                if (!le)
+                {
+                    if (bps == 16) ByteSwap16InPlace(tile);
+                    else if (bps == 32) ByteSwap32InPlace(tile);
+                }
                 if (predictor == 2) ApplyHorizontalUnpredictor(tile, tileWidth, tileLength, spp, bps);
 
                 int copyWidth = Math.Min(tileWidth, width - tx * tileWidth);
@@ -518,6 +538,15 @@ internal static class PureTiffDecoder
         for (int i = 0; i + 1 < buf.Length; i += 2)
         {
             (buf[i], buf[i + 1]) = (buf[i + 1], buf[i]);
+        }
+    }
+
+    private static void ByteSwap32InPlace(byte[] buf)
+    {
+        for (int i = 0; i + 3 < buf.Length; i += 4)
+        {
+            (buf[i], buf[i + 3]) = (buf[i + 3], buf[i]);
+            (buf[i + 1], buf[i + 2]) = (buf[i + 2], buf[i + 1]);
         }
     }
 
