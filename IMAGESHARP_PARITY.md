@@ -24,7 +24,7 @@ Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing.
 | Strong pixel typing | `Image<TPixel>` generic everywhere | `TypedImage<TPixel>` access layer; ops still operate on untyped `VipsImage` |
 | Op-chain idiom | `image.Mutate(ctx => ctx.Resize(...).Sepia())` block | `image.Mutate(im => im.Resize(...).Sepia())` block (mirrors ImageSharp); also fluent `image.Resize(...).Sepia()` |
 | `MemoryAllocator` | Pluggable everywhere; `ArrayPoolMemoryAllocator` default | `IVipsAllocator` plumbed through transient buffers (`VipsRegion`, `OrderedStripSink`); long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) bypass the pool |
-| `Configuration` registry | Global + per-image `Configuration` — registers decoders/encoders/allocator | ❌ no equivalent — decoders/encoders are static classes |
+| `Configuration` registry | Global + per-image `Configuration` — registers decoders/encoders/allocator | 🟡 `VipsConfiguration.Default` (round 89) — global registry where users can `Register(IVipsImageFormat)` custom format providers (sniffer + loader). Custom providers are consulted by `VipsIdentify.LoadAsync` BEFORE the built-in switch and win sniff conflicts. Built-in formats remain hardcoded for now (full registry of built-ins + per-image config + allocator registration deferred) |
 | Auto-format detect (`Image.IdentifyAsync`) | Single entry point detects format + reads header | ✅ `VipsImageOps.IdentifyAsync(stream)` returns `{Format, Header}`; sniffs across 19 formats (round 54) |
 | Streaming load | Native — every decoder consumes `Stream` incrementally | 🟡 opt-in `LoadStreamingAsync` on every Stream-capable format; PNG/PDF still byte-buffer |
 | Async API | Every entry point has `Async` variant | ✅ all loaders / savers / sinks are async |
@@ -306,7 +306,7 @@ profile API ImageSharp ships is a meaningful gap.
 | :--- | :--- | :--- |
 | Auto-detect format from magic bytes | ✅ `Image.DetectFormatAsync` | ✅ `IdentifyAsync` returns `Format` enum across all 19 formats (round 54) |
 | Magic-byte registry | ✅ via `Configuration` | ❌ — implicit, format-by-format |
-| Custom format plugin registration | ✅ — register decoder/encoder pair via `Configuration` | ❌ — would need to add a static loader + saver pair |
+| Custom format plugin registration | ✅ — register decoder/encoder pair via `Configuration` | 🟡 read-side only — `VipsConfiguration.Default.Register(IVipsImageFormat)` (round 89) plugs custom decoders into the dispatch chain; saver-side registration not yet exposed |
 
 **Closed (round 54)**: `VipsImageOps.IdentifyAsync(stream)` and
 `VipsImageOps.LoadAsync(stream)` sniff every known format's magic

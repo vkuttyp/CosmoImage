@@ -92,6 +92,11 @@ public static class VipsIdentify
 
     public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken ct = default)
     {
+        // Custom providers registered on VipsConfiguration.Default win
+        // sniff conflicts — they're consulted before the built-in switch.
+        var custom = await VipsConfiguration.Default.FindMatchAsync(source, ct);
+        if (custom != null) return await custom.LoadAsync(source, ct);
+
         var format = await DetectAsync(source, ct);
         return format switch
         {
