@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using SixLabors.Fonts;
+using SixLabors.Fonts.Tables.AdvancedTypographic;
 
 namespace CosmoImage.Operations.Drawing;
 
@@ -122,6 +123,20 @@ public sealed class VipsTextOptions
 
     /// <summary>Reading direction — LTR (default), RTL, or Auto (BiDi).</summary>
     public VipsTextDirection TextDirection { get; init; } = VipsTextDirection.LeftToRight;
+
+    // ---- Round 77: OpenType features ----
+
+    /// <summary>
+    /// Additional OpenType feature tags to enable, each a 4-char
+    /// string (e.g., <c>"smcp"</c> for small caps, <c>"ss01"</c> for
+    /// stylistic set 1, <c>"frac"</c> for fractions, <c>"dlig"</c>
+    /// for discretionary ligatures). The font must include the
+    /// corresponding GSUB / GPOS tables for the feature to take
+    /// effect — most system fonts only ship a small subset.
+    /// Default features (<c>kern</c>, <c>liga</c>, etc.) remain on
+    /// regardless.
+    /// </summary>
+    public IReadOnlyList<string>? OpenTypeFeatures { get; init; }
 }
 
 /// <summary>
@@ -203,6 +218,19 @@ public static class VipsTextOps
         };
         if (opts.WrappingLength is double w)
             textOptions.WrappingLength = (float)w;
+        if (opts.OpenTypeFeatures != null && opts.OpenTypeFeatures.Count > 0)
+        {
+            var tags = new List<Tag>(opts.OpenTypeFeatures.Count);
+            foreach (var s in opts.OpenTypeFeatures)
+            {
+                if (s == null || s.Length != 4)
+                    throw new ArgumentException(
+                        $"OpenType feature tags must be exactly 4 characters; got '{s}'",
+                        nameof(opts));
+                tags.Add(Tag.Parse(s));
+            }
+            textOptions.FeatureTags = tags;
+        }
         TextRenderer.RenderTextTo(renderer, opts.Text, textOptions);
         return renderer.Path;
     }
