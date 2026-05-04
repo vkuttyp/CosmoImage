@@ -242,16 +242,16 @@ typed structs for each space:
 | ImageSharp colour space | Status |
 | :--- | :---: |
 | `Color`, `Rgb`, `LinearRgb` | 🟡 — we do sRGB↔linear via `Linearize`/`Delinearize` |
-| `Hsl`, `Hsv` | 🟡 — internal use only inside `Lightness` |
-| `CieLab`, `CieLch`, `CieLchuv`, `CieLuv` | ❌ |
-| `CieXyz`, `CieXyy` | ❌ |
-| `Cmyk` | ❌ |
+| `Hsl`, `Hsv` | ✅ via `VipsColorHsl` / `VipsColorHsv` value types + `VipsColorConvert.RgbToHsl` etc. (round 79) |
+| `CieLab`, `CieLch`, `CieLchuv`, `CieLuv` | 🟡 `VipsColorLab` / `VipsColorLch` (CIE L\*a\*b\* + polar L\*C\*h\*ab) via `VipsColorConvert` (round 79). LCh-uv / Luv variants (CIE 1976 UCS) still missing |
+| `CieXyz`, `CieXyy` | 🟡 `VipsColorXyz` (D65 reference white, normalised Y=1) via `VipsColorConvert` (round 79). xyY chromaticity form still missing |
+| `Cmyk` | ✅ `VipsColorCmyk` value type + RGB↔CMYK conversion via `VipsColorConvert` (round 79) |
 | `HunterLab` | ❌ |
 | `LmsBradford`, `LmsCAT02`, `LmsCAT97s` | ❌ |
 | `YCbCr` | ❌ — internal in JPEG decode only |
 | Chromatic adaptation | ❌ |
 | White-point (D65, D50, etc.) | ❌ |
-| `ColorConverter.Convert<TFrom, TTo>(...)` | ❌ |
+| `ColorConverter.Convert<TFrom, TTo>(...)` | ✅ `VipsColorConvert.Convert<TFrom, TTo>` (round 79) — generic dispatcher routing through RGB / XYZ. Direct pairwise methods also available (RgbToHsl, RgbToHsv, RgbToCmyk, RgbToXyz, XyzToLab, LabToLch). Identity case skips conversion |
 | `ColorMatrix` (4×4 with alpha channel) | 🟡 we have `Recomb` (3×3 RGB) |
 
 Same gap as the libvips colour matrix. Both libvips and ImageSharp
