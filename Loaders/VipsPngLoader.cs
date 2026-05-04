@@ -174,6 +174,26 @@ public static class VipsPngLoader
         var image = await LoadHeaderAsync(memSource, cancellationToken);
         if (image == null) return null;
 
+        // APNG detection — if the stream has an acTL chunk and the
+        // pure decoder can handle it, switch to multi-frame mode.
+        var apng = PureApngDecoder.TryDecode(imageBytes);
+        if (apng != null)
+        {
+            // Stack frames vertically — same convention as animated
+            // GIF / WebP / HEIF in this codebase.
+            image.Width = apng.CanvasWidth;
+            image.Height = apng.CanvasHeight * apng.FrameCount;
+            image.Bands = 4;
+            image.BandFormat = VipsBandFormat.UChar;
+            image.Interpretation = VipsInterpretation.RGB;
+            image.Metadata["n-pages"] = apng.FrameCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["page-height"] = apng.CanvasHeight.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["animation-delays"] = string.Join(",", apng.DelaysCentiseconds);
+            var apngPixels = apng.Pixels;
+            image.PixelsLazy = new Lazy<byte[]>(() => apngPixels);
+            return image;
+        }
+
         image.PixelsLazy = new Lazy<byte[]>(() =>
         {
             // Try the pure-managed decoder first (8-bit non-interlaced
