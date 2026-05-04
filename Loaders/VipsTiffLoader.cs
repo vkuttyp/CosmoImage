@@ -116,6 +116,16 @@ public static class VipsTiffLoader
 
         var imageBytes = ms.ToArray();
 
+        // Pure-managed fast path for baseline uncompressed single-page TIFFs.
+        // Returns null for compressed / multi-page / tiled / planar / BigTIFF —
+        // those still flow through Magick below.
+        var pure = PureTiffDecoder.TryDecode(imageBytes);
+        if (pure != null)
+        {
+            AttachTiffMetadata(imageBytes, pure);
+            return pure;
+        }
+
         // Probe via Magick.NET for dimensions, colorspace, and page count.
         // Multi-page TIFFs are detected via collection.Count > 1; pages are
         // stacked into a tall buffer with n-pages/page-height metadata, same
@@ -193,8 +203,18 @@ public static class VipsTiffLoader
             image.Metadata["page-height"] = pageHeight.ToString();
         }
 
-        // Eager probe for EXIF/XMP/ICC + orientation. Magick gives us a synthesized
-        // EXIF byte stream that's drop-in usable as a JPEG APP1 payload.
+        AttachTiffMetadata(imageBytes, image);
+
+        return image;
+    }
+
+    /// <summary>
+    /// Eager probe via Magick for EXIF/XMP/ICC profiles + orientation +
+    /// ImageDescription. Best-effort: silently swallows Magick failures so
+    /// metadata extraction never fails an otherwise successful load.
+    /// </summary>
+    private static void AttachTiffMetadata(byte[] imageBytes, VipsImage image)
+    {
         try
         {
             using var probe = new MagickImage(imageBytes);
@@ -210,14 +230,11 @@ public static class VipsTiffLoader
                 image.Metadata["orientation"] = orient.ToString();
 
             // ImageDescription (TIFF tag 270). Magick exposes it under the
-            // "comment" attribute. Used for free-form notes by most authoring
-            // tools and as the carrier for OME-XML in microscopy / pathology
-            // (OME-TIFF) — see VipsOmeTiff for typed accessors.
+            // "comment" attribute. Carrier for OME-XML in microscopy /
+            // pathology (OME-TIFF) — see VipsOmeTiff for typed accessors.
             CapturImageDescription(probe, image);
         }
-        catch { /* metadata extraction is best-effort; load shouldn't fail on it */ }
-
-        return image;
+        catch { /* best-effort */ }
     }
 
     private static void CapturImageDescription(IMagickImage<byte> probe, VipsImage image)
