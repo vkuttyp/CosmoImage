@@ -37,6 +37,44 @@ public enum VipsTextJustify
 }
 
 /// <summary>
+/// Text decorations — underline / strikeout / overline. Combined as
+/// flags; matches CSS's <c>text-decoration</c> property.
+/// </summary>
+[Flags]
+public enum VipsTextDecoration
+{
+    None = 0,
+    Underline = 1,
+    Strikeout = 2,
+    Overline = 4,
+}
+
+/// <summary>
+/// Text layout mode — horizontal vs vertical writing direction.
+/// Matches CSS's <c>writing-mode</c> values.
+/// </summary>
+public enum VipsTextLayoutMode
+{
+    HorizontalTopBottom = 0,
+    HorizontalBottomTop = 1,
+    VerticalLeftRight = 2,
+    VerticalRightLeft = 4,
+    VerticalMixedLeftRight = 8,
+    VerticalMixedRightLeft = 16,
+}
+
+/// <summary>
+/// Reading direction for the shaping engine. <c>Auto</c> uses Unicode
+/// BiDi rules to detect direction from the text itself.
+/// </summary>
+public enum VipsTextDirection
+{
+    LeftToRight = 0,
+    RightToLeft = 1,
+    Auto = 2,
+}
+
+/// <summary>
 /// Layout + style options for shaped text rendering. Mirrors the
 /// per-call shape of ImageSharp's <c>RichTextOptions</c> / Cairo's
 /// <c>cairo_text_extents_t</c>.
@@ -73,6 +111,17 @@ public sealed class VipsTextOptions
     public VipsTextWordBreak WordBreak { get; init; } = VipsTextWordBreak.Standard;
     /// <summary>Justification — distribute extra space across each line to fill the wrap width.</summary>
     public VipsTextJustify Justify { get; init; } = VipsTextJustify.None;
+
+    // ---- Round 75: decorations + writing mode ----
+
+    /// <summary>Combined text decorations (underline / strikeout / overline).</summary>
+    public VipsTextDecoration Decorations { get; init; } = VipsTextDecoration.None;
+
+    /// <summary>Writing mode — horizontal (default) or vertical.</summary>
+    public VipsTextLayoutMode LayoutMode { get; init; } = VipsTextLayoutMode.HorizontalTopBottom;
+
+    /// <summary>Reading direction — LTR (default), RTL, or Auto (BiDi).</summary>
+    public VipsTextDirection TextDirection { get; init; } = VipsTextDirection.LeftToRight;
 }
 
 /// <summary>
@@ -118,7 +167,7 @@ public static class VipsTextOps
         if (opts == null) throw new ArgumentNullException(nameof(opts));
         if (string.IsNullOrEmpty(opts.Text)) return new VipsPath();
         var font = LoadFont(opts);
-        var renderer = new VipsGlyphRenderer();
+        var renderer = new VipsGlyphRenderer((TextDecorations)opts.Decorations);
         // Note: SL.Fonts' HorizontalAlignment enum order differs from
         // the natural Left/Center/Right — explicit map.
         var hAlign = opts.HAlign switch
@@ -149,6 +198,8 @@ public static class VipsTextOps
             HorizontalAlignment = hAlign,
             WordBreaking = (WordBreaking)opts.WordBreak,
             TextJustification = (TextJustification)opts.Justify,
+            LayoutMode = (LayoutMode)opts.LayoutMode,
+            TextDirection = (TextDirection)opts.TextDirection,
         };
         if (opts.WrappingLength is double w)
             textOptions.WrappingLength = (float)w;
@@ -260,7 +311,10 @@ public static class VipsTextOps
 /// </summary>
 internal sealed class VipsGlyphRenderer : IGlyphRenderer
 {
+    private readonly TextDecorations _enabled;
     public VipsPath Path { get; } = new VipsPath();
+
+    public VipsGlyphRenderer(TextDecorations enabled = TextDecorations.None) { _enabled = enabled; }
 
     public void BeginText(in FontRectangle bounds) { }
     public void EndText() { }
@@ -277,8 +331,29 @@ internal sealed class VipsGlyphRenderer : IGlyphRenderer
     public void CubicBezierTo(Vector2 c1, Vector2 c2, Vector2 point)
         => Path.CubicTo(c1.X, c1.Y, c2.X, c2.Y, point.X, point.Y);
 
-    public TextDecorations EnabledDecorations() => TextDecorations.None;
-    public void SetDecoration(TextDecorations d, Vector2 s, Vector2 e, float thickness) { }
+    public TextDecorations EnabledDecorations() => _enabled;
+
+    /// <summary>
+    /// Append the decoration line as a thin filled rectangle to the
+    /// same path. Width is <paramref name="thickness"/>; the rectangle
+    /// is built by offsetting <paramref name="s"/>..<paramref name="e"/>
+    /// perpendicular to its direction by ±thickness/2.
+    /// </summary>
+    public void SetDecoration(TextDecorations d, Vector2 s, Vector2 e, float thickness)
+    {
+        if (thickness <= 0) return;
+        Vector2 along = e - s;
+        float len = along.Length();
+        if (len < 1e-6f) return;
+        Vector2 unit = along / len;
+        // Right-hand perpendicular, scaled to half-thickness.
+        Vector2 perp = new Vector2(-unit.Y, unit.X) * (thickness * 0.5f);
+        Path.MoveTo(s.X + perp.X, s.Y + perp.Y);
+        Path.LineTo(e.X + perp.X, e.Y + perp.Y);
+        Path.LineTo(e.X - perp.X, e.Y - perp.Y);
+        Path.LineTo(s.X - perp.X, s.Y - perp.Y);
+        Path.Close();
+    }
 }
 
 /// <summary>
