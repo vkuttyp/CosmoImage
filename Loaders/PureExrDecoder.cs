@@ -71,14 +71,20 @@ internal static class PureExrDecoder
         // canonicalise to RGBA on output.
         int[]? channelOrder = ResolveChannelOrder(header.Channels, out int outBands);
         if (channelOrder == null) return null;
-        // Selected channels must agree on pixel type (no mixing HALF +
-        // FLOAT in the same image; could be relaxed later but is rare).
-        // Supported: HALF and FLOAT promote to VipsBandFormat.Float;
-        // UINT requires its own band format which we don't yet wire.
+        // Selected channels must agree on pixel type (no mixing HALF /
+        // FLOAT / UINT in the same image; the EXR spec allows it but
+        // it's rare and the API surface for "different formats per
+        // band" doesn't exist in VipsImage).
         int selectedPixelType = header.Channels[channelOrder[0]].PixelType;
         foreach (int idx in channelOrder)
             if (header.Channels[idx].PixelType != selectedPixelType) return null;
-        if (selectedPixelType != PixelTypeHalf && selectedPixelType != PixelTypeFloat) return null;
+        if (selectedPixelType != PixelTypeHalf
+            && selectedPixelType != PixelTypeFloat
+            && selectedPixelType != PixelTypeUint)
+            return null;
+        VipsBandFormat outBandFormat = selectedPixelType == PixelTypeUint
+            ? VipsBandFormat.UInt
+            : VipsBandFormat.Float;
 
         int width = header.DataWindow.Width;
         int height = header.DataWindow.Height;
@@ -96,7 +102,7 @@ internal static class PureExrDecoder
             if (levelMode != 0 && levelMode != 1 && levelMode != 2) return null;
             if (roundingMode != 0 && roundingMode != 1) return null;
             return DecodeTiled(bytes, p, header, channelOrder, width, height, outBands,
-                levelMode, roundingMode);
+                levelMode, roundingMode, outBandFormat);
         }
 
         // After attributes (terminated by a single null byte), the
@@ -106,7 +112,8 @@ internal static class PureExrDecoder
         long need = (long)offsetTableStart + 8L * blockCount;
         if (need > bytes.Length) return null;
 
-        var pixels = new float[(long)width * height * outBands];
+        // 4 bytes per sample for all supported output formats (Float / UInt).
+        var pixels = new byte[(long)width * height * outBands * 4];
 
         // Number of channels in the FILE's scanline (which includes any
         // unselected channels, alphabetically). Each scanline has all of
@@ -165,17 +172,12 @@ internal static class PureExrDecoder
             Width = width,
             Height = height,
             Bands = outBands,
-            BandFormat = VipsBandFormat.Float,
+            BandFormat = outBandFormat,
             Interpretation = outBands == 1 ? VipsInterpretation.BW : VipsInterpretation.RGB,
             Coding = VipsCoding.None,
             XRes = 1.0,
             YRes = 1.0,
-            PixelsLazy = new Lazy<byte[]>(() =>
-            {
-                var dst = new byte[pixels.Length * 4];
-                Buffer.BlockCopy(pixels, 0, dst, 0, dst.Length);
-                return dst;
-            }),
+            PixelsLazy = new Lazy<byte[]>(() => pixels),
         };
     }
 
@@ -189,7 +191,7 @@ internal static class PureExrDecoder
     /// </summary>
     private static void DemuxRegionRow(byte[] bytes, int srcOff,
         List<ExrChannel> fileChannels, int[] channelOrder,
-        int srcRowWidth, float[] dstPixels, long dstRowBase, int outBands)
+        int srcRowWidth, byte[] dstPixels, long dstRowBaseBytes, int outBands)
     {
         int[] channelOffsets = new int[fileChannels.Count];
         int cursor = srcOff;
@@ -206,18 +208,22 @@ internal static class PureExrDecoder
             int pixelType = fileChannels[srcChIdx].PixelType;
             if (pixelType == PixelTypeHalf)
             {
+                // HALF promotes to Float — convert and write 4 bytes.
                 for (int x = 0; x < srcRowWidth; x++)
                 {
                     ushort half = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(co + x * 2, 2));
-                    dstPixels[dstRowBase + (long)x * outBands + outCh] = HalfToFloat(half);
+                    int bits = BitConverter.SingleToInt32Bits(HalfToFloat(half));
+                    long dst = dstRowBaseBytes + ((long)x * outBands + outCh) * 4;
+                    BinaryPrimitives.WriteInt32LittleEndian(dstPixels.AsSpan((int)dst, 4), bits);
                 }
             }
-            else  // PixelTypeFloat
+            else
             {
+                // FLOAT and UINT are already 4 bytes / sample, host LE — copy as-is.
                 for (int x = 0; x < srcRowWidth; x++)
                 {
-                    int bits = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(co + x * 4, 4));
-                    dstPixels[dstRowBase + (long)x * outBands + outCh] = BitConverter.Int32BitsToSingle(bits);
+                    long dst = dstRowBaseBytes + ((long)x * outBands + outCh) * 4;
+                    Buffer.BlockCopy(bytes, co + x * 4, dstPixels, (int)dst, 4);
                 }
             }
         }
@@ -229,10 +235,10 @@ internal static class PureExrDecoder
     /// </summary>
     private static void DemuxScanline(byte[] bytes, int srcOff,
         List<ExrChannel> fileChannels, int[] channelOrder,
-        int width, float[] dstPixels, int outY, int outBands)
+        int width, byte[] dstPixels, int outY, int outBands)
     {
-        long dstRowBase = (long)outY * width * outBands;
-        DemuxRegionRow(bytes, srcOff, fileChannels, channelOrder, width, dstPixels, dstRowBase, outBands);
+        long dstRowBaseBytes = (long)outY * width * outBands * 4;
+        DemuxRegionRow(bytes, srcOff, fileChannels, channelOrder, width, dstPixels, dstRowBaseBytes, outBands);
     }
 
     /// <summary>
@@ -287,7 +293,7 @@ internal static class PureExrDecoder
     /// </summary>
     private static VipsImage? DecodeTiled(byte[] bytes, int offsetTableStart,
         ExrHeader header, int[] channelOrder, int width, int height, int outBands,
-        int levelMode, int roundingMode)
+        int levelMode, int roundingMode, VipsBandFormat outBandFormat)
     {
         int tileW = header.Tiles!.Value.XSize;
         int tileH = header.Tiles!.Value.YSize;
@@ -316,7 +322,8 @@ internal static class PureExrDecoder
         long maxTileBytes = fileTileRowBytes * tileH;
         byte[]? tileScratch = header.Compression != 0 ? new byte[maxTileBytes] : null;
 
-        var pixels = new float[(long)width * height * outBands];
+        // 4 bytes per sample for all supported output formats (Float / UInt).
+        var pixels = new byte[(long)width * height * outBands * 4];
 
         for (long t = 0; t < numLevel0Tiles; t++)
         {
@@ -372,9 +379,9 @@ internal static class PureExrDecoder
             {
                 int outY = imgY0 + row;
                 int rowSrcOff = tileSourceOff + row * (int)tileRowBytes;
-                long dstRowBase = ((long)outY * width + imgX0) * outBands;
+                long dstRowBaseBytes = ((long)outY * width + imgX0) * outBands * 4;
                 DemuxRegionRow(tileSource, rowSrcOff, header.Channels, channelOrder,
-                    colsInTile, pixels, dstRowBase, outBands);
+                    colsInTile, pixels, dstRowBaseBytes, outBands);
             }
         }
 
@@ -383,17 +390,12 @@ internal static class PureExrDecoder
             Width = width,
             Height = height,
             Bands = outBands,
-            BandFormat = VipsBandFormat.Float,
+            BandFormat = outBandFormat,
             Interpretation = outBands == 1 ? VipsInterpretation.BW : VipsInterpretation.RGB,
             Coding = VipsCoding.None,
             XRes = 1.0,
             YRes = 1.0,
-            PixelsLazy = new Lazy<byte[]>(() =>
-            {
-                var dst = new byte[pixels.Length * 4];
-                Buffer.BlockCopy(pixels, 0, dst, 0, dst.Length);
-                return dst;
-            }),
+            PixelsLazy = new Lazy<byte[]>(() => pixels),
         };
     }
 
