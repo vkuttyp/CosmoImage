@@ -121,59 +121,60 @@ public static class VipsBmpLoader
 
         uint pixelOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(10, 4));
         uint dibSize = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(14, 4));
-        // Only BITMAPINFOHEADER for the fast path. V4/V5 sometimes use
-        // identical pixel layout but the extra fields complicate validation.
-        if (dibSize != 40) return null;
+        // Only BITMAPINFOHEADER (40) or its V4/V5 prefixes for the fast path.
+        if (dibSize < 40) return null;
 
         int width = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(18, 4));
         int rawHeight = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(22, 4));
         ushort planes = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(26, 2));
         ushort bpp = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(28, 2));
         uint compression = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(30, 4));
+        uint colorsUsed = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(46, 4));
 
         if (planes != 1) return null;
-        if (compression != 0 /* BI_RGB */) return null;
-        if (bpp != 24 && bpp != 32) return null;
         if (width <= 0) return null;
+        // Reject only configurations we don't handle. Supported:
+        //   BI_RGB (0) at 1/4/8/16/24/32 bpp
+        //   BI_RLE8 (1) at 8 bpp
+        if (compression != 0 && compression != 1) return null;
+        if (compression == 1 && bpp != 8) return null;
+        if (bpp != 1 && bpp != 4 && bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32) return null;
 
         int height = Math.Abs(rawHeight);
         if (height == 0) return null;
-        // Positive height: rows stored bottom-to-top in the file. Negative:
-        // top-to-bottom. We always flip to top-to-bottom in the output buffer.
         bool bottomUp = rawHeight > 0;
 
-        int bytesPerPixel = bpp / 8;
-        int bands = bytesPerPixel; // 24 → 3 RGB; 32 → 4 RGBA.
-        // BMP rows are padded to 4-byte boundary.
-        int rowStride = ((width * bpp + 31) / 32) * 4;
-        long pixelDataSize = (long)rowStride * height;
-        if (pixelOffset + pixelDataSize > bytes.Length) return null;
-
-        var pixels = new byte[width * height * bands];
-        for (int srcRow = 0; srcRow < height; srcRow++)
+        // Palette for ≤ 8 bpp. Each entry is 4 bytes BGRA (A reserved/0).
+        byte[]? palette = null;
+        if (bpp <= 8)
         {
-            int dstRow = bottomUp ? (height - 1 - srcRow) : srcRow;
-            int srcOffset = (int)pixelOffset + srcRow * rowStride;
-            int dstOffset = dstRow * width * bands;
-
-            for (int x = 0; x < width; x++)
-            {
-                int sp = srcOffset + x * bytesPerPixel;
-                int dp = dstOffset + x * bands;
-                // BMP pixel order: BGR(A). Convert to RGB(A) by swapping
-                // B↔R; alpha (if present) passes through.
-                pixels[dp + 0] = bytes[sp + 2];
-                pixels[dp + 1] = bytes[sp + 1];
-                pixels[dp + 2] = bytes[sp + 0];
-                if (bands == 4) pixels[dp + 3] = bytes[sp + 3];
-            }
+            int paletteEntries = colorsUsed > 0 ? (int)colorsUsed : (1 << bpp);
+            int paletteOff = 14 + (int)dibSize;
+            if (paletteOff + paletteEntries * 4 > bytes.Length) return null;
+            palette = new byte[paletteEntries * 4];
+            Buffer.BlockCopy(bytes, paletteOff, palette, 0, palette.Length);
         }
+
+        // 16 / 24 / 32 bpp produce 3 (RGB) or 4 (RGBA) bands.
+        // ≤ 8 bpp paletted is expanded to 3-band RGB.
+        int outBands = (bpp == 32) ? 4 : 3;
+        var pixels = new byte[width * height * outBands];
+
+        bool ok = compression switch
+        {
+            0 => DecodeBiRgb(bytes, pixelOffset, pixels, width, height,
+                bpp, bottomUp, outBands, palette),
+            1 => DecodeBiRle8(bytes, pixelOffset, pixels, width, height,
+                bottomUp, palette!),
+            _ => false,
+        };
+        if (!ok) return null;
 
         return new VipsImage
         {
             Width = width,
             Height = height,
-            Bands = bands,
+            Bands = outBands,
             BandFormat = VipsBandFormat.UChar,
             Interpretation = VipsInterpretation.RGB,
             Coding = VipsCoding.None,
@@ -181,6 +182,186 @@ public static class VipsBmpLoader
             YRes = 1.0,
             PixelsLazy = new Lazy<byte[]>(() => pixels),
         };
+    }
+
+    /// <summary>
+    /// Decode uncompressed BMP pixel data (BI_RGB) into the row-major
+    /// RGB(A) <paramref name="pixels"/> buffer. Handles 1 / 4 / 8 bpp
+    /// paletted (palette = BGRA quads), 16 bpp RGB555, 24 bpp BGR, 32 bpp BGRA.
+    /// </summary>
+    private static bool DecodeBiRgb(byte[] bytes, uint pixelOffset, byte[] pixels,
+        int width, int height, ushort bpp, bool bottomUp, int outBands, byte[]? palette)
+    {
+        int rowStride = ((width * bpp + 31) / 32) * 4;
+        if (pixelOffset + (long)rowStride * height > bytes.Length) return false;
+
+        for (int srcRow = 0; srcRow < height; srcRow++)
+        {
+            int dstRow = bottomUp ? (height - 1 - srcRow) : srcRow;
+            int srcOffset = (int)pixelOffset + srcRow * rowStride;
+            int dstOffset = dstRow * width * outBands;
+
+            switch (bpp)
+            {
+                case 1:
+                {
+                    if (palette == null) return false;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int byteIdx = x >> 3;
+                        int bitOff = 7 - (x & 7);
+                        int idx = (bytes[srcOffset + byteIdx] >> bitOff) & 1;
+                        WritePaletteEntry(pixels, dstOffset + x * 3, palette, idx);
+                    }
+                    break;
+                }
+                case 4:
+                {
+                    if (palette == null) return false;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int byteIdx = x >> 1;
+                        int idx = (x & 1) == 0
+                            ? (bytes[srcOffset + byteIdx] >> 4) & 0x0F
+                            : bytes[srcOffset + byteIdx] & 0x0F;
+                        WritePaletteEntry(pixels, dstOffset + x * 3, palette, idx);
+                    }
+                    break;
+                }
+                case 8:
+                {
+                    if (palette == null) return false;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int idx = bytes[srcOffset + x];
+                        WritePaletteEntry(pixels, dstOffset + x * 3, palette, idx);
+                    }
+                    break;
+                }
+                case 16:
+                {
+                    // BI_RGB at 16bpp = RGB555 (5R + 5G + 5B, 1 reserved
+                    // bit at top). Scale 5-bit channels to 8-bit by
+                    // <<3 + replicating MSBs into the low 3 bits.
+                    for (int x = 0; x < width; x++)
+                    {
+                        ushort v = BinaryPrimitives.ReadUInt16LittleEndian(
+                            bytes.AsSpan(srcOffset + x * 2, 2));
+                        int r5 = (v >> 10) & 0x1F;
+                        int g5 = (v >> 5) & 0x1F;
+                        int b5 = v & 0x1F;
+                        pixels[dstOffset + x * 3 + 0] = (byte)((r5 << 3) | (r5 >> 2));
+                        pixels[dstOffset + x * 3 + 1] = (byte)((g5 << 3) | (g5 >> 2));
+                        pixels[dstOffset + x * 3 + 2] = (byte)((b5 << 3) | (b5 >> 2));
+                    }
+                    break;
+                }
+                case 24:
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        int sp = srcOffset + x * 3;
+                        int dp = dstOffset + x * 3;
+                        pixels[dp + 0] = bytes[sp + 2];
+                        pixels[dp + 1] = bytes[sp + 1];
+                        pixels[dp + 2] = bytes[sp + 0];
+                    }
+                    break;
+                }
+                case 32:
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        int sp = srcOffset + x * 4;
+                        int dp = dstOffset + x * 4;
+                        pixels[dp + 0] = bytes[sp + 2];
+                        pixels[dp + 1] = bytes[sp + 1];
+                        pixels[dp + 2] = bytes[sp + 0];
+                        pixels[dp + 3] = bytes[sp + 3];
+                    }
+                    break;
+                }
+                default:
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Decode BI_RLE8 (run-length-encoded 8bpp paletted). Format:
+    ///   pair (count, index): copy the indexed colour count times
+    ///   pair (0, 0): end-of-line — pad to start of next row
+    ///   pair (0, 1): end-of-bitmap
+    ///   pair (0, 2): delta — next 2 bytes are dx, dy offsets
+    ///   pair (0, count) where count ≥ 3: absolute mode — next count
+    ///     bytes are direct indices, padded to word boundary
+    /// </summary>
+    private static bool DecodeBiRle8(byte[] bytes, uint pixelOffset, byte[] pixels,
+        int width, int height, bool bottomUp, byte[] palette)
+    {
+        int p = (int)pixelOffset;
+        int x = 0, y = 0;
+        while (p + 2 <= bytes.Length)
+        {
+            byte n = bytes[p++];
+            byte v = bytes[p++];
+            if (n == 0)
+            {
+                switch (v)
+                {
+                    case 0:  // end of line
+                        x = 0; y++;
+                        continue;
+                    case 1:  // end of bitmap
+                        return true;
+                    case 2:  // delta
+                        if (p + 2 > bytes.Length) return false;
+                        x += bytes[p++];
+                        y += bytes[p++];
+                        continue;
+                    default:  // absolute mode (3..255 raw indices)
+                        int count = v;
+                        if (p + count > bytes.Length) return false;
+                        for (int i = 0; i < count; i++)
+                        {
+                            if (x < width && y < height)
+                                WritePixelAt(pixels, palette, bytes[p + i], width, height, x, y, bottomUp);
+                            x++;
+                        }
+                        p += count;
+                        if ((count & 1) == 1) p++;  // pad to word boundary
+                        continue;
+                }
+            }
+            // Encoded run: copy palette[v] n times.
+            for (int i = 0; i < n; i++)
+            {
+                if (x < width && y < height)
+                    WritePixelAt(pixels, palette, v, width, height, x, y, bottomUp);
+                x++;
+            }
+        }
+        return true;
+    }
+
+    private static void WritePaletteEntry(byte[] pixels, int dst, byte[] palette, int idx)
+    {
+        int p = idx * 4;
+        if (p + 3 > palette.Length) return;
+        // Palette is BGRA (A reserved/0); output is RGB.
+        pixels[dst + 0] = palette[p + 2];
+        pixels[dst + 1] = palette[p + 1];
+        pixels[dst + 2] = palette[p + 0];
+    }
+
+    private static void WritePixelAt(byte[] pixels, byte[] palette, byte idx,
+        int width, int height, int x, int y, bool bottomUp)
+    {
+        int dstY = bottomUp ? (height - 1 - y) : y;
+        if (dstY < 0 || dstY >= height) return;
+        int dst = (dstY * width + x) * 3;
+        WritePaletteEntry(pixels, dst, palette, idx);
     }
 
     private static VipsImage? DecodeViaMagick(byte[] imageBytes)

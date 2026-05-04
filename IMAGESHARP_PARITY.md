@@ -77,7 +77,7 @@ threaded through `VipsEnumsExtensions.SizeOf`) and the three
 | :--- | :--- | :--- |
 | **JPEG** | Pure managed; full + EXIF/ICC/XMP, baseline + progressive, arithmetic | ✅ pure-C# decoder via JpegLibrary; full metadata round-trip |
 | **PNG** | Pure managed; full + APNG (animated), interlace | ✅ pure-managed `PurePngDecoder` (rounds 102, 104) — 8-bit AND 16-bit color types 0/2/3/4/6 with `tRNS` expansion (8-bit and 16-bit variants); filter unfilter (None/Sub/Up/Avg/Paeth); Adam7 interlace (round 104 — 7-pass scatter into the canvas, per-pass independent filter context); endianness-aware uint16 conversion (PNG BE → host LE for the existing UShort convention). Pure-managed `PureApngDecoder` (round 103) — animated PNG read with `dispose_op` / `blend_op` frame composition. StbImageSharp dependency now used only for 1/2/4-bit depths (rare; can be added later) |
-| **BMP** | Pure managed; full | 🟡 pure-C# fast path (24/32 bpp BI_RGB); paletted/RLE via Magick |
+| **BMP** | Pure managed; full | 🟡 pure-C# fast path now covers (round 107): 1 / 4 / 8 bpp paletted with BGR0-encoded palette, 16 bpp RGB555 (5-bit channels expanded to 8 by replicating MSBs into low bits), 24 bpp BGR, 32 bpp BGRA, and BI_RLE8 (run-length encoded 8 bpp with end-of-line / end-of-bitmap / delta / absolute escape codes). Magick fallback remains for BI_RLE4, BI_BITFIELDS, V4 / V5 colour-space variants |
 | **TGA** | Pure managed | 🟡 pure-C# fast path (types 2/3/10/11) |
 | **WebP** | Pure managed; full lossy + lossless + animated | 🟡 via Magick.NET (animated load works) |
 | **TIFF** | Pure managed; LZW / Deflate / PackBits / JPEG-in-TIFF, multi-page | 🟡 via Magick; multi-page + Ptif pyramid + OME-XML metadata |
