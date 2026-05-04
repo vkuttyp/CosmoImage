@@ -42,6 +42,58 @@ public enum VipsExifTag : ushort
     LensModel = 0xA434,
 }
 
+/// <summary>
+/// GPS sub-IFD tag identifiers (EXIF specification, GPS Info IFD).
+/// Tag IDs are a separate namespace from <see cref="VipsExifTag"/> —
+/// the same numeric IDs collide between GPS and TIFF, so GPS tags
+/// have their own enum + their own accessor methods on
+/// <see cref="VipsExifProfile"/>.
+/// </summary>
+public enum VipsGpsTag : ushort
+{
+    /// <summary>Byte[4] — typically {2, 2, 0, 0} for v2.2.0.0.</summary>
+    VersionID = 0x0000,
+    /// <summary>2-char ASCII — "N" or "S" plus terminator.</summary>
+    LatitudeRef = 0x0001,
+    /// <summary>3 rationals — degrees, minutes, seconds.</summary>
+    Latitude = 0x0002,
+    /// <summary>2-char ASCII — "E" or "W" plus terminator.</summary>
+    LongitudeRef = 0x0003,
+    /// <summary>3 rationals — degrees, minutes, seconds.</summary>
+    Longitude = 0x0004,
+    /// <summary>Single byte — 0=above sea level, 1=below.</summary>
+    AltitudeRef = 0x0005,
+    /// <summary>Rational — altitude in metres.</summary>
+    Altitude = 0x0006,
+    /// <summary>3 rationals — UTC hour / minute / second.</summary>
+    TimeStamp = 0x0007,
+    Satellites = 0x0008,
+    /// <summary>"A" (active) or "V" (void).</summary>
+    Status = 0x0009,
+    /// <summary>"2" (2D) or "3" (3D).</summary>
+    MeasureMode = 0x000A,
+    Dop = 0x000B,
+    SpeedRef = 0x000C,
+    Speed = 0x000D,
+    TrackRef = 0x000E,
+    Track = 0x000F,
+    ImgDirectionRef = 0x0010,
+    ImgDirection = 0x0011,
+    MapDatum = 0x0012,
+    DestLatitudeRef = 0x0013,
+    DestLatitude = 0x0014,
+    DestLongitudeRef = 0x0015,
+    DestLongitude = 0x0016,
+    DestBearingRef = 0x0017,
+    DestBearing = 0x0018,
+    DestDistanceRef = 0x0019,
+    DestDistance = 0x001A,
+    ProcessingMethod = 0x001B,
+    AreaInformation = 0x001C,
+    /// <summary>11-char ASCII — "YYYY:MM:DD" UTC.</summary>
+    DateStamp = 0x001D,
+}
+
 /// <summary>EXIF / TIFF data type codes (per the spec).</summary>
 public enum VipsExifType : ushort
 {
@@ -90,6 +142,7 @@ public readonly record struct VipsExifSRational(int Numerator, int Denominator)
 public sealed class VipsExifProfile
 {
     private readonly Dictionary<VipsExifTag, object> _values = new();
+    private readonly Dictionary<VipsGpsTag, object> _gpsValues = new();
 
     /// <summary>Byte order for serialization. Default <c>false</c> = little-endian (II).</summary>
     public bool BigEndian { get; set; } = false;
@@ -123,6 +176,88 @@ public sealed class VipsExifProfile
     /// <summary>Set a tag's value. The runtime type drives how it serializes.</summary>
     public void SetValue<T>(VipsExifTag tag, T value) where T : notnull
         => _values[tag] = value;
+
+    // ---- GPS accessors (parallel API for the GPS sub-IFD) ----
+
+    /// <summary>True if the GPS tag has a value set.</summary>
+    public bool ContainsGps(VipsGpsTag tag) => _gpsValues.ContainsKey(tag);
+    /// <summary>Remove a GPS tag. Returns whether it was present.</summary>
+    public bool RemoveGps(VipsGpsTag tag) => _gpsValues.Remove(tag);
+    /// <summary>All GPS tags currently set on this profile.</summary>
+    public IEnumerable<VipsGpsTag> GpsTags => _gpsValues.Keys;
+
+    /// <summary>Get a GPS tag's value, attempting to convert to <typeparamref name="T"/>.</summary>
+    public T? GetGpsValue<T>(VipsGpsTag tag)
+    {
+        if (!_gpsValues.TryGetValue(tag, out var raw)) return default;
+        if (raw is T t) return t;
+        try { return (T)System.Convert.ChangeType(raw, typeof(T))!; }
+        catch { return default; }
+    }
+
+    /// <summary>Get the raw stored GPS value (boxed).</summary>
+    public object? GetGpsRaw(VipsGpsTag tag)
+        => _gpsValues.TryGetValue(tag, out var v) ? v : null;
+
+    /// <summary>Set a GPS tag's value.</summary>
+    public void SetGpsValue<T>(VipsGpsTag tag, T value) where T : notnull
+        => _gpsValues[tag] = value;
+
+    /// <summary>
+    /// Decode latitude / longitude as decimal degrees from
+    /// <see cref="VipsGpsTag.Latitude"/> + <see cref="VipsGpsTag.LatitudeRef"/>
+    /// + <see cref="VipsGpsTag.Longitude"/> + <see cref="VipsGpsTag.LongitudeRef"/>.
+    /// Returns <c>null</c> if any of the four are missing.
+    /// </summary>
+    public (double latitude, double longitude)? GetLocation()
+    {
+        var lat = _gpsValues.TryGetValue(VipsGpsTag.Latitude, out var lv) ? lv as VipsExifRational[] : null;
+        var lon = _gpsValues.TryGetValue(VipsGpsTag.Longitude, out var nv) ? nv as VipsExifRational[] : null;
+        if (lat == null || lat.Length < 3 || lon == null || lon.Length < 3) return null;
+        var latRef = (_gpsValues.TryGetValue(VipsGpsTag.LatitudeRef, out var lr) ? lr as string : null)
+                     ?? "N";
+        var lonRef = (_gpsValues.TryGetValue(VipsGpsTag.LongitudeRef, out var nr) ? nr as string : null)
+                     ?? "E";
+        double latDeg = DmsToDegrees(lat) * (latRef.StartsWith("S") ? -1 : 1);
+        double lonDeg = DmsToDegrees(lon) * (lonRef.StartsWith("W") ? -1 : 1);
+        return (latDeg, lonDeg);
+    }
+
+    /// <summary>
+    /// Encode <paramref name="latitude"/> / <paramref name="longitude"/>
+    /// as decimal degrees into the four GPS tags
+    /// (<see cref="VipsGpsTag.Latitude"/> / <see cref="VipsGpsTag.LatitudeRef"/>
+    /// / <see cref="VipsGpsTag.Longitude"/> / <see cref="VipsGpsTag.LongitudeRef"/>).
+    /// </summary>
+    public void SetLocation(double latitude, double longitude)
+    {
+        if (latitude < -90 || latitude > 90) throw new ArgumentOutOfRangeException(nameof(latitude));
+        if (longitude < -180 || longitude > 180) throw new ArgumentOutOfRangeException(nameof(longitude));
+        _gpsValues[VipsGpsTag.LatitudeRef] = latitude < 0 ? "S" : "N";
+        _gpsValues[VipsGpsTag.Latitude] = DegreesToDms(Math.Abs(latitude));
+        _gpsValues[VipsGpsTag.LongitudeRef] = longitude < 0 ? "W" : "E";
+        _gpsValues[VipsGpsTag.Longitude] = DegreesToDms(Math.Abs(longitude));
+    }
+
+    private static double DmsToDegrees(VipsExifRational[] dms)
+        => dms[0].ToDouble() + dms[1].ToDouble() / 60 + dms[2].ToDouble() / 3600;
+
+    private static VipsExifRational[] DegreesToDms(double degrees)
+    {
+        int deg = (int)Math.Floor(degrees);
+        double minDecimal = (degrees - deg) * 60;
+        int min = (int)Math.Floor(minDecimal);
+        double secDecimal = (minDecimal - min) * 60;
+        // Store seconds as a rational with 1e6 denominator for sub-second precision.
+        const uint secScale = 1_000_000;
+        uint secNum = (uint)Math.Round(secDecimal * secScale);
+        return new[]
+        {
+            new VipsExifRational((uint)deg, 1),
+            new VipsExifRational((uint)min, 1),
+            new VipsExifRational(secNum, secScale),
+        };
+    }
 
     // ---- Tag → IFD / type tables ----
 
@@ -183,6 +318,40 @@ public sealed class VipsExifProfile
     private const ushort ExifIfdPointerTag = 0x8769;
     private const ushort GpsIfdPointerTag = 0x8825;
 
+    private static readonly Dictionary<VipsGpsTag, VipsExifType> GpsTagType = new()
+    {
+        [VipsGpsTag.VersionID] = VipsExifType.Byte,
+        [VipsGpsTag.LatitudeRef] = VipsExifType.Ascii,
+        [VipsGpsTag.Latitude] = VipsExifType.Rational,
+        [VipsGpsTag.LongitudeRef] = VipsExifType.Ascii,
+        [VipsGpsTag.Longitude] = VipsExifType.Rational,
+        [VipsGpsTag.AltitudeRef] = VipsExifType.Byte,
+        [VipsGpsTag.Altitude] = VipsExifType.Rational,
+        [VipsGpsTag.TimeStamp] = VipsExifType.Rational,
+        [VipsGpsTag.Satellites] = VipsExifType.Ascii,
+        [VipsGpsTag.Status] = VipsExifType.Ascii,
+        [VipsGpsTag.MeasureMode] = VipsExifType.Ascii,
+        [VipsGpsTag.Dop] = VipsExifType.Rational,
+        [VipsGpsTag.SpeedRef] = VipsExifType.Ascii,
+        [VipsGpsTag.Speed] = VipsExifType.Rational,
+        [VipsGpsTag.TrackRef] = VipsExifType.Ascii,
+        [VipsGpsTag.Track] = VipsExifType.Rational,
+        [VipsGpsTag.ImgDirectionRef] = VipsExifType.Ascii,
+        [VipsGpsTag.ImgDirection] = VipsExifType.Rational,
+        [VipsGpsTag.MapDatum] = VipsExifType.Ascii,
+        [VipsGpsTag.DestLatitudeRef] = VipsExifType.Ascii,
+        [VipsGpsTag.DestLatitude] = VipsExifType.Rational,
+        [VipsGpsTag.DestLongitudeRef] = VipsExifType.Ascii,
+        [VipsGpsTag.DestLongitude] = VipsExifType.Rational,
+        [VipsGpsTag.DestBearingRef] = VipsExifType.Ascii,
+        [VipsGpsTag.DestBearing] = VipsExifType.Rational,
+        [VipsGpsTag.DestDistanceRef] = VipsExifType.Ascii,
+        [VipsGpsTag.DestDistance] = VipsExifType.Rational,
+        [VipsGpsTag.ProcessingMethod] = VipsExifType.Undefined,
+        [VipsGpsTag.AreaInformation] = VipsExifType.Undefined,
+        [VipsGpsTag.DateStamp] = VipsExifType.Ascii,
+    };
+
     // ---------- Parsing ----------
 
     /// <summary>
@@ -233,12 +402,36 @@ public sealed class VipsExifProfile
                 ReadIfd(bytes, (int)subOffset, be, profile, isExifSub: true);
                 continue;
             }
-            if (!isExifSub && tagId == GpsIfdPointerTag) continue;  // GPS not yet parsed
+            if (!isExifSub && tagId == GpsIfdPointerTag)
+            {
+                uint subOffset = ReadU32(bytes, p + 8, be);
+                ReadGpsIfd(bytes, (int)subOffset, be, profile);
+                continue;
+            }
 
             if (!Enum.IsDefined(typeof(VipsExifTag), tagId)) continue;
             var tag = (VipsExifTag)tagId;
             object? value = ReadValue(bytes, p + 8, (VipsExifType)typeCode, (int)count, be);
             if (value != null) profile._values[tag] = value;
+        }
+    }
+
+    private static void ReadGpsIfd(byte[] bytes, int offset, bool be, VipsExifProfile profile)
+    {
+        if (offset < 0 || offset + 2 > bytes.Length) return;
+        ushort numEntries = ReadU16(bytes, offset, be);
+        int p = offset + 2;
+        if (p + numEntries * 12 > bytes.Length) return;
+
+        for (int i = 0; i < numEntries; i++, p += 12)
+        {
+            ushort tagId = ReadU16(bytes, p, be);
+            ushort typeCode = ReadU16(bytes, p + 2, be);
+            uint count = ReadU32(bytes, p + 4, be);
+            if (!Enum.IsDefined(typeof(VipsGpsTag), tagId)) continue;
+            var tag = (VipsGpsTag)tagId;
+            object? value = ReadValue(bytes, p + 8, (VipsExifType)typeCode, (int)count, be);
+            if (value != null) profile._gpsValues[tag] = value;
         }
     }
 
@@ -324,8 +517,11 @@ public sealed class VipsExifProfile
             .OrderBy(kv => (ushort)kv.Key).ToList();
         var subTags = _values.Where(kv => TagIfd[kv.Key] == 1)
             .OrderBy(kv => (ushort)kv.Key).ToList();
+        var gpsTags = _gpsValues.OrderBy(kv => (ushort)kv.Key).ToList();
         bool hasSubIfd = subTags.Count > 0;
-        int ifd0EntryCount = ifd0Tags.Count + (hasSubIfd ? 1 : 0);
+        bool hasGpsIfd = gpsTags.Count > 0;
+        int ifd0EntryCount = ifd0Tags.Count
+            + (hasSubIfd ? 1 : 0) + (hasGpsIfd ? 1 : 0);
 
         // Pre-compute offsets so we can write entry "value-or-offset" fields correctly.
         const int headerSize = 8;                   // II/MM + magic + IFD0 ptr
@@ -333,7 +529,9 @@ public sealed class VipsExifProfile
         int ifd0Size = 2 + ifd0EntryCount * 12 + 4;
         int subStart = ifd0Start + ifd0Size;
         int subSize = hasSubIfd ? 2 + subTags.Count * 12 + 4 : 0;
-        int dataStart = subStart + subSize;
+        int gpsStart = subStart + subSize;
+        int gpsSize = hasGpsIfd ? 2 + gpsTags.Count * 12 + 4 : 0;
+        int dataStart = gpsStart + gpsSize;
 
         var stream = new MemoryStream();
         // Header
@@ -346,21 +544,38 @@ public sealed class VipsExifProfile
         var data = new MemoryStream();
         int dataCursor = dataStart;
 
-        // IFD0 entries
+        // IFD0 entries — emit user tags + sub-IFD pointers in tag-ID order.
         WriteU16(stream, (ushort)ifd0EntryCount, be);
-        foreach (var (tag, val) in ifd0Tags)
-            WriteEntry(stream, data, ref dataCursor, tag, val, be);
-        if (hasSubIfd)
+        // Sub-IFD pointer entries are 0x8769 / 0x8825; merge them into the
+        // sorted tag list so the on-wire order is ascending.
+        var ifd0Entries = new List<(ushort id, Action emit)>();
+        foreach (var kv in ifd0Tags)
         {
-            // ExifIFDPointer entry
-            WriteU16(stream, ExifIfdPointerTag, be);
-            WriteU16(stream, (ushort)VipsExifType.Long, be);
-            WriteU32(stream, 1, be);
-            WriteU32(stream, (uint)subStart, be);
+            var tag = kv.Key; var val = kv.Value;
+            ifd0Entries.Add(((ushort)tag,
+                () => WriteEntry(stream, data, ref dataCursor, tag, val, be)));
         }
+        if (hasSubIfd)
+            ifd0Entries.Add((ExifIfdPointerTag, () =>
+            {
+                WriteU16(stream, ExifIfdPointerTag, be);
+                WriteU16(stream, (ushort)VipsExifType.Long, be);
+                WriteU32(stream, 1, be);
+                WriteU32(stream, (uint)subStart, be);
+            }));
+        if (hasGpsIfd)
+            ifd0Entries.Add((GpsIfdPointerTag, () =>
+            {
+                WriteU16(stream, GpsIfdPointerTag, be);
+                WriteU16(stream, (ushort)VipsExifType.Long, be);
+                WriteU32(stream, 1, be);
+                WriteU32(stream, (uint)gpsStart, be);
+            }));
+        foreach (var (_, emit) in ifd0Entries.OrderBy(e => e.id))
+            emit();
         WriteU32(stream, 0, be);  // No next IFD
 
-        // Sub-IFD entries
+        // Exif sub-IFD entries
         if (hasSubIfd)
         {
             WriteU16(stream, (ushort)subTags.Count, be);
@@ -369,10 +584,41 @@ public sealed class VipsExifProfile
             WriteU32(stream, 0, be);
         }
 
+        // GPS sub-IFD entries
+        if (hasGpsIfd)
+        {
+            WriteU16(stream, (ushort)gpsTags.Count, be);
+            foreach (var (tag, val) in gpsTags)
+                WriteGpsEntry(stream, data, ref dataCursor, tag, val, be);
+            WriteU32(stream, 0, be);
+        }
+
         // Data area
         data.Position = 0;
         data.CopyTo(stream);
         return stream.ToArray();
+    }
+
+    private static void WriteGpsEntry(MemoryStream entries, MemoryStream data, ref int dataCursor,
+        VipsGpsTag tag, object value, bool be)
+    {
+        var type = GpsTagType[tag];
+        WriteU16(entries, (ushort)tag, be);
+        WriteU16(entries, (ushort)type, be);
+        var (encoded, count) = EncodeValue(type, value, be);
+        WriteU32(entries, (uint)count, be);
+        if (encoded.Length <= 4)
+        {
+            entries.Write(encoded, 0, encoded.Length);
+            for (int i = encoded.Length; i < 4; i++) entries.WriteByte(0);
+        }
+        else
+        {
+            WriteU32(entries, (uint)dataCursor, be);
+            data.Write(encoded, 0, encoded.Length);
+            dataCursor += encoded.Length;
+            if ((encoded.Length & 1) != 0) { data.WriteByte(0); dataCursor++; }
+        }
     }
 
     private static void WriteEntry(MemoryStream entries, MemoryStream data, ref int dataCursor,
@@ -442,19 +688,37 @@ public sealed class VipsExifProfile
             }
             case VipsExifType.Rational:
             {
+                if (value is VipsExifRational[] rArr)
+                {
+                    var b = new byte[8 * rArr.Length];
+                    for (int i = 0; i < rArr.Length; i++)
+                    {
+                        if (be)
+                        {
+                            BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(i * 8, 4), rArr[i].Numerator);
+                            BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(i * 8 + 4, 4), rArr[i].Denominator);
+                        }
+                        else
+                        {
+                            BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(i * 8, 4), rArr[i].Numerator);
+                            BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(i * 8 + 4, 4), rArr[i].Denominator);
+                        }
+                    }
+                    return (b, rArr.Length);
+                }
                 var r = (VipsExifRational)value;
-                var b = new byte[8];
+                var bs = new byte[8];
                 if (be)
                 {
-                    BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(0, 4), r.Numerator);
-                    BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(4, 4), r.Denominator);
+                    BinaryPrimitives.WriteUInt32BigEndian(bs.AsSpan(0, 4), r.Numerator);
+                    BinaryPrimitives.WriteUInt32BigEndian(bs.AsSpan(4, 4), r.Denominator);
                 }
                 else
                 {
-                    BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(0, 4), r.Numerator);
-                    BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(4, 4), r.Denominator);
+                    BinaryPrimitives.WriteUInt32LittleEndian(bs.AsSpan(0, 4), r.Numerator);
+                    BinaryPrimitives.WriteUInt32LittleEndian(bs.AsSpan(4, 4), r.Denominator);
                 }
-                return (b, 1);
+                return (bs, 1);
             }
             case VipsExifType.Byte:
             case VipsExifType.Undefined:
