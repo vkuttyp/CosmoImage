@@ -100,6 +100,42 @@ public sealed class IccMft2
     public ushort[][] OutputTables { get; init; } = Array.Empty<ushort[]>();
 }
 
+/// <summary>
+/// Parsed multi-dimensional CLUT (used by mAB/mBA tags). Grid sizes
+/// can vary per dimension (unlike mft2 which uses a single grid size
+/// for all axes).
+/// </summary>
+public sealed class IccClut
+{
+    public int InputChannels { get; init; }
+    public int OutputChannels { get; init; }
+    /// <summary>Grid points per dimension (length = InputChannels).</summary>
+    public int[] GridSizes { get; init; } = Array.Empty<int>();
+    /// <summary>Flattened CLUT entries normalized to ushort (range 0..65535).</summary>
+    public ushort[] Data { get; init; } = Array.Empty<ushort>();
+}
+
+/// <summary>
+/// Parsed lutAtoBType ('mAB ') or lutBtoAType ('mBA ') tag. The two
+/// formats share a layout — the only difference is pipeline order:
+///   mAB (forward): A curves → CLUT → M curves → matrix → B curves
+///   mBA (reverse): B curves → matrix → M curves → CLUT → A curves
+/// Each component is optional; missing pieces are skipped at apply
+/// time.
+/// </summary>
+public sealed class IccLutAB
+{
+    public bool IsAtoB { get; init; }
+    public int InputChannels { get; init; }
+    public int OutputChannels { get; init; }
+    public Func<double, double>[]? ACurves { get; init; }
+    public Func<double, double>[]? BCurves { get; init; }
+    public Func<double, double>[]? MCurves { get; init; }
+    /// <summary>3×4 matrix: 3×3 multiplier in cols 0..2, offset vector in col 3. Applied as <c>output = M[3×3] * input + M[*, 3]</c>.</summary>
+    public double[,]? Matrix { get; init; }
+    public IccClut? Clut { get; init; }
+}
+
 public sealed class VipsIccProfile
 {
     // ---- Header fields ----
@@ -437,6 +473,184 @@ public sealed class VipsIccProfile
         int r = 1;
         for (int i = 0; i < e; i++) r *= b;
         return r;
+    }
+
+    /// <summary>
+    /// Decode a <c>mAB </c> (lutAtoBType) or <c>mBA </c> (lutBtoAType)
+    /// tag. Returns <c>null</c> for missing tags or shapes the parser
+    /// can't recognise. <paramref name="signature"/> is the tag slot
+    /// name (e.g., <c>"A2B0"</c> for the perceptual A-to-B intent).
+    /// </summary>
+    public IccLutAB? GetTagLutAB(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 32) return null;
+        string sig = Encoding.ASCII.GetString(data, 0, 4);
+        bool isAtoB;
+        if (sig == "mAB ") isAtoB = true;
+        else if (sig == "mBA ") isAtoB = false;
+        else return null;
+
+        int inCh = data[8];
+        int outCh = data[9];
+        if (inCh < 1 || inCh > 4 || outCh < 1 || outCh > 4) return null;
+
+        uint offB = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(12, 4));
+        uint offMatrix = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(16, 4));
+        uint offM = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(20, 4));
+        uint offClut = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(24, 4));
+        uint offA = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(28, 4));
+
+        // For mAB: A curves count = i, B curves count = o.
+        // For mBA: A curves count = o, B curves count = i.
+        // Easier framing: A curves apply to whichever side is the "A" side
+        // (the device side); B curves apply to the PCS side.
+        int aCount = isAtoB ? inCh : outCh;
+        int bCount = isAtoB ? outCh : inCh;
+
+        Func<double, double>[]? aCurves = offA != 0 ? ParseCurves(data, (int)offA, aCount) : null;
+        Func<double, double>[]? bCurves = offB != 0 ? ParseCurves(data, (int)offB, bCount) : null;
+        Func<double, double>[]? mCurves = offM != 0 ? ParseCurves(data, (int)offM, 3) : null;
+        if ((offA != 0 && aCurves == null) || (offB != 0 && bCurves == null) || (offM != 0 && mCurves == null))
+            return null;
+
+        double[,]? matrix = null;
+        if (offMatrix != 0)
+        {
+            if (offMatrix + 12 * 4 > data.Length) return null;
+            matrix = new double[3, 4];
+            for (int i = 0; i < 3; i++)
+                for (int j = 0; j < 3; j++)
+                    matrix[i, j] = ReadS15Fixed16(data, (int)offMatrix + (i * 3 + j) * 4);
+            // Offset vector is the last 3 s15Fixed16 values.
+            for (int i = 0; i < 3; i++)
+                matrix[i, 3] = ReadS15Fixed16(data, (int)offMatrix + (9 + i) * 4);
+        }
+
+        IccClut? clut = null;
+        if (offClut != 0)
+        {
+            clut = ParseClut(data, (int)offClut, inCh, outCh);
+            if (clut == null) return null;
+        }
+
+        return new IccLutAB
+        {
+            IsAtoB = isAtoB,
+            InputChannels = inCh,
+            OutputChannels = outCh,
+            ACurves = aCurves,
+            BCurves = bCurves,
+            MCurves = mCurves,
+            Matrix = matrix,
+            Clut = clut,
+        };
+    }
+
+    /// <summary>
+    /// Parse <paramref name="count"/> consecutive curves ('curv' or 'para')
+    /// starting at <paramref name="offset"/>. Each curve is padded to a
+    /// 4-byte boundary in the file. Returns <c>null</c> on malformed
+    /// curves.
+    /// </summary>
+    private Func<double, double>[]? ParseCurves(byte[] data, int offset, int count)
+    {
+        var result = new Func<double, double>[count];
+        int p = offset;
+        for (int i = 0; i < count; i++)
+        {
+            if (p + 8 > data.Length) return null;
+            string type = Encoding.ASCII.GetString(data, p, 4);
+            int consumed;
+            if (type == "curv")
+            {
+                if (p + 12 > data.Length) return null;
+                uint n = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(p + 8, 4));
+                consumed = 12 + (int)n * 2;
+                if (p + consumed > data.Length) return null;
+                if (n == 0)
+                {
+                    result[i] = x => x;  // identity
+                }
+                else if (n == 1)
+                {
+                    if (p + 14 > data.Length) return null;
+                    double gamma = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(p + 12, 2)) / 256.0;
+                    result[i] = x => x <= 0 ? 0 : Math.Pow(x, gamma);
+                }
+                else
+                {
+                    var table = new ushort[n];
+                    for (int k = 0; k < n; k++)
+                        table[k] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(p + 12 + k * 2, 2));
+                    result[i] = BuildLutEvaluator(table);
+                }
+            }
+            else if (type == "para")
+            {
+                if (p + 12 > data.Length) return null;
+                int fnType = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(p + 8, 2));
+                int paramCount = fnType switch { 0 => 1, 1 => 3, 2 => 4, 3 => 5, 4 => 7, _ => -1 };
+                if (paramCount < 0) return null;
+                consumed = 12 + paramCount * 4;
+                if (p + consumed > data.Length) return null;
+                var pars = new double[paramCount];
+                for (int k = 0; k < paramCount; k++)
+                    pars[k] = ReadS15Fixed16(data, p + 12 + k * 4);
+                result[i] = BuildParametricEvaluator(fnType, pars);
+            }
+            else
+            {
+                return null;
+            }
+            // Curves are 4-byte aligned within the tag.
+            p += (consumed + 3) & ~3;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Parse the multi-dimensional CLUT inside an mAB/mBA tag.
+    /// CLUT layout: 16 bytes of grid sizes (one byte per dim, unused
+    /// dims = 0), 1 byte precision (1 = uint8, 2 = uint16), 3 reserved
+    /// bytes, then the table data.
+    /// </summary>
+    private static IccClut? ParseClut(byte[] data, int offset, int inCh, int outCh)
+    {
+        if (offset + 20 > data.Length) return null;
+        var grids = new int[inCh];
+        long entries = 1;
+        for (int i = 0; i < inCh; i++)
+        {
+            grids[i] = data[offset + i];
+            if (grids[i] < 2 || grids[i] > 255) return null;
+            entries *= grids[i];
+        }
+        int precision = data[offset + 16];
+        if (precision != 1 && precision != 2) return null;
+        long bytes = entries * outCh * precision;
+        if (offset + 20 + bytes > data.Length) return null;
+
+        var dataArr = new ushort[entries * outCh];
+        int p = offset + 20;
+        if (precision == 1)
+        {
+            for (long i = 0; i < entries * outCh; i++)
+                dataArr[i] = (ushort)((data[p + (int)i]) * 257);  // 8-bit → 16-bit scale
+        }
+        else
+        {
+            for (long i = 0; i < entries * outCh; i++)
+                dataArr[i] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(p + (int)i * 2, 2));
+        }
+
+        return new IccClut
+        {
+            InputChannels = inCh,
+            OutputChannels = outCh,
+            GridSizes = grids,
+            Data = dataArr,
+        };
     }
 
     private static Func<double, double> BuildParametricEvaluator(int fn, double[] p)
