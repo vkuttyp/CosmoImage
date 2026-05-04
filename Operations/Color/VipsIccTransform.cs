@@ -13,6 +13,12 @@ public class VipsIccTransform : VipsOperation
     public byte[]? InputProfile { get; set; }
     public byte[]? OutputProfile { get; set; }
     public VipsInterpretation Intent { get; set; } = VipsInterpretation.SRGB;
+    /// <summary>
+    /// ICC rendering intent. Selects A2B0/A2B1/A2B2 + B2A0/B2A1/B2A2
+    /// tag slots when both source and destination are LUT profiles
+    /// that carry intent-specific LUTs. Defaults to Perceptual.
+    /// </summary>
+    public VipsIccRenderingIntent RenderingIntent { get; set; } = VipsIccRenderingIntent.Perceptual;
 
     public override int Build()
     {
@@ -33,7 +39,7 @@ public class VipsIccTransform : VipsOperation
             {
                 matrixCmm = VipsIccCmm.TryBuild(srcParsed, dstParsed);
                 if (matrixCmm == null)
-                    lutCmm = VipsIccLutCmm.TryBuild(srcParsed, dstParsed);
+                    lutCmm = VipsIccLutCmm.TryBuild(srcParsed, dstParsed, RenderingIntent);
             }
         }
 

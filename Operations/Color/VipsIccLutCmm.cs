@@ -42,25 +42,34 @@ public sealed class VipsIccLutCmm
     /// <summary>Channels produced on the destination side.</summary>
     public int DstChannels => _reverse.OutputChannels;
 
-    public static VipsIccLutCmm? TryBuild(VipsIccProfile src, VipsIccProfile dst)
+    public static VipsIccLutCmm? TryBuild(VipsIccProfile src, VipsIccProfile dst,
+        VipsIccRenderingIntent intent = VipsIccRenderingIntent.Perceptual)
     {
         if (src == null || dst == null) return null;
-        var fwd = LutTransform.TryFromTag(src, "A2B0");
-        var rev = LutTransform.TryFromTag(dst, "B2A0");
+        // Intent-specific tag slots, with fallback to perceptual (A2B0/B2A0)
+        // if the requested intent isn't present in the profile — this
+        // mirrors what every real CMM (LittleCMS, ColorSync) does.
+        var (a2bTag, b2aTag) = TagsForIntent(intent);
+        var fwd = LutTransform.TryFromTag(src, a2bTag) ?? LutTransform.TryFromTag(src, "A2B0");
+        var rev = LutTransform.TryFromTag(dst, b2aTag) ?? LutTransform.TryFromTag(dst, "B2A0");
         if (fwd == null || rev == null) return null;
-        // PCS is always 3D — both transforms must agree at the seam.
         if (fwd.OutputChannels != 3 || rev.InputChannels != 3) return null;
-        // Device sides can be 1..4 (Gray / Lab / RGB / CMYK).
         if (fwd.InputChannels < 1 || fwd.InputChannels > 4) return null;
         if (rev.OutputChannels < 1 || rev.OutputChannels > 4) return null;
 
-        // Determine each profile's PCS. Default to XYZ for unknown
-        // profiles (matches ICC v2 default).
         Pcs srcPcs = src.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
         Pcs dstPcs = dst.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
 
         return new VipsIccLutCmm(fwd, rev, srcPcs, dstPcs);
     }
+
+    private static (string A2B, string B2A) TagsForIntent(VipsIccRenderingIntent intent) => intent switch
+    {
+        VipsIccRenderingIntent.RelativeColorimetric => ("A2B1", "B2A1"),
+        VipsIccRenderingIntent.Saturation           => ("A2B2", "B2A2"),
+        VipsIccRenderingIntent.AbsoluteColorimetric => ("A2B1", "B2A1"),  // shares relative colorimetric LUT
+        _                                            => ("A2B0", "B2A0"),  // Perceptual
+    };
 
     /// <summary>
     /// Apply the transform pixel-by-pixel.
