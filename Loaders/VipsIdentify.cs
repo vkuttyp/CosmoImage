@@ -85,18 +85,33 @@ public static class VipsIdentify
     /// <c>LoadAsync</c> directly).
     /// </summary>
     public static ValueTask<VipsImage?> LoadAsync(Stream stream, CancellationToken ct = default)
+        => LoadAsync(stream, VipsConfiguration.Default, ct);
+
+    /// <summary>
+    /// Load using a specific <see cref="VipsConfiguration"/> instance —
+    /// useful when test code or a sandboxed loader needs custom
+    /// registrations isolated from the global <see cref="VipsConfiguration.Default"/>.
+    /// </summary>
+    public static ValueTask<VipsImage?> LoadAsync(Stream stream, VipsConfiguration configuration,
+        CancellationToken ct = default)
     {
         var source = new PipeVipsSource(PipeReader.Create(stream));
-        return LoadAsync(source, ct);
+        return LoadAsync(source, configuration, ct);
     }
 
-    public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken ct = default)
+    public static ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken ct = default)
+        => LoadAsync(source, VipsConfiguration.Default, ct);
+
+    /// <summary>
+    /// Load using a specific <see cref="VipsConfiguration"/> instance.
+    /// Walks the configuration's registered formats; newer registrations
+    /// win sniff conflicts.
+    /// </summary>
+    public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, VipsConfiguration configuration,
+        CancellationToken ct = default)
     {
-        // Walk VipsConfiguration.Default (custom + built-in formats);
-        // first sniffer to claim the source wins. Newer registrations
-        // are tried first, so user-registered formats can override
-        // built-ins for the same magic bytes.
-        var match = await VipsConfiguration.Default.FindMatchAsync(source, ct);
+        if (configuration == null) throw new ArgumentNullException(nameof(configuration));
+        var match = await configuration.FindMatchAsync(source, ct);
         if (match != null) return await match.LoadAsync(source, ct);
         throw new NotSupportedException("Could not detect image format from stream content.");
     }

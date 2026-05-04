@@ -1772,6 +1772,16 @@ public static partial class VipsImageOps
         LoadAsync(System.IO.Stream stream, System.Threading.CancellationToken ct = default)
         => CosmoImage.Loaders.VipsIdentify.LoadAsync(stream, ct);
 
+    /// <summary>
+    /// Load with an explicit <see cref="VipsConfiguration"/>. Useful for
+    /// scoped custom format registrations that don't pollute the global
+    /// <see cref="VipsConfiguration.Default"/>.
+    /// </summary>
+    public static System.Threading.Tasks.ValueTask<VipsImage?>
+        LoadAsync(System.IO.Stream stream, VipsConfiguration configuration,
+            System.Threading.CancellationToken ct = default)
+        => CosmoImage.Loaders.VipsIdentify.LoadAsync(stream, configuration, ct);
+
     // From Operations/Color/VipsPixelOperations.cs
     /// <summary>Convert to single-band UChar via BT.601 luminance.</summary>
     public static VipsImage ToL8(VipsImage input)

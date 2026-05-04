@@ -74,13 +74,19 @@ public sealed class VipsConfiguration
     private readonly List<IVipsImageFormat> _formats = new();
 
     /// <summary>The process-wide default configuration used by every implicit dispatch.</summary>
-    public static VipsConfiguration Default { get; } = CreateDefault();
+    public static VipsConfiguration Default { get; } = new VipsConfiguration();
 
-    private static VipsConfiguration CreateDefault()
+    /// <summary>
+    /// Construct a new configuration. By default, the registry is
+    /// pre-seeded with all built-in formats (PNG / JPEG / WebP / GIF /
+    /// TIFF / BMP / QOI / HEIF / JXL / JP2K / PDF / SVG / HDR / FITS /
+    /// NIfTI / MAT / PNM / TGA). Pass <c>seedBuiltIns: false</c> to
+    /// start from an empty registry — useful when shipping a tool
+    /// that should ONLY accept a curated set of custom formats.
+    /// </summary>
+    public VipsConfiguration(bool seedBuiltIns = true)
     {
-        var c = new VipsConfiguration();
-        c.SeedBuiltIns();
-        return c;
+        if (seedBuiltIns) SeedBuiltIns();
     }
 
     /// <summary>
