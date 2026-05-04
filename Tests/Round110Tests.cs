@@ -139,24 +139,16 @@ public class Round110Tests
             Assert.Equal(px[i], got[i]);
     }
 
-    // ---- LZW (still rejected — falls through to Magick) ----
+    // ---- JPEG-in-TIFF (Compression=7) is genuinely unsupported here ----
 
     [Fact]
-    public void Pure_LzwTiff_StillRejected()
+    public async Task LoadAsync_JpegInTiff_FallsBackToMagick()
     {
-        int w = 8, h = 4;
+        // JPEG-compressed TIFF strips contain a JPEG bitstream — outside
+        // the pure decoder's scope. Magick still handles it.
+        int w = 16, h = 16;
         var px = BuildRgbPixels(w, h);
-        var tiff = BuildTiffViaMagick(px, w, h, CompressionMethod.LZW);
-        // LZW is not yet implemented in the pure path.
-        Assert.Null(PureTiffDecoder.TryDecode(tiff));
-    }
-
-    [Fact]
-    public async Task LoadAsync_LzwTiff_FallsBackToMagick()
-    {
-        int w = 8, h = 4;
-        var px = BuildRgbPixels(w, h);
-        var tiff = BuildTiffViaMagick(px, w, h, CompressionMethod.LZW);
+        var tiff = BuildTiffViaMagick(px, w, h, CompressionMethod.JPEG);
         var src = new PipeVipsSource(PipeReader.Create(new MemoryStream(tiff)));
         var img = await VipsTiffLoader.LoadAsync(src);
         Assert.NotNull(img);

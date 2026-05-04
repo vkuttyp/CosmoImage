@@ -12,13 +12,14 @@ namespace CosmoImage.Loaders;
 /// PhotometricInterpretation 0 (WhiteIsZero), 1 (BlackIsZero), 2 (RGB),
 /// 3 (Palette). Compression schemes supported:
 ///   1 = None,
+///   5 = LZW (libtiff early-change variant),
 ///   8 / 32946 = Deflate (zlib-wrapped),
 ///   32773 = PackBits.
 ///
 /// <para>Returns <c>null</c> for everything else (BigTIFF, multi-page,
-/// tiled, LZW, JPEG-compressed, planar=2, FillOrder=2, predictor != 1,
-/// sample formats other than unsigned int, exotic SamplesPerPixel).
-/// Callers fall back to the Magick.NET path.</para>
+/// tiled, JPEG-compressed, CCITT, planar=2, FillOrder=2, sample
+/// formats other than unsigned int, exotic SamplesPerPixel). Callers
+/// fall back to the Magick.NET path.</para>
 /// </summary>
 internal static class PureTiffDecoder
 {
@@ -95,7 +96,8 @@ internal static class PureTiffDecoder
 
         if (tiled) return null;
         if (width <= 0 || height <= 0) return null;
-        if (compression != 1 && compression != 8 && compression != 32946 && compression != 32773)
+        if (compression != 1 && compression != 5 && compression != 8
+            && compression != 32946 && compression != 32773)
             return null;
         if (planarConfig != 1) return null;
         if (fillOrder != 1) return null;
@@ -154,6 +156,7 @@ internal static class PureTiffDecoder
             bool ok = compression switch
             {
                 1 => CopyRaw(bytes, (int)off, (int)enc, raw, dst, (int)expected),
+                5 => DecompressLzw(bytes, (int)off, (int)enc, raw, dst, (int)expected),
                 32773 => DecompressPackBits(bytes, (int)off, (int)enc, raw, dst, (int)expected),
                 8 or 32946 => DecompressDeflate(bytes, (int)off, (int)enc, raw, dst, (int)expected),
                 _ => false,
@@ -415,6 +418,110 @@ internal static class PureTiffDecoder
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// TIFF LZW decompress (Compression=5). Bit packing is MSB-first
+    /// (high bit of each byte is the start of the next code). Code
+    /// width starts at 9 and bumps to 10/11/12 using libtiff's
+    /// "early change" rule — the variant emitted by every libtiff /
+    /// ImageMagick / GDAL / Pillow encoder. Special codes: 256 = clear,
+    /// 257 = end-of-information.
+    /// </summary>
+    private static bool DecompressLzw(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, int expected)
+    {
+        const int MaxEntries = 4096;
+        const int ClearCode = 256;
+        const int EoiCode = 257;
+
+        var prefix = new short[MaxEntries];
+        var suffix = new byte[MaxEntries];
+        for (int i = 0; i < 256; i++)
+        {
+            prefix[i] = -1;
+            suffix[i] = (byte)i;
+        }
+        var sbuf = new byte[MaxEntries];
+
+        int sp = srcOff, sEnd = srcOff + srcLen;
+        int dp = dstOff, dEnd = dstOff + expected;
+        int bitBuf = 0, bitCount = 0;
+
+        int codeWidth = 9;
+        int dictSize = 258;
+        int prevCode = -1;
+
+        while (true)
+        {
+            while (bitCount < codeWidth)
+            {
+                if (sp >= sEnd) return false;
+                bitBuf = (bitBuf << 8) | src[sp++];
+                bitCount += 8;
+            }
+            int code = (bitBuf >> (bitCount - codeWidth)) & ((1 << codeWidth) - 1);
+            bitCount -= codeWidth;
+
+            if (code == EoiCode) break;
+            if (code == ClearCode)
+            {
+                codeWidth = 9;
+                dictSize = 258;
+                prevCode = -1;
+                continue;
+            }
+
+            // Resolve code → walk dict back to a literal, collecting suffix bytes.
+            int len = 0;
+            int c;
+            bool isKwKwK = false;
+            if (code < dictSize)
+            {
+                c = code;
+            }
+            else if (code == dictSize && prevCode != -1)
+            {
+                c = prevCode;
+                isKwKwK = true;
+            }
+            else
+            {
+                return false;
+            }
+
+            while (c >= 256)
+            {
+                sbuf[len++] = suffix[c];
+                c = prefix[c];
+            }
+            sbuf[len++] = (byte)c;
+            int firstChar = c;
+
+            int emit = len + (isKwKwK ? 1 : 0);
+            if (dp + emit > dEnd) return false;
+            // sbuf[0..len-1] holds the string in reverse — emit reversed.
+            for (int i = len - 1; i >= 0; i--) dst[dp++] = sbuf[i];
+            // KwKwK: append firstChar AFTER the prevCode-string emission
+            // so the output order is prevString + firstChar = "ABA"-style.
+            if (isKwKwK) dst[dp++] = (byte)firstChar;
+
+            // Add new entry: prevCode + firstChar(string(currentCode))
+            if (prevCode != -1 && dictSize < MaxEntries)
+            {
+                prefix[dictSize] = (short)prevCode;
+                suffix[dictSize] = (byte)firstChar;
+                dictSize++;
+                // libtiff early-change: bump width when next code to be
+                // added would have value (1 << codeWidth) - 1 (one less
+                // than the natural threshold).
+                if (dictSize == (1 << codeWidth) - 1 && codeWidth < 12)
+                    codeWidth++;
+            }
+            prevCode = code;
+        }
+
+        return dp == dEnd;
     }
 
     private static int TypeSize(ushort type) => type switch
