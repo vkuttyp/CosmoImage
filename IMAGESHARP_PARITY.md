@@ -173,7 +173,7 @@ of theirs we don't have, a few of ours they don't.
 
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
-| `Quantize(IQuantizer)` — Octree / Wu / Werner / Webby / Palette | 🟡 `Quantize(image, IVipsQuantizer)` (round 96) — pluggable interface mirroring ImageSharp's `IQuantizer`; built-in `MagickQuantizer` (Wu / median-cut, with dither toggle) wraps the existing Magick.NET path. Octree / Werner / Webby implementations not shipped — users plug their own |
+| `Quantize(IQuantizer)` — Octree / Wu / Werner / Webby / Palette | 🟡 `Quantize(image, IVipsQuantizer)` pluggable interface (round 96) + two built-in implementations: `MagickQuantizer` wraps Magick.NET's Wu / median-cut + Floyd-Steinberg (round 96), `VipsOctreeQuantizer` is pure-managed Gervautz-Purgathofer octree quantization (round 99 — RGB / RGBA UChar; deep→shallow all-leaves-only reduction; alpha preserved unmodified). Werner / Webby still missing |
 | `Dither(IDither, threshold)` — Floyd-Steinberg / Stevenson-Arce / Burkes / Bayer / Ordered | ✅ `Dither(method, levels)` — FS / Atkinson / Burkes / Stevenson-Arce / Sierra error-diffusion + Bayer4×4 / Bayer8×8 ordered |
 | `BinaryThreshold(threshold)` | ✅ `Threshold(value)` from round 51 |
 | `BinaryDither(...)` | ✅ `BinaryDither(method)` — alias for `Dither(method, levels=2)` |
