@@ -518,3 +518,65 @@ public struct HalfVector4 : IPixel<HalfVector4>
     public static int BandCount => 4;
     public static VipsBandFormat BandFormat => VipsBandFormat.Half;
 }
+
+/// <summary>
+/// Single-band 32-bit float. <c>L</c> in [0, 1] is the conventional
+/// range for linear-light luminance; values outside that range are
+/// allowed and round-trip cleanly.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct LFloat : IPixel<LFloat>
+{
+    public float L;
+    public LFloat(float l) { L = l; }
+    public static int BandCount => 1;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Float;
+}
+
+/// <summary>
+/// 3-band 32-bit float RGB (linear or sRGB; struct itself is
+/// space-agnostic). Mirrors ImageSharp's <c>Rgb</c> typed pixel.
+/// Use <see cref="Operations.Color.VipsColorRgb"/> + the
+/// <c>Linearize</c> / <c>Delinearize</c> ops when you need explicit
+/// gamma handling.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct RgbVector : IPixel<RgbVector>
+{
+    public float R;
+    public float G;
+    public float B;
+    public RgbVector(float r, float g, float b) { R = r; G = g; B = b; }
+    public static int BandCount => 3;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Float;
+}
+
+/// <summary>
+/// 4-band 32-bit float RGBA. Maximum precision for HDR / linear-light
+/// pipelines. Mirrors ImageSharp's <c>RgbaVector</c>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct RgbaVector : IPixel<RgbaVector>
+{
+    public float R;
+    public float G;
+    public float B;
+    public float A;
+    public RgbaVector(float r, float g, float b, float a) { R = r; G = g; B = b; A = a; }
+    public static int BandCount => 4;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Float;
+}
+
+/// <summary>
+/// 2-band 32-bit float — luminance + alpha. Float counterpart of
+/// <see cref="La16"/>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct LaVector : IPixel<LaVector>
+{
+    public float L;
+    public float A;
+    public LaVector(float l, float a) { L = l; A = a; }
+    public static int BandCount => 2;
+    public static VipsBandFormat BandFormat => VipsBandFormat.Float;
+}

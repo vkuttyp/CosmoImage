@@ -60,7 +60,7 @@ ImageSharp ships ~25 pixel structs covering the matrix of:
 | `HalfSingle` | 1 | 16-bit float | ✅ `HalfSingle` (round 60) — uses `System.Half` storage |
 | `HalfVector2` | 2 | 16-bit float ×2 | ✅ `HalfVector2` (round 60) |
 | `HalfVector4` | 4 | 16-bit float ×4 | ✅ `HalfVector4` (round 60) |
-| `RgbaVector` | 4 | 32-bit float per channel | 🟡 covered functionally by `BandFormat=Float` + 4 bands, but no typed struct |
+| `RgbaVector` | 4 | 32-bit float per channel | ✅ `RgbaVector` typed struct (round 97) — `[StructLayout(Sequential, Pack=1)]`, 16-byte contiguous; reinterpretable from byte buffers via `MemoryMarshal.Cast`. Plus `RgbVector` (3-band), `LFloat` (1-band), `LaVector` (2-band) for the float-per-channel family |
 | `Byte4`, `Short2`, `Short4`, `NormalizedByte2/4`, `NormalizedShort2/4` | 2/4 | various integer | ✅ all 7 added round 59. `Byte4` = 4-band UChar tuple, `Short2/4` = 2/4-band Short, `NormalizedByte*` reinterpret raw byte as `sbyte` for `[-1, 1]` access, `NormalizedShort*` use Short with /32767 normalisation |
 | `PixelOperations<TPixel>` (bulk format conversion) | — | — | 🟡 named conversions: `ToL8` / `ToLa16` / `ToRgb24` / `ToRgba32` / `SwapRb` / `ToArgb` (round 55). Generic `From<TFromPixel>` still missing — needs the typed-pixel surface to mature first |
 
@@ -241,7 +241,7 @@ typed structs for each space:
 
 | ImageSharp colour space | Status |
 | :--- | :---: |
-| `Color`, `Rgb`, `LinearRgb` | 🟡 — we do sRGB↔linear via `Linearize`/`Delinearize` |
+| `Color`, `Rgb`, `LinearRgb` | 🟡 typed pixel structs `Rgb24` / `Rgba32` / `RgbVector` / `RgbaVector` (rounds 55, 97) cover the byte / float per-channel layouts; sRGB↔linear conversion via `Linearize` / `Delinearize` ops + `VipsColorConvert` (round 79). No dedicated `LinearRgb`-flavoured struct (the layout is identical to `RgbVector` — gamma is a pipeline concept here, not a per-pixel type) |
 | `Hsl`, `Hsv` | ✅ via `VipsColorHsl` / `VipsColorHsv` value types + `VipsColorConvert.RgbToHsl` etc. (round 79) |
 | `CieLab`, `CieLch`, `CieLchuv`, `CieLuv` | ✅ all four — `VipsColorLab` / `VipsColorLch` (round 79) + `VipsColorLuv` / `VipsColorLchuv` (round 80, CIE 1976 UCS) via `VipsColorConvert` |
 | `CieXyz`, `CieXyy` | ✅ `VipsColorXyz` (D65, normalised Y=1) (round 79) + `VipsColorXyy` chromaticity form (round 80) |
