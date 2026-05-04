@@ -7,13 +7,17 @@ using System.Threading.Tasks;
 namespace CosmoImage.Loaders;
 
 /// <summary>
-/// TGA (Truevision TARGA) loader. Pure-C# fast path for the common
-/// non-paletted variants: uncompressed RGB (type 2, 24/32 bpp),
-/// uncompressed grayscale (type 3, 8 bpp), and their RLE-compressed
-/// counterparts (types 10/11). Paletted variants (types 1/9), 16 bpp
-/// RGB555, and any unrecognised image-type byte still go through
-/// Magick.NET — the fast path covers ~all real-world modern TGAs while
-/// preserving full coverage for edge files.
+/// TGA (Truevision TARGA) loader. Pure-C# fast path covers all the
+/// commonly-encountered real-world variants:
+/// <list type="bullet">
+///   <item>Uncompressed paletted (type 1) and RLE paletted (type 9)
+///         with 15/16/24/32-bit color map entries</item>
+///   <item>Uncompressed RGB (type 2) and RLE RGB (type 10) at depth
+///         15/16/24/32 (15/16-bit unpack 5-5-5 BGR with bit replication)</item>
+///   <item>Uncompressed grayscale (type 3) and RLE grayscale (type 11)
+///         at depth 8</item>
+/// </list>
+/// Anything outside this set falls back to Magick.NET.
 ///
 /// <para>TGA has no fixed magic at file offset 0. <see cref="IsTgaAsync"/>
 /// uses a coarse-but-reliable header validity check (image type ∈
@@ -76,42 +80,78 @@ public static class VipsTgaLoader
         byte idLength = bytes[0];
         byte colorMapType = bytes[1];
         byte imageType = bytes[2];
-        // colorMap spec at bytes[3..7]; we skip past it for non-paletted types.
         ushort width = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(12, 2));
         ushort height = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(14, 2));
         byte depth = bytes[16];
         byte descriptor = bytes[17];
 
         if (width == 0 || height == 0) return null;
-        if (colorMapType != 0) return null; // paletted → Magick
-        if (imageType != 2 && imageType != 3 && imageType != 10 && imageType != 11) return null;
-        bool isGrayscale = imageType == 3 || imageType == 11;
-        bool isRle = imageType == 10 || imageType == 11;
+        if (colorMapType > 1) return null;
+        if (imageType != 1 && imageType != 2 && imageType != 3
+            && imageType != 9 && imageType != 10 && imageType != 11) return null;
 
+        bool isPaletted = imageType == 1 || imageType == 9;
+        bool isGrayscale = imageType == 3 || imageType == 11;
+        bool isRle = imageType == 9 || imageType == 10 || imageType == 11;
+
+        if (isPaletted && colorMapType != 1) return null;
+        if (!isPaletted && colorMapType == 1) return null;  // unexpected palette
+        if (isPaletted && depth != 8) return null;
         if (isGrayscale && depth != 8) return null;
-        if (!isGrayscale && depth != 24 && depth != 32) return null;
+        if (!isPaletted && !isGrayscale
+            && depth != 15 && depth != 16 && depth != 24 && depth != 32) return null;
 
         // Image descriptor bit 5: 1 = top-to-bottom, 0 = bottom-to-top.
-        // Bit 4 (left-to-right) is universally 0 in real-world files; we
-        // ignore the right-to-left bit and treat it as left-to-right.
         bool topDown = (descriptor & 0x20) != 0;
 
-        int bands = depth / 8; // 1, 3, or 4
-        int pelOffset = 18 + idLength;
-        // colour-map length × entry size — 0 for non-paletted but spec
-        // technically requires reading past the (empty) colour-map block.
         int colorMapLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(5, 2));
         int colorMapEntrySize = bytes[7];
-        pelOffset += colorMapLength * (colorMapEntrySize / 8);
+        int colorMapBytes = isPaletted ? colorMapLength * (colorMapEntrySize / 8) : 0;
+
+        // Output bands: paletted → palette-derived (3 RGB or 4 RGBA);
+        // 15/16-bit → 3 RGB (alpha bit dropped); else depth/8.
+        int outBands;
+        byte[][]? palette = null;
+        if (isPaletted)
+        {
+            if (colorMapEntrySize != 15 && colorMapEntrySize != 16
+                && colorMapEntrySize != 24 && colorMapEntrySize != 32) return null;
+            outBands = colorMapEntrySize == 32 ? 4 : 3;
+            int paletteOff = 18 + idLength;
+            if (paletteOff + colorMapBytes > bytes.Length) return null;
+            palette = BuildPalette(bytes, paletteOff, colorMapLength, colorMapEntrySize, outBands);
+            if (palette == null) return null;
+        }
+        else if (isGrayscale)
+        {
+            outBands = 1;
+        }
+        else
+        {
+            outBands = depth == 32 ? 4 : 3;
+        }
+
+        // Bytes per input pixel (in the encoded stream).
+        int inBpp = isPaletted ? 1
+            : isGrayscale ? 1
+            : (depth == 15 || depth == 16) ? 2
+            : depth / 8;
+
+        int pelOffset = 18 + idLength + colorMapBytes;
         if (pelOffset > bytes.Length) return null;
 
-        var pixels = new byte[width * height * bands];
+        var pixels = new byte[width * height * outBands];
         int p = pelOffset;
 
+        // Decode straight to OUTPUT layout, with per-pixel translation
+        // applied at the point of write. Same path for RLE and raw —
+        // RLE just reads control bytes first; both eventually call
+        // TranslatePixel which handles palette / RGB555 / BGR(A) translation.
+        int total = width * height;
+        Span<byte> px = stackalloc byte[4];
         if (isRle)
         {
             int produced = 0;
-            int total = width * height;
             while (produced < total)
             {
                 if (p >= bytes.Length) return null;
@@ -121,49 +161,30 @@ public static class VipsTgaLoader
 
                 if ((ctrl & 0x80) != 0)
                 {
-                    // RLE packet — single pixel value repeated `count` times.
-                    if (p + bands > bytes.Length) return null;
-                    if (isGrayscale)
+                    // Repeat a single source pixel `count` times.
+                    if (p + inBpp > bytes.Length) return null;
+                    int outBytes = TranslatePixel(bytes, p, inBpp, depth, isGrayscale,
+                        isPaletted, palette, px);
+                    if (outBytes < 0) return null;
+                    p += inBpp;
+                    for (int i = 0; i < count; i++)
                     {
-                        byte v = bytes[p++];
-                        for (int i = 0; i < count; i++)
-                            pixels[(produced + i)] = v;
-                    }
-                    else
-                    {
-                        byte b = bytes[p++], g = bytes[p++], r = bytes[p++];
-                        byte a = bands == 4 ? bytes[p++] : (byte)0;
-                        for (int i = 0; i < count; i++)
-                        {
-                            int dst = (produced + i) * bands;
-                            pixels[dst + 0] = r;
-                            pixels[dst + 1] = g;
-                            pixels[dst + 2] = b;
-                            if (bands == 4) pixels[dst + 3] = a;
-                        }
+                        int dst = (produced + i) * outBands;
+                        for (int b = 0; b < outBands; b++) pixels[dst + b] = px[b];
                     }
                 }
                 else
                 {
-                    // Literal packet — `count` distinct pixels follow.
-                    if (p + count * bands > bytes.Length) return null;
-                    if (isGrayscale)
+                    // `count` distinct source pixels follow.
+                    if (p + count * inBpp > bytes.Length) return null;
+                    for (int i = 0; i < count; i++)
                     {
-                        for (int i = 0; i < count; i++)
-                            pixels[produced + i] = bytes[p++];
-                    }
-                    else
-                    {
-                        for (int i = 0; i < count; i++)
-                        {
-                            byte b = bytes[p++], g = bytes[p++], r = bytes[p++];
-                            byte a = bands == 4 ? bytes[p++] : (byte)0;
-                            int dst = (produced + i) * bands;
-                            pixels[dst + 0] = r;
-                            pixels[dst + 1] = g;
-                            pixels[dst + 2] = b;
-                            if (bands == 4) pixels[dst + 3] = a;
-                        }
+                        int outBytes = TranslatePixel(bytes, p, inBpp, depth, isGrayscale,
+                            isPaletted, palette, px);
+                        if (outBytes < 0) return null;
+                        p += inBpp;
+                        int dst = (produced + i) * outBands;
+                        for (int b = 0; b < outBands; b++) pixels[dst + b] = px[b];
                     }
                 }
                 produced += count;
@@ -171,33 +192,22 @@ public static class VipsTgaLoader
         }
         else
         {
-            // Uncompressed: contiguous pixel data.
-            int dataLen = width * height * bands;
-            if (p + dataLen > bytes.Length) return null;
-            if (isGrayscale)
+            if (p + total * inBpp > bytes.Length) return null;
+            for (int i = 0; i < total; i++)
             {
-                Buffer.BlockCopy(bytes, p, pixels, 0, dataLen);
-            }
-            else
-            {
-                for (int i = 0; i < width * height; i++)
-                {
-                    int sp = p + i * bands;
-                    int dp = i * bands;
-                    pixels[dp + 0] = bytes[sp + 2]; // R from B-position
-                    pixels[dp + 1] = bytes[sp + 1];
-                    pixels[dp + 2] = bytes[sp + 0]; // B from R-position
-                    if (bands == 4) pixels[dp + 3] = bytes[sp + 3];
-                }
+                int outBytes = TranslatePixel(bytes, p, inBpp, depth, isGrayscale,
+                    isPaletted, palette, px);
+                if (outBytes < 0) return null;
+                p += inBpp;
+                int dst = i * outBands;
+                for (int b = 0; b < outBands; b++) pixels[dst + b] = px[b];
             }
         }
 
-        // Flip vertically when the file is bottom-up. Faster as a swap-pass
-        // on the assembled buffer than threading a flag through the decode
-        // loop, especially for RLE where the loop is already complex.
+        // Flip vertically when the file is bottom-up.
         if (!topDown)
         {
-            int rowBytes = width * bands;
+            int rowBytes = width * outBands;
             var tmp = new byte[rowBytes];
             for (int y = 0; y < height / 2; y++)
             {
@@ -213,7 +223,7 @@ public static class VipsTgaLoader
         {
             Width = width,
             Height = height,
-            Bands = bands,
+            Bands = outBands,
             BandFormat = VipsBandFormat.UChar,
             Interpretation = isGrayscale ? VipsInterpretation.BW : VipsInterpretation.RGB,
             Coding = VipsCoding.None,
@@ -221,5 +231,83 @@ public static class VipsTgaLoader
             YRes = 1.0,
             PixelsLazy = new Lazy<byte[]>(() => pixels),
         };
+    }
+
+    /// <summary>
+    /// Translate one input pixel into RGB/RGBA/Gray bytes in <paramref name="dst"/>.
+    /// Returns the number of output bytes written (= outBands), or -1 if
+    /// the input is malformed (palette index out of range).
+    /// </summary>
+    private static int TranslatePixel(byte[] src, int offset, int inBpp, int depth,
+        bool isGrayscale, bool isPaletted, byte[][]? palette, Span<byte> dst)
+    {
+        if (isGrayscale)
+        {
+            dst[0] = src[offset];
+            return 1;
+        }
+        if (isPaletted)
+        {
+            int idx = src[offset];
+            if (idx >= palette!.Length) return -1;
+            var entry = palette[idx];
+            for (int i = 0; i < entry.Length; i++) dst[i] = entry[i];
+            return entry.Length;
+        }
+        if (depth == 15 || depth == 16)
+        {
+            // 16-bit BGR555: ARRRRR-GGGGG-BBBBB stored little-endian.
+            ushort v = (ushort)(src[offset] | (src[offset + 1] << 8));
+            int r = (v >> 10) & 0x1F;
+            int g = (v >> 5) & 0x1F;
+            int b = v & 0x1F;
+            // Bit-replicate 5→8 (so 0x1F maps to 0xFF, not 0xF8).
+            dst[0] = (byte)((r << 3) | (r >> 2));
+            dst[1] = (byte)((g << 3) | (g >> 2));
+            dst[2] = (byte)((b << 3) | (b >> 2));
+            return 3;
+        }
+        // 24/32-bit BGR(A) → RGB(A).
+        dst[0] = src[offset + 2];
+        dst[1] = src[offset + 1];
+        dst[2] = src[offset + 0];
+        if (inBpp == 4) { dst[3] = src[offset + 3]; return 4; }
+        return 3;
+    }
+
+    private static byte[][]? BuildPalette(byte[] bytes, int offset, int length, int entryBits, int outBands)
+    {
+        int entryBytes = entryBits / 8;
+        var palette = new byte[length][];
+        for (int i = 0; i < length; i++)
+        {
+            int sp = offset + i * entryBytes;
+            switch (entryBits)
+            {
+                case 24:
+                    palette[i] = new[] { bytes[sp + 2], bytes[sp + 1], bytes[sp + 0] };
+                    break;
+                case 32:
+                    palette[i] = new[] { bytes[sp + 2], bytes[sp + 1], bytes[sp + 0], bytes[sp + 3] };
+                    break;
+                case 15:
+                case 16:
+                {
+                    ushort v = (ushort)(bytes[sp] | (bytes[sp + 1] << 8));
+                    int r = (v >> 10) & 0x1F;
+                    int g = (v >> 5) & 0x1F;
+                    int b = v & 0x1F;
+                    palette[i] = new[]
+                    {
+                        (byte)((r << 3) | (r >> 2)),
+                        (byte)((g << 3) | (g >> 2)),
+                        (byte)((b << 3) | (b >> 2)),
+                    };
+                    break;
+                }
+                default: return null;
+            }
+        }
+        return palette;
     }
 }
