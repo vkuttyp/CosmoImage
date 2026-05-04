@@ -52,15 +52,13 @@ internal static class PureExrDecoder
         if (!ParseAttributes(bytes, ref p, longNames, header)) return null;
         if (!header.IsValid()) return null;
 
-        // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PXR24.
-        // PIZ primitives exist in ExrPiz and are validated in isolation,
-        // but the integration against libimf-encoded bitstreams has
-        // residual issues (likely in the demux step or in the W16 wavelet
-        // wrap path) — leaving PIZ unwired for now.
+        // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PIZ, PXR24.
+        // PIZ uses 32 scanlines per block (ImfPizCompressor.h).
         int scanlinesPerBlock = header.Compression switch
         {
             0 or 1 or 2 => 1,
             3 or 5 => 16,
+            4 => 32,
             _ => -1,
         };
         if (scanlinesPerBlock < 0) return null;
@@ -494,9 +492,17 @@ internal static class PureExrDecoder
             int rowBytes = expected / Math.Max(1, rows);
             return DecompressPxr24Geom(src, srcOff, srcLen, dst, rows, rowBytes, channels, width);
         }
-        // PIZ (compression == 4) goes through ExrPiz.Decompress, but the
-        // integration is currently disabled at the dispatcher above —
-        // resumed once the bitstream/wavelet integration is fixed.
+        if (compression == 4)
+        {
+            // ExrPiz.Decompress handles PIZ end-to-end: bitmap LUT +
+            // canonical Huffman + 2D inverse wavelet + per-channel demux.
+            // Channel byte widths are per-pixel sample sizes the
+            // wavelet works in (each ushort is one wavelet sample).
+            var channelByteWidths = new int[channels.Count];
+            for (int i = 0; i < channels.Count; i++)
+                channelByteWidths[i] = BytesPerChannelSample(channels[i].PixelType);
+            return ExrPiz.Decompress(src, srcOff, srcLen, dst, rows, channelByteWidths, width);
+        }
 
         var scratch = new byte[expected];
         bool ok = compression switch

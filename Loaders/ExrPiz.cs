@@ -566,10 +566,11 @@ internal static class ExrPiz
         if (HuffmanDecode(freq, im, iM, br, nBits, totalSamples, raw, out _) != totalSamples)
             return false;
 
-        // Apply reverse LUT — token index → original 16-bit value.
-        for (int i = 0; i < totalSamples; i++) raw[i] = revLut[raw[i]];
-
-        // 2D inverse wavelet per channel sub-band.
+        // Per libimf ImfPizCompressor.cpp the canonical decode order is
+        // inverse-wavelet-then-reverse-LUT (the wavelet operates in token
+        // space; the reverse LUT maps tokens back to raw 16-bit values).
+        // We had this reversed, which produced garbage when integrating
+        // with our own encoder primitives.
         int sampleOff = 0;
         foreach (int bw in channelByteWidths)
         {
@@ -580,6 +581,9 @@ internal static class ExrPiz
                 sampleOff += width * rows;
             }
         }
+
+        // Apply reverse LUT — token index → original 16-bit value.
+        for (int i = 0; i < totalSamples; i++) raw[i] = revLut[raw[i]];
 
         // Demux into the standard per-row-per-channel-per-pixel layout
         // (matches what DemuxRegionRow in PureExrDecoder expects).
@@ -604,6 +608,241 @@ internal static class ExrPiz
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// Pack a code-length table into the bit-packed form
+    /// <see cref="UnpackEncTable"/> expects. 6-bit values per slot;
+    /// zero runs collapse via <see cref="ShortZeroCodeRun"/> /
+    /// <see cref="LongZeroCodeRun"/>. Caller bears responsibility for
+    /// producing a code-length table whose maxLen ≤ 58 (the decoder
+    /// enforces this).
+    /// </summary>
+    internal static byte[] PackEncTable(int[] freq, int im, int iM)
+    {
+        var ms = new System.IO.MemoryStream();
+        ulong acc = 0;
+        int accBits = 0;
+
+        void Emit(int value, int len)
+        {
+            acc = (acc << len) | (ulong)(uint)value;
+            accBits += len;
+            while (accBits >= 8)
+            {
+                accBits -= 8;
+                ms.WriteByte((byte)(acc >> accBits));
+                acc &= (1UL << accBits) - 1;
+            }
+        }
+
+        int i = im;
+        while (i <= iM)
+        {
+            if (freq[i] != 0)
+            {
+                Emit(freq[i], 6);
+                i++;
+                continue;
+            }
+            // Zero run starting at i.
+            int j = i;
+            while (j <= iM && freq[j] == 0) j++;
+            int runLen = j - i;
+            // Encode the run greedily, longest match first.
+            while (runLen > 0)
+            {
+                if (runLen >= ShortestLongRun)
+                {
+                    int chunk = Math.Min(runLen, 255 + ShortestLongRun);
+                    Emit(LongZeroCodeRun, 6);
+                    Emit(chunk - ShortestLongRun, 8);
+                    runLen -= chunk;
+                }
+                else if (runLen >= 2)
+                {
+                    Emit(ShortZeroCodeRun + runLen - 2, 6);
+                    runLen = 0;
+                }
+                else
+                {
+                    Emit(0, 6);
+                    runLen--;
+                }
+            }
+            i = j;
+        }
+
+        // Flush remaining bits to byte boundary.
+        if (accBits > 0)
+            ms.WriteByte((byte)(acc << (8 - accBits)));
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// PIZ-encode a block. Inverse of <see cref="Decompress"/>: takes a
+    /// raw pixel buffer in the per-row-per-channel-per-pixel layout and
+    /// produces the on-disk PIZ bitstream. Used by tests to round-trip
+    /// our own primitives end-to-end. Production code only ever decodes.
+    /// </summary>
+    public static byte[] Compress(byte[] src, int rows,
+        IReadOnlyList<int> channelByteWidths, int width)
+    {
+        int samplesPerPixelTotal = 0;
+        foreach (int bw in channelByteWidths) samplesPerPixelTotal += bw / 2;
+        int totalSamples = samplesPerPixelTotal * rows * width;
+
+        // 1. Mux from per-row layout into per-channel-sub-band layout
+        //    (the layout the wavelet operates on).
+        var raw = new ushort[totalSamples];
+        int srcP = 0;
+        for (int row = 0; row < rows; row++)
+        {
+            int chSampleOff = 0;
+            foreach (int bw in channelByteWidths)
+            {
+                int sw = bw / 2;
+                for (int sub = 0; sub < sw; sub++)
+                {
+                    int dstRowBase = chSampleOff + sub * width * rows + row * width;
+                    for (int x = 0; x < width; x++)
+                    {
+                        ushort v = (ushort)(src[srcP] | (src[srcP + 1] << 8));
+                        raw[dstRowBase + x] = v;
+                        srcP += 2;
+                    }
+                }
+                chSampleOff += sw * width * rows;
+            }
+        }
+
+        // 2. Build bitmap from raw values, derive forward + reverse LUT.
+        //    (Bitmap reflects which 16-bit values occur in the data.)
+        var bitmap = new byte[BitmapSize];
+        BitmapFromTokens(raw, bitmap, out int minNonZero, out int maxNonZero);
+        var fwdLut = new ushort[UshortRange];
+        var revLut = new ushort[UshortRange];
+        ushort maxValue = ForwardAndReverseLut(bitmap, fwdLut, revLut);
+
+        // 3. Apply forward LUT — raw → tokens (compresses the symbol space).
+        for (int i = 0; i < totalSamples; i++) raw[i] = fwdLut[raw[i]];
+
+        // 4. Forward wavelet per sub-band, in token space.
+        int sampleOff = 0;
+        foreach (int bw in channelByteWidths)
+        {
+            int sw = bw / 2;
+            for (int sub = 0; sub < sw; sub++)
+            {
+                Wav2Encode(raw, sampleOff, width, rows, 1, width, maxValue);
+                sampleOff += width * rows;
+            }
+        }
+
+        // 5. Compute Huffman frequencies on the wavelet output. The RLE
+        //    marker is, by libimf convention, the largest symbol in the
+        //    alphabet (iM); we reserve the top slot of the
+        //    65536-symbol-plus-one alphabet for it so the marker is
+        //    always distinguishable from any 16-bit data sample.
+        var freq = new int[HufEncSize];
+        BuildHuffmanFrequencies(raw, freq);
+        int rlc = HufEncSize - 1;
+        freq[rlc] = 1;
+        FrequenciesToCodeLengths(freq);
+
+        int im = 0; while (im < HufEncSize && freq[im] == 0) im++;
+        int iM = rlc;
+        if (im > iM) { im = 0; iM = 0; }
+
+        // 6. Build canonical codes + encode bitstream.
+        var codes = BuildCanonicalCodes(freq, im, iM);
+        var (encodedBits, nBits) = HuffmanEncode(codes, raw, rlc);
+
+        // 7. Pack the code-length table + serialize wire format:
+        //    u16 minBits, u16 maxBits, [bitmap[min..max]], u32 hufLen,
+        //    u32 im, u32 iM, u32 (unused), u32 nBits, u32 (unused),
+        //    [code-length table], [encoded bits].
+        var packedTable = PackEncTable(freq, im, iM);
+        int hufLen = 20 + packedTable.Length + encodedBits.Length;
+
+        var ms = new System.IO.MemoryStream();
+        Span<byte> u16 = stackalloc byte[2];
+        Span<byte> u32 = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt16LittleEndian(u16, (ushort)minNonZero); ms.Write(u16);
+        BinaryPrimitives.WriteUInt16LittleEndian(u16, (ushort)maxNonZero); ms.Write(u16);
+        if (minNonZero <= maxNonZero)
+            ms.Write(bitmap, minNonZero, maxNonZero - minNonZero + 1);
+        BinaryPrimitives.WriteInt32LittleEndian(u32, hufLen); ms.Write(u32);
+        BinaryPrimitives.WriteInt32LittleEndian(u32, im); ms.Write(u32);
+        BinaryPrimitives.WriteInt32LittleEndian(u32, iM); ms.Write(u32);
+        BinaryPrimitives.WriteInt32LittleEndian(u32, 0); ms.Write(u32);
+        BinaryPrimitives.WriteInt32LittleEndian(u32, nBits); ms.Write(u32);
+        BinaryPrimitives.WriteInt32LittleEndian(u32, 0); ms.Write(u32);
+        ms.Write(packedTable);
+        ms.Write(encodedBits);
+        return ms.ToArray();
+    }
+
+    private static void BuildHuffmanFrequencies(ushort[] tokens, int[] freq)
+    {
+        for (int i = 0; i < tokens.Length; i++)
+            freq[tokens[i]]++;
+    }
+
+    /// <summary>
+    /// Convert symbol frequencies into Huffman code lengths in place.
+    /// <paramref name="freq"/> goes in as counts and comes out as
+    /// <c>codeOf[sym] = bitLength</c>, which is what
+    /// <see cref="BuildCanonicalCodes"/> expects. Standard min-heap
+    /// Huffman construction; ties broken by symbol order so output is
+    /// deterministic. Caller is responsible for ensuring no length
+    /// exceeds 58 (the wire format's 6-bit length cap).
+    /// </summary>
+    internal static void FrequenciesToCodeLengths(int[] freq)
+    {
+        var leaves = new System.Collections.Generic.List<int>();
+        for (int i = 0; i < freq.Length; i++) if (freq[i] > 0) leaves.Add(i);
+        if (leaves.Count == 0) return;
+        if (leaves.Count == 1)
+        {
+            // Single-symbol input: the canonical-code builder needs a
+            // non-zero length to emit anything, so synthesize length 1.
+            int s = leaves[0];
+            for (int i = 0; i < freq.Length; i++) freq[i] = 0;
+            freq[s] = 1;
+            return;
+        }
+
+        int leafCount = leaves.Count;
+        int maxNodes = 2 * leafCount - 1;
+        var nodeCount = new long[maxNodes];
+        var nodeParent = new int[maxNodes];
+        for (int i = 0; i < leafCount; i++) nodeCount[i] = freq[leaves[i]];
+
+        var pq = new System.Collections.Generic.SortedSet<(long count, int seq)>();
+        for (int i = 0; i < leafCount; i++) pq.Add((nodeCount[i], i));
+
+        int next = leafCount;
+        while (pq.Count > 1)
+        {
+            var a = pq.Min; pq.Remove(a);
+            var b = pq.Min; pq.Remove(b);
+            nodeCount[next] = a.count + b.count;
+            nodeParent[a.seq] = next;
+            nodeParent[b.seq] = next;
+            pq.Add((nodeCount[next], next));
+            next++;
+        }
+        int root = next - 1;
+
+        for (int i = 0; i < freq.Length; i++) freq[i] = 0;
+        for (int i = 0; i < leafCount; i++)
+        {
+            int depth = 0;
+            int node = i;
+            while (node != root) { node = nodeParent[node]; depth++; }
+            freq[leaves[i]] = depth;
+        }
     }
 
     internal static bool UnpackEncTable(BitReader br, int im, int iM, int[] freq)
