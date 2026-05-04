@@ -114,9 +114,11 @@ public static class VipsFields
     public static byte[]? GetExif(this VipsImage image) => image.GetBlob("exif");
     public static byte[]? GetXmp(this VipsImage image) => image.GetBlob("xmp");
     public static byte[]? GetIccProfile(this VipsImage image) => image.GetBlob("icc");
+    public static byte[]? GetIptc(this VipsImage image) => image.GetBlob("iptc");
     public static void SetExif(this VipsImage image, byte[] blob) => image.SetBlob("exif", blob);
     public static void SetXmp(this VipsImage image, byte[] blob) => image.SetBlob("xmp", blob);
     public static void SetIccProfile(this VipsImage image, byte[] blob) => image.SetBlob("icc", blob);
+    public static void SetIptc(this VipsImage image, byte[] blob) => image.SetBlob("iptc", blob);
 
     /// <summary>
     /// Parse the image's EXIF blob into a typed
@@ -135,4 +137,22 @@ public static class VipsFields
     public static void SetExifProfile(this VipsImage image,
         CosmoImage.Operations.Metadata.VipsExifProfile profile)
         => image.SetBlob("exif", profile.ToBytes());
+
+    /// <summary>
+    /// Parse the image's IPTC IIM blob into a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsIptcProfile"/>.
+    /// Returns <c>null</c> when no IPTC metadata is present or the blob
+    /// is malformed.
+    /// </summary>
+    public static CosmoImage.Operations.Metadata.VipsIptcProfile? GetIptcProfile(this VipsImage image)
+        => CosmoImage.Operations.Metadata.VipsIptcProfile.TryParse(image.GetBlob("iptc"));
+
+    /// <summary>
+    /// Serialize a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsIptcProfile"/>
+    /// back into the image's IPTC blob. Overwrites any existing data.
+    /// </summary>
+    public static void SetIptcProfile(this VipsImage image,
+        CosmoImage.Operations.Metadata.VipsIptcProfile profile)
+        => image.SetBlob("iptc", profile.ToBytes());
 }

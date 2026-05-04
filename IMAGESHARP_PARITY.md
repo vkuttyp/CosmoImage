@@ -267,7 +267,7 @@ doesn't yet.
 | Raw EXIF/XMP/ICC byte-blob round-trip | ✅ | ✅ |
 | Typed EXIF tag access (`ExifProfile.GetValue<T>(ExifTag)`) | ✅ — full tag dictionary | 🟡 `VipsExifProfile` (round 83) — TIFF-format parser + serializer with typed `GetValue<T>` / `SetValue<T>`; supports IFD0 + Exif sub-IFD, both byte orders, common tags (Orientation, Make, Model, DateTime, ExposureTime, FNumber, ISO, FocalLength, dimensions, lens info, etc.). GPS sub-IFD parsing deferred. Bridge methods `VipsImage.GetExifProfile()` / `SetExifProfile()` for the round-trip |
 | EXIF profile editing | ✅ | ✅ via `VipsExifProfile.SetValue<T>` + `Remove(tag)` + `SetExifProfile` round-trip (round 83) |
-| IPTC profile (read + write) | ✅ | ❌ |
+| IPTC profile (read + write) | ✅ | ✅ `VipsIptcProfile` (round 84) — typed parser + serializer for IIM Application-Record streams; supports repeatable tags (Keywords, Byline, etc.) as `IReadOnlyList<string>`; UTF-8; standard 2-byte and extended 4-byte length forms; entries from non-Application records are silently skipped. Bridge methods `VipsImage.GetIptcProfile()` / `SetIptcProfile()`. Format-specific extraction (JPEG APP13 / 8BIM unwrap) deferred — users attach the IIM bytes directly via the bridge for now |
 | ICC profile structure parsing | ✅ — `IccProfile` with header + tag table | ❌ — raw bytes only |
 | ICC profile applied at sink (proper CMM) | 🟡 — uses RGB-matrix approximation | 🟡 — uses Magick.NET as one-shot |
 | XMP DOM | ✅ via `SixLabors.Fonts` extension | ❌ — raw bytes only |
