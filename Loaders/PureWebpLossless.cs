@@ -30,8 +30,11 @@ internal static class PureWebpLossless
         if (bytes[0] != 'R' || bytes[1] != 'I' || bytes[2] != 'F' || bytes[3] != 'F') return null;
         if (bytes[8] != 'W' || bytes[9] != 'E' || bytes[10] != 'B' || bytes[11] != 'P') return null;
 
-        // Walk chunks looking for VP8L. Reject if we hit VP8 or VP8X first
-        // (we only handle plain VP8L here; animated / extended is Magick).
+        // Walk chunks looking for VP8L. We accept either a plain VP8L file
+        // (no VP8X wrapper) OR a VP8X-wrapped file whose payload is a
+        // single VP8L chunk plus optional ICCP/EXIF/XMP metadata.
+        // Animated WebPs (ANIM/ANMF chunks) and lossy (VP8) still flow
+        // through Magick.
         int p = 12;
         int vp8lOff = -1, vp8lLen = 0;
         while (p + 8 <= bytes.Length)
@@ -43,9 +46,14 @@ internal static class PureWebpLossless
 
             // 'VP8L' little-endian = 0x4C385056
             if (fourcc == 0x4C385056) { vp8lOff = payload; vp8lLen = len; break; }
-            // 'VP8 ' or 'VP8X' or anything else → not a plain lossless WebP.
-            if (fourcc == 0x20385056 || fourcc == 0x58385056) return null;
-            // Skip ALPH/ICCP/EXIF/XMP and similar; pad to even.
+            // 'VP8 ' (lossy) or 'ANIM' / 'ANMF' (animation) → not in scope.
+            if (fourcc == 0x20385056) return null;        // VP8 lossy
+            if (fourcc == 0x4D494E41) return null;        // ANIM
+            if (fourcc == 0x464D4E41) return null;        // ANMF
+            // VP8X / ICCP / EXIF / XMP / ALPH metadata chunks: skip past
+            // them (pad payload to even per RIFF rule). For VP8X we could
+            // inspect the flags but the loop already short-circuits on
+            // ANIM / ANMF / VP8 in subsequent chunks.
             p = payload + len + (len & 1);
         }
         if (vp8lOff < 0) return null;
