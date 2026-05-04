@@ -243,14 +243,14 @@ typed structs for each space:
 | :--- | :---: |
 | `Color`, `Rgb`, `LinearRgb` | 🟡 — we do sRGB↔linear via `Linearize`/`Delinearize` |
 | `Hsl`, `Hsv` | ✅ via `VipsColorHsl` / `VipsColorHsv` value types + `VipsColorConvert.RgbToHsl` etc. (round 79) |
-| `CieLab`, `CieLch`, `CieLchuv`, `CieLuv` | 🟡 `VipsColorLab` / `VipsColorLch` (CIE L\*a\*b\* + polar L\*C\*h\*ab) via `VipsColorConvert` (round 79). LCh-uv / Luv variants (CIE 1976 UCS) still missing |
-| `CieXyz`, `CieXyy` | 🟡 `VipsColorXyz` (D65 reference white, normalised Y=1) via `VipsColorConvert` (round 79). xyY chromaticity form still missing |
+| `CieLab`, `CieLch`, `CieLchuv`, `CieLuv` | ✅ all four — `VipsColorLab` / `VipsColorLch` (round 79) + `VipsColorLuv` / `VipsColorLchuv` (round 80, CIE 1976 UCS) via `VipsColorConvert` |
+| `CieXyz`, `CieXyy` | ✅ `VipsColorXyz` (D65, normalised Y=1) (round 79) + `VipsColorXyy` chromaticity form (round 80) |
 | `Cmyk` | ✅ `VipsColorCmyk` value type + RGB↔CMYK conversion via `VipsColorConvert` (round 79) |
 | `HunterLab` | ❌ |
-| `LmsBradford`, `LmsCAT02`, `LmsCAT97s` | ❌ |
+| `LmsBradford`, `LmsCAT02`, `LmsCAT97s` | 🟡 `VipsColorLms` with Bradford transform via `VipsColorConvert.XyzToLms` / `LmsToXyz` (round 80). CAT02 and CAT97s matrices still missing |
 | `YCbCr` | ❌ — internal in JPEG decode only |
-| Chromatic adaptation | ❌ |
-| White-point (D65, D50, etc.) | ❌ |
+| Chromatic adaptation | ✅ `VipsColorConvert.ChromaticAdapt(xyz, fromWP, toWP)` (round 80) — Bradford von Kries transform with LMS pivot |
+| White-point (D65, D50, etc.) | ✅ `VipsWhitePoint` enum + `WhitePointXyz` accessor — D65 / D50 / D55 / D75 / A / E (round 80) |
 | `ColorConverter.Convert<TFrom, TTo>(...)` | ✅ `VipsColorConvert.Convert<TFrom, TTo>` (round 79) — generic dispatcher routing through RGB / XYZ. Direct pairwise methods also available (RgbToHsl, RgbToHsv, RgbToCmyk, RgbToXyz, XyzToLab, LabToLch). Identity case skips conversion |
 | `ColorMatrix` (4×4 with alpha channel) | 🟡 we have `Recomb` (3×3 RGB) |
 
