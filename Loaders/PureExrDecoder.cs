@@ -71,9 +71,14 @@ internal static class PureExrDecoder
         // canonicalise to RGBA on output.
         int[]? channelOrder = ResolveChannelOrder(header.Channels, out int outBands);
         if (channelOrder == null) return null;
-        // All requested channels must use HALF format.
+        // Selected channels must agree on pixel type (no mixing HALF +
+        // FLOAT in the same image; could be relaxed later but is rare).
+        // Supported: HALF and FLOAT promote to VipsBandFormat.Float;
+        // UINT requires its own band format which we don't yet wire.
+        int selectedPixelType = header.Channels[channelOrder[0]].PixelType;
         foreach (int idx in channelOrder)
-            if (header.Channels[idx].PixelType != PixelTypeHalf) return null;
+            if (header.Channels[idx].PixelType != selectedPixelType) return null;
+        if (selectedPixelType != PixelTypeHalf && selectedPixelType != PixelTypeFloat) return null;
 
         int width = header.DataWindow.Width;
         int height = header.DataWindow.Height;
@@ -191,10 +196,22 @@ internal static class PureExrDecoder
         {
             int srcChIdx = channelOrder[outCh];
             int co = channelOffsets[srcChIdx];
-            for (int x = 0; x < srcRowWidth; x++)
+            int pixelType = fileChannels[srcChIdx].PixelType;
+            if (pixelType == PixelTypeHalf)
             {
-                ushort half = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(co + x * 2, 2));
-                dstPixels[dstRowBase + (long)x * outBands + outCh] = HalfToFloat(half);
+                for (int x = 0; x < srcRowWidth; x++)
+                {
+                    ushort half = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(co + x * 2, 2));
+                    dstPixels[dstRowBase + (long)x * outBands + outCh] = HalfToFloat(half);
+                }
+            }
+            else  // PixelTypeFloat
+            {
+                for (int x = 0; x < srcRowWidth; x++)
+                {
+                    int bits = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(co + x * 4, 4));
+                    dstPixels[dstRowBase + (long)x * outBands + outCh] = BitConverter.Int32BitsToSingle(bits);
+                }
             }
         }
     }
