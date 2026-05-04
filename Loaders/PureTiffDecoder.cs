@@ -34,12 +34,31 @@ internal static class PureTiffDecoder
         else return null;
 
         ushort magic = ReadU16(bytes, 2, le);
-        if (magic != 0x002A) return null;
-
-        uint ifdOffset = ReadU32(bytes, 4, le);
+        bool bigTiff;
+        ulong ifdOffset;
+        if (magic == 0x002A)
+        {
+            // Classic TIFF: 4-byte offset to IFD0 at byte 4.
+            bigTiff = false;
+            ifdOffset = ReadU32(bytes, 4, le);
+        }
+        else if (magic == 0x002B)
+        {
+            // BigTIFF: bytesize-of-offsets (must be 8) + reserved + 8-byte offset.
+            bigTiff = true;
+            if (bytes.Length < 16) return null;
+            ushort offsetSize = ReadU16(bytes, 4, le);
+            ushort reserved = ReadU16(bytes, 6, le);
+            if (offsetSize != 8 || reserved != 0) return null;
+            ifdOffset = ReadU64(bytes, 8, le);
+        }
+        else
+        {
+            return null;
+        }
         if (ifdOffset == 0) return null;
 
-        var first = DecodeIfd(bytes, le, ifdOffset, out uint nextIfd);
+        var first = DecodeIfd(bytes, le, bigTiff, ifdOffset, out ulong nextIfd);
         if (first == null) return null;
         if (nextIfd == 0) return first;
 
@@ -48,12 +67,12 @@ internal static class PureTiffDecoder
         // (used by animated GIF/WebP/HEIF too) can't carry heterogeneous
         // pages. Heterogeneous → null → caller falls back to Magick.
         var pages = new List<VipsImage> { first };
-        uint cur = nextIfd;
+        ulong cur = nextIfd;
         while (cur != 0)
         {
             // Cycle / DoS guard.
             if (pages.Count > 4096) return null;
-            var page = DecodeIfd(bytes, le, cur, out uint next);
+            var page = DecodeIfd(bytes, le, bigTiff, cur, out ulong next);
             if (page == null) return null;
             if (page.Width != first.Width || page.Height != first.Height
                 || page.Bands != first.Bands || page.BandFormat != first.BandFormat
@@ -96,17 +115,30 @@ internal static class PureTiffDecoder
     /// <c>null</c> for unsupported configurations (compression, planar,
     /// tiled, exotic SamplesPerPixel, etc.).
     /// </summary>
-    private static VipsImage? DecodeIfd(byte[] bytes, bool le, uint ifdOffset, out uint nextIfd)
+    private static VipsImage? DecodeIfd(byte[] bytes, bool le, bool bigTiff, ulong ifdOffset, out ulong nextIfd)
     {
         nextIfd = 0;
-        if (ifdOffset == 0 || ifdOffset + 6 > bytes.Length) return null;
+        if (ifdOffset == 0 || ifdOffset > (ulong)bytes.Length) return null;
 
-        ushort numEntries = ReadU16(bytes, (int)ifdOffset, le);
-        int entriesStart = (int)ifdOffset + 2;
-        int afterEntries = entriesStart + numEntries * 12;
-        if (afterEntries + 4 > bytes.Length) return null;
+        // Classic: 2-byte count + 12-byte entries + 4-byte next-IFD pointer.
+        // BigTIFF: 8-byte count + 20-byte entries + 8-byte next-IFD pointer.
+        int countSize = bigTiff ? 8 : 2;
+        int entrySize = bigTiff ? 20 : 12;
+        int nextSize = bigTiff ? 8 : 4;
 
-        nextIfd = ReadU32(bytes, afterEntries, le);
+        if (ifdOffset + (ulong)countSize > (ulong)bytes.Length) return null;
+        ulong numEntries = bigTiff
+            ? ReadU64(bytes, (int)ifdOffset, le)
+            : ReadU16(bytes, (int)ifdOffset, le);
+        if (numEntries > 65535) return null;  // sanity cap
+
+        int entriesStart = (int)ifdOffset + countSize;
+        long afterEntries = (long)entriesStart + (long)numEntries * entrySize;
+        if (afterEntries + nextSize > bytes.Length) return null;
+
+        nextIfd = bigTiff
+            ? ReadU64(bytes, (int)afterEntries, le)
+            : ReadU32(bytes, (int)afterEntries, le);
 
         long width = -1, height = -1;
         long compression = 1;
@@ -125,33 +157,35 @@ internal static class PureTiffDecoder
         long[] tileOffsets = Array.Empty<long>();
         long[] tileByteCounts = Array.Empty<long>();
 
-        for (int i = 0; i < numEntries; i++)
+        for (ulong i = 0; i < numEntries; i++)
         {
-            int e = entriesStart + i * 12;
+            int e = entriesStart + (int)i * entrySize;
             ushort tag = ReadU16(bytes, e, le);
             ushort type = ReadU16(bytes, e + 2, le);
-            uint count = ReadU32(bytes, e + 4, le);
+            ulong count = bigTiff
+                ? ReadU64(bytes, e + 4, le)
+                : ReadU32(bytes, e + 4, le);
 
             switch (tag)
             {
-                case 256: width = ReadOne(bytes, e, type, le, count); break;
-                case 257: height = ReadOne(bytes, e, type, le, count); break;
-                case 258: bitsPerSample = ReadAll(bytes, e, type, le, count) ?? bitsPerSample; break;
-                case 259: compression = ReadOne(bytes, e, type, le, count); break;
-                case 262: photometric = ReadOne(bytes, e, type, le, count); break;
-                case 266: fillOrder = ReadOne(bytes, e, type, le, count); break;
-                case 273: stripOffsets = ReadAll(bytes, e, type, le, count) ?? stripOffsets; break;
-                case 277: samplesPerPixel = ReadOne(bytes, e, type, le, count); break;
-                case 278: rowsPerStrip = ReadOne(bytes, e, type, le, count); break;
-                case 279: stripByteCounts = ReadAll(bytes, e, type, le, count) ?? stripByteCounts; break;
-                case 284: planarConfig = ReadOne(bytes, e, type, le, count); break;
-                case 317: predictor = ReadOne(bytes, e, type, le, count); break;
-                case 320: colorMap = ReadAll(bytes, e, type, le, count) ?? colorMap; break;
-                case 322: tileWidth = ReadOne(bytes, e, type, le, count); break;
-                case 323: tileLength = ReadOne(bytes, e, type, le, count); break;
-                case 324: tileOffsets = ReadAll(bytes, e, type, le, count) ?? tileOffsets; break;
-                case 325: tileByteCounts = ReadAll(bytes, e, type, le, count) ?? tileByteCounts; break;
-                case 339: sampleFormat = ReadAll(bytes, e, type, le, count) ?? sampleFormat; break;
+                case 256: width = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 257: height = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 258: bitsPerSample = ReadAll(bytes, e, type, le, count, bigTiff) ?? bitsPerSample; break;
+                case 259: compression = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 262: photometric = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 266: fillOrder = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 273: stripOffsets = ReadAll(bytes, e, type, le, count, bigTiff) ?? stripOffsets; break;
+                case 277: samplesPerPixel = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 278: rowsPerStrip = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 279: stripByteCounts = ReadAll(bytes, e, type, le, count, bigTiff) ?? stripByteCounts; break;
+                case 284: planarConfig = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 317: predictor = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 320: colorMap = ReadAll(bytes, e, type, le, count, bigTiff) ?? colorMap; break;
+                case 322: tileWidth = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 323: tileLength = ReadOne(bytes, e, type, le, count, bigTiff); break;
+                case 324: tileOffsets = ReadAll(bytes, e, type, le, count, bigTiff) ?? tileOffsets; break;
+                case 325: tileByteCounts = ReadAll(bytes, e, type, le, count, bigTiff) ?? tileByteCounts; break;
+                case 339: sampleFormat = ReadAll(bytes, e, type, le, count, bigTiff) ?? sampleFormat; break;
             }
         }
 
@@ -667,51 +701,57 @@ internal static class PureTiffDecoder
 
     private static int TypeSize(ushort type) => type switch
     {
-        1 or 2 or 6 or 7 => 1,   // BYTE / ASCII / SBYTE / UNDEFINED
-        3 or 8 => 2,             // SHORT / SSHORT
-        4 or 9 or 11 => 4,       // LONG / SLONG / FLOAT
-        5 or 10 or 12 => 8,      // RATIONAL / SRATIONAL / DOUBLE
+        1 or 2 or 6 or 7 => 1,        // BYTE / ASCII / SBYTE / UNDEFINED
+        3 or 8 => 2,                  // SHORT / SSHORT
+        4 or 9 or 11 => 4,            // LONG / SLONG / FLOAT
+        5 or 10 or 12 => 8,           // RATIONAL / SRATIONAL / DOUBLE
+        16 or 17 or 18 => 8,          // LONG8 / SLONG8 / IFD8 (BigTIFF)
         _ => 0,
     };
 
-    private static long ReadOne(byte[] buf, int entryOffset, ushort type, bool le, uint count)
+    private static long ReadOne(byte[] buf, int entryOffset, ushort type, bool le, ulong count, bool bigTiff)
     {
         if (count != 1) return -1;
-        int valOffset = entryOffset + 8;
+        int valOffset = entryOffset + (bigTiff ? 12 : 8);
         return type switch
         {
             1 or 7 => buf[valOffset],
             3 => ReadU16(buf, valOffset, le),
             4 => ReadU32(buf, valOffset, le),
+            16 => (long)ReadU64(buf, valOffset, le),
             _ => -1,
         };
     }
 
-    private static long[]? ReadAll(byte[] buf, int entryOffset, ushort type, bool le, uint count)
+    private static long[]? ReadAll(byte[] buf, int entryOffset, ushort type, bool le, ulong count, bool bigTiff)
     {
         int sz = TypeSize(type);
         if (sz == 0) return null;
-        long total = (long)count * sz;
+        long total = checked((long)count * sz);
+        int inlineMax = bigTiff ? 8 : 4;
         int dataOffset;
-        if (total <= 4)
+        if (total <= inlineMax)
         {
-            dataOffset = entryOffset + 8;
+            dataOffset = entryOffset + (bigTiff ? 12 : 8);
         }
         else
         {
-            uint off = ReadU32(buf, entryOffset + 8, le);
-            if (off + total > buf.Length) return null;
+            ulong off = bigTiff
+                ? ReadU64(buf, entryOffset + 12, le)
+                : ReadU32(buf, entryOffset + 8, le);
+            if (off + (ulong)total > (ulong)buf.Length) return null;
             dataOffset = (int)off;
         }
         var values = new long[count];
-        for (int i = 0; i < count; i++)
+        for (ulong i = 0; i < count; i++)
         {
-            int p = dataOffset + i * sz;
+            int p = dataOffset + (int)i * sz;
             values[i] = type switch
             {
                 1 or 7 => buf[p],
                 3 => ReadU16(buf, p, le),
                 4 => ReadU32(buf, p, le),
+                16 => (long)ReadU64(buf, p, le),
                 _ => 0,
             };
         }
@@ -725,4 +765,20 @@ internal static class PureTiffDecoder
     private static uint ReadU32(byte[] buf, int offset, bool le) =>
         le ? (uint)(buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24))
            : (uint)((buf[offset] << 24) | (buf[offset + 1] << 16) | (buf[offset + 2] << 8) | buf[offset + 3]);
+
+    private static ulong ReadU64(byte[] buf, int offset, bool le)
+    {
+        if (le)
+        {
+            ulong lo = ReadU32(buf, offset, true);
+            ulong hi = ReadU32(buf, offset + 4, true);
+            return lo | (hi << 32);
+        }
+        else
+        {
+            ulong hi = ReadU32(buf, offset, false);
+            ulong lo = ReadU32(buf, offset + 4, false);
+            return (hi << 32) | lo;
+        }
+    }
 }
