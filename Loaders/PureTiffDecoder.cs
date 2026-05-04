@@ -121,7 +121,9 @@ internal static class PureTiffDecoder
         long[] stripOffsets = Array.Empty<long>();
         long[] stripByteCounts = Array.Empty<long>();
         long[] colorMap = Array.Empty<long>();
-        bool tiled = false;
+        long tileWidth = -1, tileLength = -1;
+        long[] tileOffsets = Array.Empty<long>();
+        long[] tileByteCounts = Array.Empty<long>();
 
         for (int i = 0; i < numEntries; i++)
         {
@@ -129,13 +131,6 @@ internal static class PureTiffDecoder
             ushort tag = ReadU16(bytes, e, le);
             ushort type = ReadU16(bytes, e + 2, le);
             uint count = ReadU32(bytes, e + 4, le);
-
-            // Tile-related tags → tiled layout, unsupported.
-            if (tag == 322 || tag == 323 || tag == 324 || tag == 325)
-            {
-                tiled = true;
-                continue;
-            }
 
             switch (tag)
             {
@@ -152,11 +147,15 @@ internal static class PureTiffDecoder
                 case 284: planarConfig = ReadOne(bytes, e, type, le, count); break;
                 case 317: predictor = ReadOne(bytes, e, type, le, count); break;
                 case 320: colorMap = ReadAll(bytes, e, type, le, count) ?? colorMap; break;
+                case 322: tileWidth = ReadOne(bytes, e, type, le, count); break;
+                case 323: tileLength = ReadOne(bytes, e, type, le, count); break;
+                case 324: tileOffsets = ReadAll(bytes, e, type, le, count) ?? tileOffsets; break;
+                case 325: tileByteCounts = ReadAll(bytes, e, type, le, count) ?? tileByteCounts; break;
                 case 339: sampleFormat = ReadAll(bytes, e, type, le, count) ?? sampleFormat; break;
             }
         }
 
-        if (tiled) return null;
+        bool tiled = tileWidth > 0 || tileLength > 0 || tileOffsets.Length > 0;
         if (width <= 0 || height <= 0) return null;
         if (compression != 1 && compression != 5 && compression != 8
             && compression != 32946 && compression != 32773)
@@ -192,53 +191,36 @@ internal static class PureTiffDecoder
             if (colorMap.Length != expected) return null;
         }
 
-        if (stripOffsets.Length != stripByteCounts.Length || stripOffsets.Length == 0)
-            return null;
-
-        if (rowsPerStrip < 0) rowsPerStrip = height;
-
         int bytesPerSample = bps / 8;
         long inRowStride = width * spp * bytesPerSample;
         long totalIn = checked(height * inRowStride);
         if (totalIn > int.MaxValue) return null;
 
-        // Gather strip bytes into a flat raw buffer, decompressing per strip.
         var raw = new byte[totalIn];
-        long y = 0;
-        for (int s = 0; s < stripOffsets.Length; s++)
+
+        if (tiled)
         {
-            long off = stripOffsets[s];
-            long enc = stripByteCounts[s];
-            long stripRows = Math.Min(rowsPerStrip, height - y);
-            if (stripRows <= 0) break;
-            long expected = stripRows * inRowStride;
-            if (off < 0 || enc < 0 || off + enc > bytes.Length) return null;
-            int dst = (int)(y * inRowStride);
-
-            bool ok = compression switch
-            {
-                1 => CopyRaw(bytes, (int)off, (int)enc, raw, dst, (int)expected),
-                5 => DecompressLzw(bytes, (int)off, (int)enc, raw, dst, (int)expected),
-                32773 => DecompressPackBits(bytes, (int)off, (int)enc, raw, dst, (int)expected),
-                8 or 32946 => DecompressDeflate(bytes, (int)off, (int)enc, raw, dst, (int)expected),
-                _ => false,
-            };
-            if (!ok) return null;
-            y += stripRows;
+            if (tileWidth <= 0 || tileLength <= 0) return null;
+            if (tileOffsets.Length != tileByteCounts.Length || tileOffsets.Length == 0) return null;
+            if (!DecodeTiles(bytes, raw, (int)width, (int)height, (int)tileWidth, (int)tileLength,
+                spp, bytesPerSample, bps, (int)compression, (int)predictor, le,
+                tileOffsets, tileByteCounts))
+                return null;
         }
-        if (y != height) return null;
+        else
+        {
+            if (stripOffsets.Length != stripByteCounts.Length || stripOffsets.Length == 0)
+                return null;
+            if (rowsPerStrip < 0) rowsPerStrip = height;
+            if (!DecodeStrips(bytes, raw, (int)width, (int)height, (int)rowsPerStrip,
+                spp, bytesPerSample, bps, (int)compression, (int)predictor, le, inRowStride,
+                stripOffsets, stripByteCounts))
+                return null;
+        }
 
-        // Normalize 16-bit samples to host little-endian (matches existing
-        // VipsImage convention; PurePngDecoder does the same).
-        if (bps == 16 && !le)
-            ByteSwap16InPlace(raw);
-
-        // Predictor 2 = horizontal differencing — each sample is stored
-        // as the wrap-around difference from the previous sample on the
-        // same row. Reverse by left-to-right accumulation. Operates on
-        // host-LE values for 16-bit (after the byte-swap above).
-        if (predictor == 2)
-            ApplyHorizontalUnpredictor(raw, (int)width, (int)height, spp, bps);
+        // (Byte-swap + predictor are applied inside DecodeStrips / DecodeTiles
+        // so 16-bit values are host-LE and predictor=2 is unwound at the
+        // appropriate stride before we land here.)
 
         // Apply photometric transformation.
         byte[] outPixels;
@@ -287,6 +269,103 @@ internal static class PureTiffDecoder
             PixelsLazy = new Lazy<byte[]>(() => outPixels),
         };
     }
+
+    /// <summary>
+    /// Decompress strip-organised TIFF pixels into <paramref name="raw"/>,
+    /// then byte-swap 16-bit samples to host LE and unwind predictor=2
+    /// across full image rows.
+    /// </summary>
+    private static bool DecodeStrips(byte[] bytes, byte[] raw,
+        int width, int height, int rowsPerStrip,
+        int spp, int bytesPerSample, int bps,
+        int compression, int predictor, bool le, long inRowStride,
+        long[] stripOffsets, long[] stripByteCounts)
+    {
+        long y = 0;
+        for (int s = 0; s < stripOffsets.Length; s++)
+        {
+            long off = stripOffsets[s];
+            long enc = stripByteCounts[s];
+            long stripRows = Math.Min(rowsPerStrip, height - y);
+            if (stripRows <= 0) break;
+            long expected = stripRows * inRowStride;
+            if (off < 0 || enc < 0 || off + enc > bytes.Length) return false;
+            int dst = (int)(y * inRowStride);
+
+            if (!Decompress(bytes, (int)off, (int)enc, raw, dst, (int)expected, compression))
+                return false;
+            y += stripRows;
+        }
+        if (y != height) return false;
+
+        if (bps == 16 && !le) ByteSwap16InPlace(raw);
+        if (predictor == 2) ApplyHorizontalUnpredictor(raw, width, height, spp, bps);
+        return true;
+    }
+
+    /// <summary>
+    /// Decode a TIFF tile grid: each tile is decompressed into a fixed-size
+    /// scratch buffer (always padded to <c>tileWidth × tileLength</c> per
+    /// spec), byte-swapped, predictor-unwound at tile-row stride, then
+    /// blitted into the image buffer with edge clamping.
+    /// </summary>
+    private static bool DecodeTiles(byte[] bytes, byte[] raw,
+        int width, int height, int tileWidth, int tileLength,
+        int spp, int bytesPerSample, int bps,
+        int compression, int predictor, bool le,
+        long[] tileOffsets, long[] tileByteCounts)
+    {
+        int tilesAcross = (width + tileWidth - 1) / tileWidth;
+        int tilesDown = (height + tileLength - 1) / tileLength;
+        if ((long)tilesAcross * tilesDown != tileOffsets.Length) return false;
+
+        long tileSize = (long)tileWidth * tileLength * spp * bytesPerSample;
+        if (tileSize > int.MaxValue) return false;
+        var tile = new byte[tileSize];
+        long imageRowStride = (long)width * spp * bytesPerSample;
+        long tileRowStride = (long)tileWidth * spp * bytesPerSample;
+
+        for (int ty = 0; ty < tilesDown; ty++)
+        {
+            for (int tx = 0; tx < tilesAcross; tx++)
+            {
+                int tileIdx = ty * tilesAcross + tx;
+                long off = tileOffsets[tileIdx];
+                long enc = tileByteCounts[tileIdx];
+                if (off < 0 || enc < 0 || off + enc > bytes.Length) return false;
+
+                if (!Decompress(bytes, (int)off, (int)enc, tile, 0, (int)tileSize, compression))
+                    return false;
+
+                if (bps == 16 && !le) ByteSwap16InPlace(tile);
+                if (predictor == 2) ApplyHorizontalUnpredictor(tile, tileWidth, tileLength, spp, bps);
+
+                int copyWidth = Math.Min(tileWidth, width - tx * tileWidth);
+                int copyHeight = Math.Min(tileLength, height - ty * tileLength);
+                long copyRowBytes = (long)copyWidth * spp * bytesPerSample;
+                for (int y = 0; y < copyHeight; y++)
+                {
+                    long imgY = (long)ty * tileLength + y;
+                    long imgX = (long)tx * tileWidth;
+                    long dstOff = imgY * imageRowStride + imgX * spp * bytesPerSample;
+                    long srcOff = (long)y * tileRowStride;
+                    Buffer.BlockCopy(tile, (int)srcOff, raw, (int)dstOff, (int)copyRowBytes);
+                }
+            }
+        }
+        return true;
+    }
+
+    /// <summary>Dispatch decompression by TIFF Compression tag.</summary>
+    private static bool Decompress(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, int expected, int compression) => compression switch
+    {
+        1 => CopyRaw(src, srcOff, srcLen, dst, dstOff, expected),
+        5 => DecompressLzw(src, srcOff, srcLen, dst, dstOff, expected),
+        32773 => DecompressPackBits(src, srcOff, srcLen, dst, dstOff, expected),
+        8 or 32946 => DecompressDeflate(src, srcOff, srcLen, dst, dstOff, expected),
+        _ => false,
+    };
 
     private static void ApplyHorizontalUnpredictor(byte[] buf, int width, int height, int spp, int bps)
     {
