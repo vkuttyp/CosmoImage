@@ -52,10 +52,15 @@ internal static class PureExrDecoder
         if (!ParseAttributes(bytes, ref p, longNames, header)) return null;
         if (!header.IsValid()) return null;
 
-        // Supported compressors so far: NO_COMPRESSION (=0), RLE (=1), ZIPS (=2).
-        // ZIP / PIZ / PXR24 / B44 / DWA come in later rounds.
-        if (header.Compression != 0 && header.Compression != 1 && header.Compression != 2)
-            return null;
+        // Supported compressors so far: NO_COMPRESSION (=0), RLE (=1),
+        // ZIPS (=2), ZIP (=3). PIZ / PXR24 / B44 / DWA come in later rounds.
+        int scanlinesPerBlock = header.Compression switch
+        {
+            0 or 1 or 2 => 1,
+            3 => 16,
+            _ => -1,
+        };
+        if (scanlinesPerBlock < 0) return null;
         if (header.LineOrder != 0 && header.LineOrder != 1) return null;
 
         // Determine output bands based on which channels are present.
@@ -72,9 +77,10 @@ internal static class PureExrDecoder
         if (width <= 0 || height <= 0) return null;
 
         // After attributes (terminated by a single null byte), the
-        // scanline offset table follows: one uint64 per scanline.
+        // scanline offset table follows: one uint64 per BLOCK.
+        int blockCount = (height + scanlinesPerBlock - 1) / scanlinesPerBlock;
         int offsetTableStart = p;
-        long need = (long)offsetTableStart + 8L * height;
+        long need = (long)offsetTableStart + 8L * blockCount;
         if (need > bytes.Length) return null;
 
         var pixels = new float[(long)width * height * outBands];
@@ -86,40 +92,49 @@ internal static class PureExrDecoder
         long fileRowBytes = 0;
         foreach (var c in header.Channels) fileRowBytes += BytesPerChannelSample(c.PixelType) * width;
 
-        // Per-scanline scratch buffer for compressed paths.
-        byte[]? rowScratch = null;
-        if (header.Compression != 0)
-            rowScratch = new byte[fileRowBytes];
+        // Block-level scratch buffer; max possible size is
+        // scanlinesPerBlock × fileRowBytes.
+        byte[]? blockScratch = header.Compression != 0
+            ? new byte[scanlinesPerBlock * fileRowBytes]
+            : null;
 
-        for (int y = 0; y < height; y++)
+        for (int b = 0; b < blockCount; b++)
         {
-            long off = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offsetTableStart + y * 8, 8));
+            long off = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offsetTableStart + b * 8, 8));
             if (off < 0 || off + 8 > bytes.Length) return null;
             int yCoord = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off, 4));
             int dataSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 4, 4));
-            int rowDataOff = (int)off + 8;
-            if (rowDataOff + dataSize > bytes.Length) return null;
+            int blockDataOff = (int)off + 8;
+            if (blockDataOff + dataSize > bytes.Length) return null;
             if (yCoord < header.DataWindow.YMin || yCoord > header.DataWindow.YMax) return null;
-            int outY = yCoord - header.DataWindow.YMin;
+            int outY0 = yCoord - header.DataWindow.YMin;
 
-            byte[] rowSource;
-            int rowSourceOff;
+            int rowsInBlock = Math.Min(scanlinesPerBlock, height - outY0);
+            int blockBytes = rowsInBlock * (int)fileRowBytes;
+
+            byte[] blockSource;
+            int blockSourceOff;
             if (header.Compression == 0)
             {
-                if ((long)dataSize < fileRowBytes) return null;
-                rowSource = bytes;
-                rowSourceOff = rowDataOff;
+                if (dataSize < blockBytes) return null;
+                blockSource = bytes;
+                blockSourceOff = blockDataOff;
             }
             else
             {
-                if (!DecompressBlock(header.Compression, bytes, rowDataOff, dataSize,
-                    rowScratch!, (int)fileRowBytes))
+                if (!DecompressBlock(header.Compression, bytes, blockDataOff, dataSize,
+                    blockScratch!, blockBytes))
                     return null;
-                rowSource = rowScratch!;
-                rowSourceOff = 0;
+                blockSource = blockScratch!;
+                blockSourceOff = 0;
             }
 
-            DemuxScanline(rowSource, rowSourceOff, header.Channels, channelOrder, width, pixels, outY, outBands);
+            for (int row = 0; row < rowsInBlock; row++)
+            {
+                int outY = outY0 + row;
+                int rowOff = blockSourceOff + row * (int)fileRowBytes;
+                DemuxScanline(blockSource, rowOff, header.Channels, channelOrder, width, pixels, outY, outBands);
+            }
         }
 
         return new VipsImage
@@ -242,7 +257,9 @@ internal static class PureExrDecoder
         bool ok = compression switch
         {
             1 => RleDecompress(src, srcOff, srcLen, scratch, expected),
-            2 => ZlibDecompress(src, srcOff, srcLen, scratch, expected),
+            // ZIPS (=2) and ZIP (=3) share the same per-block algorithm —
+            // ZIP just bundles 16 scanlines per block instead of 1.
+            2 or 3 => ZlibDecompress(src, srcOff, srcLen, scratch, expected),
             _ => false,
         };
         if (!ok) return false;
