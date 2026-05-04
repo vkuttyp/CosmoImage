@@ -52,13 +52,14 @@ internal static class PureExrDecoder
         if (!ParseAttributes(bytes, ref p, longNames, header)) return null;
         if (!header.IsValid()) return null;
 
-        // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PIZ, PXR24.
-        // PIZ uses 32 scanlines per block (ImfPizCompressor.h).
+        // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PIZ,
+        // PXR24, B44, B44A. PIZ / B44 / B44A use 32 scanlines per block
+        // (per ImfPizCompressor.h / ImfB44Compressor.h).
         int scanlinesPerBlock = header.Compression switch
         {
             0 or 1 or 2 => 1,
             3 or 5 => 16,
-            4 => 32,
+            4 or 6 or 7 => 32,
             _ => -1,
         };
         if (scanlinesPerBlock < 0) return null;
@@ -502,6 +503,20 @@ internal static class PureExrDecoder
             for (int i = 0; i < channels.Count; i++)
                 channelByteWidths[i] = BytesPerChannelSample(channels[i].PixelType);
             return ExrPiz.Decompress(src, srcOff, srcLen, dst, rows, channelByteWidths, width);
+        }
+        if (compression == 6 || compression == 7)
+        {
+            // B44 / B44A: 4×4-block DPCM compressor for HALF channels.
+            // FLOAT / UINT channels pass through raw within the block.
+            // Both compressor codes share the same decode path; only
+            // the encoder differs (B44A emits a 3-byte short form for
+            // uniform blocks, which the decoder auto-detects).
+            var b44Channels = new ExrB44ChannelInfo[channels.Count];
+            for (int i = 0; i < channels.Count; i++)
+                b44Channels[i] = new ExrB44ChannelInfo(
+                    BytesPerChannelSample(channels[i].PixelType),
+                    channels[i].PLinear != 0);
+            return ExrB44.Decompress(src, srcOff, srcLen, dst, rows, b44Channels, width);
         }
 
         var scratch = new byte[expected];
