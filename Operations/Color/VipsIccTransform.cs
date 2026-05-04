@@ -20,6 +20,16 @@ public class VipsIccTransform : VipsOperation
     /// </summary>
     public VipsIccRenderingIntent RenderingIntent { get; set; } = VipsIccRenderingIntent.Perceptual;
 
+    /// <summary>
+    /// When <c>true</c>, scale shadow values so the source profile's
+    /// black point maps to the destination profile's black point.
+    /// Preserves shadow detail when the destination has darker
+    /// representable black than the source. Only meaningful for
+    /// LUT-based profiles that carry a non-zero <c>bkpt</c> tag —
+    /// matrix profiles like sRGB have BP ≈ 0 and BPC has no effect.
+    /// </summary>
+    public bool BlackPointCompensation { get; set; }
+
     public override int Build()
     {
         if (In == null || OutputProfile == null) return -1;
@@ -39,7 +49,8 @@ public class VipsIccTransform : VipsOperation
             {
                 matrixCmm = VipsIccCmm.TryBuild(srcParsed, dstParsed);
                 if (matrixCmm == null)
-                    lutCmm = VipsIccLutCmm.TryBuild(srcParsed, dstParsed, RenderingIntent);
+                    lutCmm = VipsIccLutCmm.TryBuild(srcParsed, dstParsed, RenderingIntent,
+                        BlackPointCompensation);
             }
         }
 
@@ -96,6 +107,7 @@ public class VipsIccTransform : VipsOperation
         if (InputProfile != null) hash.Add(InputProfile.Length);
         if (OutputProfile != null) hash.Add(OutputProfile.Length);
         hash.Add(Intent);
+        hash.Add(BlackPointCompensation);
         return hash.ToHashCode();
     }
 

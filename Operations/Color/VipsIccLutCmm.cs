@@ -28,13 +28,20 @@ public sealed class VipsIccLutCmm
     private readonly LutTransform _reverse;
     private readonly Pcs _srcPcs;
     private readonly Pcs _dstPcs;
+    private readonly bool _bpcEnabled;
+    private readonly double _srcBpX, _srcBpY, _srcBpZ;
+    private readonly double _dstBpX, _dstBpY, _dstBpZ;
 
-    private VipsIccLutCmm(LutTransform forward, LutTransform reverse, Pcs srcPcs, Pcs dstPcs)
+    private VipsIccLutCmm(LutTransform forward, LutTransform reverse, Pcs srcPcs, Pcs dstPcs,
+        bool bpc, double sX, double sY, double sZ, double dX, double dY, double dZ)
     {
         _forward = forward;
         _reverse = reverse;
         _srcPcs = srcPcs;
         _dstPcs = dstPcs;
+        _bpcEnabled = bpc;
+        _srcBpX = sX; _srcBpY = sY; _srcBpZ = sZ;
+        _dstBpX = dX; _dstBpY = dY; _dstBpZ = dZ;
     }
 
     /// <summary>Channels expected on the source side (3 for RGB, 4 for CMYK).</summary>
@@ -43,7 +50,8 @@ public sealed class VipsIccLutCmm
     public int DstChannels => _reverse.OutputChannels;
 
     public static VipsIccLutCmm? TryBuild(VipsIccProfile src, VipsIccProfile dst,
-        VipsIccRenderingIntent intent = VipsIccRenderingIntent.Perceptual)
+        VipsIccRenderingIntent intent = VipsIccRenderingIntent.Perceptual,
+        bool blackPointCompensation = false)
     {
         if (src == null || dst == null) return null;
         // Intent-specific tag slots, with fallback to perceptual (A2B0/B2A0)
@@ -60,7 +68,19 @@ public sealed class VipsIccLutCmm
         Pcs srcPcs = src.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
         Pcs dstPcs = dst.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
 
-        return new VipsIccLutCmm(fwd, rev, srcPcs, dstPcs);
+        // Resolve absolute-XYZ black points from the bkpt tag. Profiles
+        // without bkpt are treated as zero black (matrix profiles like
+        // sRGB, AdobeRGB really do have BP ≈ 0). When both are zero, BPC
+        // is a no-op so we skip the per-pixel work entirely.
+        var srcBp = src.BlackPoint ?? new VipsColorXyz(0, 0, 0);
+        var dstBp = dst.BlackPoint ?? new VipsColorXyz(0, 0, 0);
+        bool bpcActive = blackPointCompensation
+            && (Math.Abs(srcBp.X - dstBp.X) > 1e-6
+                || Math.Abs(srcBp.Y - dstBp.Y) > 1e-6
+                || Math.Abs(srcBp.Z - dstBp.Z) > 1e-6);
+
+        return new VipsIccLutCmm(fwd, rev, srcPcs, dstPcs, bpcActive,
+            srcBp.X, srcBp.Y, srcBp.Z, dstBp.X, dstBp.Y, dstBp.Z);
     }
 
     private static (string A2B, string B2A) TagsForIntent(VipsIccRenderingIntent intent) => intent switch
@@ -99,7 +119,17 @@ public sealed class VipsIccLutCmm
             for (int c = 0; c < srcCh; c++) inBuf[c] = src[sp + c] / 255.0;
 
             _forward.Apply(inBuf.Slice(0, srcCh), pcs);
-            if (_srcPcs != _dstPcs) ConvertPcs(pcs, _srcPcs, _dstPcs);
+            if (_bpcEnabled)
+            {
+                // BPC operates in absolute XYZ. Decode whichever PCS we
+                // have, scale, then re-encode in the destination's PCS
+                // (subsumes the cross-PCS conversion below).
+                ApplyBpc(pcs, _srcPcs, _dstPcs);
+            }
+            else if (_srcPcs != _dstPcs)
+            {
+                ConvertPcs(pcs, _srcPcs, _dstPcs);
+            }
             _reverse.Apply(pcs, outBuf.Slice(0, dstCh));
 
             for (int c = 0; c < dstCh; c++) dst[dp + c] = ToByte(outBuf[c]);
@@ -119,6 +149,61 @@ public sealed class VipsIccLutCmm
         if (v <= 0) return 0;
         if (v >= 1) return 255;
         return (byte)(v * 255.0 + 0.5);
+    }
+
+    /// <summary>
+    /// Apply black-point compensation in absolute XYZ. Decodes the
+    /// source PCS to abs XYZ, scales each channel so that
+    /// (srcBP, D50) maps to (dstBP, D50) — preserving white at D50 and
+    /// shifting black from the source's profile-black to the
+    /// destination's — then re-encodes for the destination PCS.
+    /// </summary>
+    private void ApplyBpc(Span<double> v, Pcs from, Pcs to)
+    {
+        const double XyzScale = 65535.0 / 32768.0;
+
+        double X, Y, Z;
+        if (from == Pcs.Lab)
+        {
+            double L = v[0] * 100.0;
+            double a = v[1] * 256.0 - 128.0;
+            double b = v[2] * 256.0 - 128.0;
+            LabToXyz(L, a, b, out X, out Y, out Z);
+        }
+        else
+        {
+            X = v[0] * XyzScale;
+            Y = v[1] * XyzScale;
+            Z = v[2] * XyzScale;
+        }
+
+        // Per-channel linear scale: maps srcBP → dstBP, D50 → D50.
+        // Skips axes where the source range is degenerate to avoid /0.
+        X = ScaleAxis(X, _srcBpX, _dstBpX, D50X);
+        Y = ScaleAxis(Y, _srcBpY, _dstBpY, D50Y);
+        Z = ScaleAxis(Z, _srcBpZ, _dstBpZ, D50Z);
+
+        if (to == Pcs.Lab)
+        {
+            XyzToLab(X, Y, Z, out double L, out double a, out double b);
+            v[0] = Math.Clamp(L / 100.0, 0, 1);
+            v[1] = Math.Clamp((a + 128.0) / 256.0, 0, 1);
+            v[2] = Math.Clamp((b + 128.0) / 256.0, 0, 1);
+        }
+        else
+        {
+            v[0] = Math.Clamp(X / XyzScale, 0, 1);
+            v[1] = Math.Clamp(Y / XyzScale, 0, 1);
+            v[2] = Math.Clamp(Z / XyzScale, 0, 1);
+        }
+    }
+
+    private static double ScaleAxis(double v, double srcBp, double dstBp, double wp)
+    {
+        double srcRange = wp - srcBp;
+        if (srcRange < 1e-9) return v;
+        double t = (v - srcBp) / srcRange;
+        return t * (wp - dstBp) + dstBp;
     }
 
     /// <summary>
