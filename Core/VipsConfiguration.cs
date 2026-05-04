@@ -53,6 +53,13 @@ public interface IVipsImageFormat
     /// </summary>
     ValueTask SaveAsync(VipsImage image, Stream stream, CancellationToken cancellationToken = default)
         => throw new NotSupportedException($"Format '{Name}' does not support encoding");
+
+    /// <summary>
+    /// Conventional file extensions for this format (each starts with
+    /// a dot, e.g., <c>".png"</c>). Used by <see cref="VipsConfiguration.FindByExtension"/>
+    /// + extension-based save dispatch. Default is empty.
+    /// </summary>
+    IReadOnlyList<string> FileExtensions => Array.Empty<string>();
 }
 
 /// <summary>
@@ -192,6 +199,51 @@ public sealed class VipsConfiguration
             throw new NotSupportedException($"No registered format named '{formatName}'");
         if (!fmt.CanEncode)
             throw new NotSupportedException($"Format '{formatName}' does not support encoding");
+        await fmt.SaveAsync(image, stream, cancellationToken);
+    }
+
+    /// <summary>
+    /// Find a registered format whose <see cref="IVipsImageFormat.FileExtensions"/>
+    /// includes <paramref name="extension"/> (case-insensitive). The
+    /// extension argument may be passed with or without the leading
+    /// dot (<c>"png"</c> and <c>".png"</c> both match).
+    /// When multiple registrations claim the same extension, newest wins.
+    /// </summary>
+    public IVipsImageFormat? FindByExtension(string extension)
+    {
+        if (string.IsNullOrEmpty(extension)) return null;
+        if (extension[0] != '.') extension = "." + extension;
+        var snapshot = _formats.ToArray();
+        for (int i = snapshot.Length - 1; i >= 0; i--)
+        {
+            foreach (var ext in snapshot[i].FileExtensions)
+            {
+                if (string.Equals(ext, extension, StringComparison.OrdinalIgnoreCase))
+                    return snapshot[i];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Encode by file-extension dispatch. Looks up the format whose
+    /// <see cref="IVipsImageFormat.FileExtensions"/> claims
+    /// <paramref name="extension"/> (e.g., <c>".png"</c>) and writes
+    /// through it. Equivalent to
+    /// <c>SaveAsync(image, stream, FindByExtension(ext).Name)</c> but
+    /// without the name round-trip.
+    /// </summary>
+    public async ValueTask SaveByExtensionAsync(VipsImage image, Stream stream, string extension,
+        CancellationToken cancellationToken = default)
+    {
+        if (image == null) throw new ArgumentNullException(nameof(image));
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        if (extension == null) throw new ArgumentNullException(nameof(extension));
+        var fmt = FindByExtension(extension);
+        if (fmt == null)
+            throw new NotSupportedException($"No registered format claims extension '{extension}'");
+        if (!fmt.CanEncode)
+            throw new NotSupportedException($"Format '{fmt.Name}' does not support encoding");
         await fmt.SaveAsync(image, stream, cancellationToken);
     }
 }

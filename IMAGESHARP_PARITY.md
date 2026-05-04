@@ -306,7 +306,7 @@ profile API ImageSharp ships is a meaningful gap.
 | :--- | :--- | :--- |
 | Auto-detect format from magic bytes | ✅ `Image.DetectFormatAsync` | ✅ `IdentifyAsync` returns `Format` enum across all 19 formats (round 54) |
 | Magic-byte registry | ✅ via `Configuration` | ❌ — implicit, format-by-format |
-| Custom format plugin registration | ✅ — register decoder/encoder pair via `Configuration` | ✅ `VipsConfiguration.Default.Register(IVipsImageFormat)` (round 89: decoder side) + `IVipsImageFormat.SaveAsync` + `VipsConfiguration.Default.SaveAsync(image, stream, formatName)` for save-by-name dispatch (round 90: encoder side). `CanEncode` defaults to false; decoder-only providers don't need to implement `SaveAsync`. Round-trippable custom formats supported |
+| Custom format plugin registration | ✅ — register decoder/encoder pair via `Configuration` | ✅ `VipsConfiguration.Default.Register(IVipsImageFormat)` (round 89: decoder side) + `IVipsImageFormat.SaveAsync` + `VipsConfiguration.Default.SaveAsync(image, stream, formatName)` for save-by-name dispatch (round 90: encoder side) + `IVipsImageFormat.FileExtensions` + `FindByExtension` + `SaveByExtensionAsync` for ergonomic extension-based save (round 108). All 13 encodable built-ins wired with their conventional extensions: `.png` / `.jpg` / `.jpeg` / `.webp` / `.gif` / `.bmp` / `.tif` / `.tiff` / `.qoi` / `.heif` / `.heic` / `.avif` / `.hdr` / `.fits` / `.nii` / `.tga` / `.pnm` / `.ppm` / `.pgm` / `.pbm`. Decoder-only formats (PDF, SVG, JXL, JP2K) declare extensions but throw on save |
 
 **Closed (round 54)**: `VipsImageOps.IdentifyAsync(stream)` and
 `VipsImageOps.LoadAsync(stream)` sniff every known format's magic
