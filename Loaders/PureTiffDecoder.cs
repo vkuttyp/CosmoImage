@@ -156,6 +156,7 @@ internal static class PureTiffDecoder
         long tileWidth = -1, tileLength = -1;
         long[] tileOffsets = Array.Empty<long>();
         long[] tileByteCounts = Array.Empty<long>();
+        byte[] jpegTables = Array.Empty<byte>();
 
         for (ulong i = 0; i < numEntries; i++)
         {
@@ -186,14 +187,19 @@ internal static class PureTiffDecoder
                 case 324: tileOffsets = ReadAll(bytes, e, type, le, count, bigTiff) ?? tileOffsets; break;
                 case 325: tileByteCounts = ReadAll(bytes, e, type, le, count, bigTiff) ?? tileByteCounts; break;
                 case 339: sampleFormat = ReadAll(bytes, e, type, le, count, bigTiff) ?? sampleFormat; break;
+                case 347: jpegTables = ReadBytes(bytes, e, type, le, count, bigTiff) ?? jpegTables; break;
             }
         }
 
         bool tiled = tileWidth > 0 || tileLength > 0 || tileOffsets.Length > 0;
         if (width <= 0 || height <= 0) return null;
-        if (compression != 1 && compression != 5 && compression != 8
+        if (compression != 1 && compression != 5 && compression != 7 && compression != 8
             && compression != 32946 && compression != 32773)
             return null;
+        // JPEG-compressed TIFFs encode entire strips/tiles as JPEG datastreams
+        // and predictor doesn't apply; planar=2 + JPEG combo is rare and
+        // we don't implement it.
+        if (compression == 7 && (predictor != 1 || planarConfig != 1)) return null;
         if (planarConfig != 1 && planarConfig != 2) return null;
         if (planarConfig == 2 && tiled) return null;  // tiled+planar combo deferred
         if (fillOrder != 1) return null;
@@ -221,8 +227,14 @@ internal static class PureTiffDecoder
         int spp = (int)samplesPerPixel;
         if (spp < 1 || spp > 4) return null;
 
+        // Photometric 6 (YCbCr) is allowed only with JPEG compression — we
+        // hand the YCbCr→RGB conversion off to the JPEG decoder there.
+        bool jpegNeedsYcbcr = photometric == 6 && compression == 7;
         if (photometric != 0 && photometric != 1 && photometric != 2
-            && photometric != 3 && photometric != 5) return null;
+            && photometric != 3 && photometric != 5 && !jpegNeedsYcbcr) return null;
+        // Treat the YCbCr-JPEG case as RGB downstream: the strip decode
+        // emits RGB pixels, photometric processing then sees regular RGB.
+        if (jpegNeedsYcbcr) photometric = 2;
         // Float samples don't have a meaningful "invert" or palette
         // interpretation — restrict to plain BlackIsZero / RGB.
         if (sampleFmt == 3 && photometric != 1 && photometric != 2) return null;
@@ -260,7 +272,7 @@ internal static class PureTiffDecoder
             if (tileOffsets.Length != tileByteCounts.Length || tileOffsets.Length == 0) return null;
             if (!DecodeTiles(bytes, raw, (int)width, (int)height, (int)tileWidth, (int)tileLength,
                 spp, bytesPerSample, bps, (int)compression, (int)predictor, le,
-                tileOffsets, tileByteCounts))
+                tileOffsets, tileByteCounts, jpegTables, jpegNeedsYcbcr))
                 return null;
         }
         else if (planarConfig == 2)
@@ -288,7 +300,7 @@ internal static class PureTiffDecoder
                 }
                 if (!DecodeStrips(bytes, planes[c], (int)width, (int)height, (int)rowsPerStrip,
                     spp: 1, bytesPerSample, bps, (int)compression, (int)predictor, le,
-                    planeRowStride, planeOffsets, planeCounts))
+                    planeRowStride, planeOffsets, planeCounts, jpegTables, jpegNeedsYcbcr))
                     return null;
             }
 
@@ -315,7 +327,7 @@ internal static class PureTiffDecoder
             if (rowsPerStrip < 0) rowsPerStrip = height;
             if (!DecodeStrips(bytes, raw, (int)width, (int)height, (int)rowsPerStrip,
                 spp, bytesPerSample, bps, (int)compression, (int)predictor, le, inRowStride,
-                stripOffsets, stripByteCounts))
+                stripOffsets, stripByteCounts, jpegTables, jpegNeedsYcbcr))
                 return null;
         }
 
@@ -388,7 +400,8 @@ internal static class PureTiffDecoder
         int width, int height, int rowsPerStrip,
         int spp, int bytesPerSample, int bps,
         int compression, int predictor, bool le, long inRowStride,
-        long[] stripOffsets, long[] stripByteCounts)
+        long[] stripOffsets, long[] stripByteCounts, byte[] jpegTables,
+        bool jpegYcbcr = false)
     {
         long y = 0;
         for (int s = 0; s < stripOffsets.Length; s++)
@@ -401,7 +414,9 @@ internal static class PureTiffDecoder
             if (off < 0 || enc < 0 || off + enc > bytes.Length) return false;
             int dst = (int)(y * inRowStride);
 
-            if (!Decompress(bytes, (int)off, (int)enc, raw, dst, (int)expected, compression))
+            if (!Decompress(bytes, (int)off, (int)enc, raw, dst, (int)expected, compression,
+                jpegTables: jpegTables, jpegWidth: width, jpegHeight: (int)stripRows,
+                jpegRowStride: (int)inRowStride, jpegYcbcr: jpegYcbcr))
                 return false;
             y += stripRows;
         }
@@ -429,7 +444,8 @@ internal static class PureTiffDecoder
         int width, int height, int tileWidth, int tileLength,
         int spp, int bytesPerSample, int bps,
         int compression, int predictor, bool le,
-        long[] tileOffsets, long[] tileByteCounts)
+        long[] tileOffsets, long[] tileByteCounts, byte[] jpegTables,
+        bool jpegYcbcr = false)
     {
         int tilesAcross = (width + tileWidth - 1) / tileWidth;
         int tilesDown = (height + tileLength - 1) / tileLength;
@@ -450,7 +466,9 @@ internal static class PureTiffDecoder
                 long enc = tileByteCounts[tileIdx];
                 if (off < 0 || enc < 0 || off + enc > bytes.Length) return false;
 
-                if (!Decompress(bytes, (int)off, (int)enc, tile, 0, (int)tileSize, compression))
+                if (!Decompress(bytes, (int)off, (int)enc, tile, 0, (int)tileSize, compression,
+                    jpegTables: jpegTables, jpegWidth: tileWidth, jpegHeight: tileLength,
+                    jpegRowStride: (int)tileRowStride, jpegYcbcr: jpegYcbcr))
                     return false;
 
                 if (predictor == 3) ApplyFloatUnpredictor(tile, tileWidth, tileLength, spp);
@@ -479,14 +497,88 @@ internal static class PureTiffDecoder
 
     /// <summary>Dispatch decompression by TIFF Compression tag.</summary>
     private static bool Decompress(byte[] src, int srcOff, int srcLen,
-        byte[] dst, int dstOff, int expected, int compression) => compression switch
+        byte[] dst, int dstOff, int expected, int compression,
+        byte[]? jpegTables = null,
+        int jpegWidth = 0, int jpegHeight = 0, int jpegRowStride = 0,
+        bool jpegYcbcr = false) => compression switch
     {
         1 => CopyRaw(src, srcOff, srcLen, dst, dstOff, expected),
         5 => DecompressLzw(src, srcOff, srcLen, dst, dstOff, expected),
+        7 => DecompressJpeg(src, srcOff, srcLen, dst, dstOff, jpegTables ?? Array.Empty<byte>(),
+            jpegWidth, jpegHeight, jpegRowStride, jpegYcbcr),
         32773 => DecompressPackBits(src, srcOff, srcLen, dst, dstOff, expected),
         8 or 32946 => DecompressDeflate(src, srcOff, srcLen, dst, dstOff, expected),
         _ => false,
     };
+
+    /// <summary>
+    /// Decompress a JPEG-compressed TIFF strip / tile. If the strip data
+    /// already starts with SOI it's treated as a self-contained JPEG;
+    /// otherwise <paramref name="jpegTables"/> (tag 347, the shared
+    /// markers wrapped in their own SOI/EOI envelope) is spliced in
+    /// before the strip data so the combined stream is a complete JPEG.
+    /// </summary>
+    private static bool DecompressJpeg(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, byte[] jpegTables,
+        int width, int height, int rowStride, bool ycbcr)
+    {
+        if (width <= 0 || height <= 0 || rowStride <= 0) return false;
+        byte[] jpeg = BuildJpegStream(src, srcOff, srcLen, jpegTables);
+        // For TIFF photometric=6 (YCbCr) the JPEG components ARE Y/Cb/Cr
+        // and need conversion. For photometric=2 (RGB), the JPEG was
+        // encoded as direct R/G/B with no internal YCbCr transform; the
+        // decoder's heuristic would otherwise mis-detect 3-component
+        // JPEGs as YCbCr and corrupt the data. Pass that decision in
+        // explicitly via forceRgbPassthrough.
+        return VipsJpegLoader.DecodeJpegToBuffer(jpeg, dst, dstOff, rowStride, width, height,
+            out _, forceRgbPassthrough: !ycbcr);
+    }
+
+    /// <summary>
+    /// Combine TIFF JPEGTables (tag 347) with a strip's JPEG data into a
+    /// single self-sufficient JPEG bytestream. Strategy: if the strip
+    /// already opens with SOI, keep the strip; if not, wrap the strip in
+    /// the tables' envelope by inserting tables' interior between the
+    /// strip's start and its SOS.
+    /// </summary>
+    private static byte[] BuildJpegStream(byte[] src, int srcOff, int srcLen, byte[] jpegTables)
+    {
+        bool stripHasSoi = srcLen >= 2 && src[srcOff] == 0xFF && src[srcOff + 1] == 0xD8;
+        bool tablesHaveSoi = jpegTables.Length >= 4
+            && jpegTables[0] == 0xFF && jpegTables[1] == 0xD8;
+        bool tablesHaveEoi = jpegTables.Length >= 4
+            && jpegTables[^2] == 0xFF && jpegTables[^1] == 0xD9;
+
+        if (jpegTables.Length == 0)
+        {
+            // No shared tables — strip must already be self-contained.
+            var copy = new byte[srcLen];
+            Buffer.BlockCopy(src, srcOff, copy, 0, srcLen);
+            return copy;
+        }
+
+        // Tables interior = everything between SOI and EOI.
+        int tablesStart = tablesHaveSoi ? 2 : 0;
+        int tablesEnd = tablesHaveEoi ? jpegTables.Length - 2 : jpegTables.Length;
+        int interiorLen = Math.Max(0, tablesEnd - tablesStart);
+
+        if (stripHasSoi)
+        {
+            // Splice tables interior right after strip's SOI.
+            var combined = new byte[2 + interiorLen + (srcLen - 2)];
+            combined[0] = 0xFF; combined[1] = 0xD8;
+            Buffer.BlockCopy(jpegTables, tablesStart, combined, 2, interiorLen);
+            Buffer.BlockCopy(src, srcOff + 2, combined, 2 + interiorLen, srcLen - 2);
+            return combined;
+        }
+
+        // Strip lacks SOI — synthesize one, then tables interior, then strip data.
+        var combinedNoSoi = new byte[2 + interiorLen + srcLen];
+        combinedNoSoi[0] = 0xFF; combinedNoSoi[1] = 0xD8;
+        Buffer.BlockCopy(jpegTables, tablesStart, combinedNoSoi, 2, interiorLen);
+        Buffer.BlockCopy(src, srcOff, combinedNoSoi, 2 + interiorLen, srcLen);
+        return combinedNoSoi;
+    }
 
     /// <summary>
     /// Reverse the TIFF "floating-point predictor" (Predictor=3, Adobe
@@ -856,6 +948,33 @@ internal static class PureTiffDecoder
             16 => (long)ReadU64(buf, valOffset, le),
             _ => -1,
         };
+    }
+
+    /// <summary>
+    /// Read a tag's value as raw bytes (UNDEFINED type — TIFF type 7).
+    /// JPEGTables (tag 347) is the canonical use; tag value is a JPEG
+    /// markers blob whose count is the byte length.
+    /// </summary>
+    private static byte[]? ReadBytes(byte[] buf, int entryOffset, ushort type, bool le, ulong count, bool bigTiff)
+    {
+        if (type != 7 && type != 1) return null;
+        int inlineMax = bigTiff ? 8 : 4;
+        int dataOffset;
+        if ((long)count <= inlineMax)
+        {
+            dataOffset = entryOffset + (bigTiff ? 12 : 8);
+        }
+        else
+        {
+            ulong off = bigTiff
+                ? ReadU64(buf, entryOffset + 12, le)
+                : ReadU32(buf, entryOffset + 8, le);
+            if (off + count > (ulong)buf.Length) return null;
+            dataOffset = (int)off;
+        }
+        var bytes = new byte[count];
+        Buffer.BlockCopy(buf, dataOffset, bytes, 0, (int)count);
+        return bytes;
     }
 
     private static long[]? ReadAll(byte[] buf, int entryOffset, ushort type, bool le, ulong count, bool bigTiff)

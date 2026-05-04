@@ -338,7 +338,7 @@ public static class VipsJpegLoader
     /// samples — we need to know what they encode before we can call
     /// the result "RGB".
     /// </summary>
-    private enum JpegColorSpace
+    internal enum JpegColorSpace
     {
         Grayscale,    // 1 component, no conversion
         YCbCr,        // 3 components (default JFIF) — convert to RGB
@@ -353,7 +353,7 @@ public static class VipsJpegLoader
     /// declare RGB / YCCK / CMYK. Falls back to component-count heuristic
     /// when no marker pins it down: 1 = grayscale, 3 = YCbCr, 4 = CMYK.
     /// </summary>
-    private static JpegColorSpace DetectJpegColorSpace(byte[] jpeg, int components)
+    internal static JpegColorSpace DetectJpegColorSpace(byte[] jpeg, int components)
     {
         if (components == 1) return JpegColorSpace.Grayscale;
 
@@ -397,7 +397,7 @@ public static class VipsJpegLoader
     /// RGB / CMYK / grayscale as appropriate. Operates in place on the
     /// buffer SimpleOutputWriter just filled.
     /// </summary>
-    private static void ConvertColorSpace(byte[] buf, int width, int height, int bands, JpegColorSpace cs)
+    internal static void ConvertColorSpace(byte[] buf, int width, int height, int bands, JpegColorSpace cs)
     {
         if (cs == JpegColorSpace.Grayscale || cs == JpegColorSpace.Rgb || cs == JpegColorSpace.Cmyk)
             return;
@@ -441,6 +441,54 @@ public static class VipsJpegLoader
                 buf[o + 2] = (byte)Math.Clamp(b, 0, 255);
                 // K stays at offset 3 unchanged.
             }
+        }
+    }
+
+    /// <summary>
+    /// Decode a JPEG bytestream into <paramref name="dst"/> at
+    /// <paramref name="dstOff"/>, with rows of <paramref name="dstRowStride"/>
+    /// bytes (so callers can blit into a larger image buffer at a non-zero
+    /// origin). Output is in the JPEG's native component layout converted
+    /// to display-friendly RGB / CMYK / Grayscale.
+    /// </summary>
+    internal static bool DecodeJpegToBuffer(byte[] jpegBytes,
+        byte[] dst, int dstOff, int dstRowStride, int expectedWidth, int expectedHeight,
+        out int components, bool forceRgbPassthrough = false)
+    {
+        components = 0;
+        try
+        {
+            var decoder = new JpegDecoder();
+            decoder.SetInput(jpegBytes);
+            decoder.Identify();
+            int w = decoder.Width;
+            int h = decoder.Height;
+            components = decoder.NumberOfComponents;
+            if (w != expectedWidth || h != expectedHeight) return false;
+
+            // Decode into a tightly-packed scratch buffer first; copy rows
+            // into dst at the requested stride afterwards.
+            var scratch = new byte[w * h * components];
+            decoder.SetOutputWriter(new SimpleOutputWriter(w, h, components, scratch));
+            decoder.Decode();
+            // forceRgbPassthrough is set by callers (e.g. JPEG-in-TIFF
+            // photometric=2) where the JPEG components are already R/G/B
+            // even though the JPEG itself carries no Adobe APP14 marker
+            // declaring it.
+            if (!forceRgbPassthrough)
+            {
+                var cs = DetectJpegColorSpace(jpegBytes, components);
+                ConvertColorSpace(scratch, w, h, components, cs);
+            }
+
+            int srcRow = w * components;
+            for (int y = 0; y < h; y++)
+                Buffer.BlockCopy(scratch, y * srcRow, dst, dstOff + y * dstRowStride, srcRow);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
