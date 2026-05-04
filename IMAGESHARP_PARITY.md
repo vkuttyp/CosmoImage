@@ -306,7 +306,7 @@ profile API ImageSharp ships is a meaningful gap.
 | :--- | :--- | :--- |
 | Auto-detect format from magic bytes | ✅ `Image.DetectFormatAsync` | ✅ `IdentifyAsync` returns `Format` enum across all 19 formats (round 54) |
 | Magic-byte registry | ✅ via `Configuration` | ❌ — implicit, format-by-format |
-| Custom format plugin registration | ✅ — register decoder/encoder pair via `Configuration` | 🟡 read-side only — `VipsConfiguration.Default.Register(IVipsImageFormat)` (round 89) plugs custom decoders into the dispatch chain; saver-side registration not yet exposed |
+| Custom format plugin registration | ✅ — register decoder/encoder pair via `Configuration` | ✅ `VipsConfiguration.Default.Register(IVipsImageFormat)` (round 89: decoder side) + `IVipsImageFormat.SaveAsync` + `VipsConfiguration.Default.SaveAsync(image, stream, formatName)` for save-by-name dispatch (round 90: encoder side). `CanEncode` defaults to false; decoder-only providers don't need to implement `SaveAsync`. Round-trippable custom formats supported |
 
 **Closed (round 54)**: `VipsImageOps.IdentifyAsync(stream)` and
 `VipsImageOps.LoadAsync(stream)` sniff every known format's magic

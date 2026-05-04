@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CosmoImage.Loaders;
@@ -19,7 +21,11 @@ namespace CosmoImage.Core;
 /// </summary>
 public interface IVipsImageFormat
 {
-    /// <summary>Human-readable format name (e.g., "FOO", "MyRawCamera"). Used for diagnostics.</summary>
+    /// <summary>
+    /// Human-readable format name (e.g., "FOO", "MyRawCamera"). Used
+    /// for save-by-name dispatch via
+    /// <see cref="VipsConfiguration.SaveAsync(VipsImage, Stream, string, CancellationToken)"/>.
+    /// </summary>
     string Name { get; }
 
     /// <summary>
@@ -30,6 +36,23 @@ public interface IVipsImageFormat
 
     /// <summary>Load the image from the source after a successful sniff.</summary>
     ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether this provider implements <see cref="SaveAsync"/>.
+    /// Decoder-only providers leave this <c>false</c>; encoders that
+    /// override <see cref="SaveAsync"/> should also override this to
+    /// return <c>true</c>.
+    /// </summary>
+    bool CanEncode => false;
+
+    /// <summary>
+    /// Encode <paramref name="image"/> to <paramref name="stream"/>.
+    /// Default implementation throws — providers that don't implement
+    /// encoding leave this alone and report <see cref="CanEncode"/>
+    /// = <c>false</c>.
+    /// </summary>
+    ValueTask SaveAsync(VipsImage image, Stream stream, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException($"Format '{Name}' does not support encoding");
 }
 
 /// <summary>
@@ -84,5 +107,39 @@ public sealed class VipsConfiguration
                 return _formats[i];
         }
         return null;
+    }
+
+    /// <summary>
+    /// Find a registered format by name (case-insensitive). When
+    /// multiple registrations share a name, the most recently
+    /// registered wins.
+    /// </summary>
+    public IVipsImageFormat? FindByName(string name)
+    {
+        if (name == null) return null;
+        for (int i = _formats.Count - 1; i >= 0; i--)
+            if (string.Equals(_formats[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                return _formats[i];
+        return null;
+    }
+
+    /// <summary>
+    /// Encode <paramref name="image"/> to <paramref name="stream"/>
+    /// via the registered format named <paramref name="formatName"/>
+    /// (case-insensitive). Throws <see cref="NotSupportedException"/>
+    /// when no registered format with that name supports encoding.
+    /// </summary>
+    public async ValueTask SaveAsync(VipsImage image, Stream stream, string formatName,
+        CancellationToken cancellationToken = default)
+    {
+        if (image == null) throw new ArgumentNullException(nameof(image));
+        if (stream == null) throw new ArgumentNullException(nameof(stream));
+        if (formatName == null) throw new ArgumentNullException(nameof(formatName));
+        var fmt = FindByName(formatName);
+        if (fmt == null)
+            throw new NotSupportedException($"No registered format named '{formatName}'");
+        if (!fmt.CanEncode)
+            throw new NotSupportedException($"Format '{formatName}' does not support encoding");
+        await fmt.SaveAsync(image, stream, cancellationToken);
     }
 }
