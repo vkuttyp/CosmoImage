@@ -129,6 +129,181 @@ public sealed class VipsIccProfile
     public string VersionString
         => $"{(Version >> 24) & 0xFF}.{(Version >> 20) & 0xF}.{(Version >> 16) & 0xF}";
 
+    private bool IsV4 => (Version >> 24) >= 4;
+
+    // ---- Typed tag-data accessors ----
+
+    /// <summary>
+    /// Decode a text tag's value (handles <c>text</c>, <c>desc</c>
+    /// (textDescriptionType / ICC v2), and <c>mluc</c>
+    /// (multiLocalizedUnicodeType / ICC v4)). Returns <c>null</c>
+    /// when the tag is absent or its type isn't a text variant.
+    /// </summary>
+    public string? GetTagText(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 8) return null;
+        string type = Encoding.ASCII.GetString(data, 0, 4);
+        return type switch
+        {
+            "text" => DecodeText(data),
+            "desc" => DecodeDesc(data),
+            "mluc" => DecodeMluc(data),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Set a text tag's value. Encoder is chosen by profile version:
+    /// ICC v4+ writes <c>mluc</c>; ICC v2 writes <c>desc</c> for the
+    /// description-flavoured tags (<c>desc</c> / <c>dmnd</c> / <c>dmdd</c>)
+    /// and <c>text</c> for everything else (<c>cprt</c> etc.).
+    /// </summary>
+    public void SetTagText(string signature, string value)
+    {
+        if (value == null) throw new ArgumentNullException(nameof(value));
+        byte[] data;
+        if (IsV4) data = EncodeMluc(value);
+        else if (signature is "desc" or "dmnd" or "dmdd") data = EncodeDesc(value);
+        else data = EncodeText(value);
+        SetTagData(signature, data);
+    }
+
+    /// <summary>Decode an <c>XYZ</c>-type tag (e.g., wtpt, bkpt, rXYZ).</summary>
+    public VipsColorXyz? GetTagXyz(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 20) return null;
+        if (Encoding.ASCII.GetString(data, 0, 4) != "XYZ ") return null;
+        return new VipsColorXyz(
+            ReadS15Fixed16(data, 8),
+            ReadS15Fixed16(data, 12),
+            ReadS15Fixed16(data, 16));
+    }
+
+    /// <summary>Set an <c>XYZ</c>-type tag.</summary>
+    public void SetTagXyz(string signature, VipsColorXyz xyz)
+    {
+        var data = new byte[20];
+        Encoding.ASCII.GetBytes("XYZ ").CopyTo(data, 0);
+        WriteS15Fixed16(data, 8, xyz.X);
+        WriteS15Fixed16(data, 12, xyz.Y);
+        WriteS15Fixed16(data, 16, xyz.Z);
+        SetTagData(signature, data);
+    }
+
+    /// <summary>
+    /// Decode a <c>curv</c>-type tag's gamma value. Returns
+    /// <c>1.0</c> for an identity curve (count=0), the gamma exponent
+    /// for the single-value form (count=1, u8Fixed8 encoding), or
+    /// <c>null</c> if the curve is a lookup table — use
+    /// <see cref="GetTagCurveTable"/> for the LUT form.
+    /// </summary>
+    public double? GetTagCurveGamma(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 12) return null;
+        if (Encoding.ASCII.GetString(data, 0, 4) != "curv") return null;
+        uint count = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(8, 4));
+        if (count == 0) return 1.0;
+        if (count == 1 && data.Length >= 14)
+            return BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(12, 2)) / 256.0;
+        return null;
+    }
+
+    /// <summary>
+    /// Decode a <c>curv</c>-type tag's lookup table. Returns the raw
+    /// uint16 entries (range 0..65535), or <c>null</c> if the curve is
+    /// gamma-form or absent.
+    /// </summary>
+    public ushort[]? GetTagCurveTable(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 12) return null;
+        if (Encoding.ASCII.GetString(data, 0, 4) != "curv") return null;
+        uint count = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(8, 4));
+        if (count <= 1) return null;
+        if (12 + count * 2 > data.Length) return null;
+        var table = new ushort[count];
+        for (int i = 0; i < count; i++)
+            table[i] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(12 + i * 2, 2));
+        return table;
+    }
+
+    /// <summary>Set a <c>curv</c>-type tag in single-gamma form.</summary>
+    public void SetTagCurveGamma(string signature, double gamma)
+    {
+        var data = new byte[14];
+        Encoding.ASCII.GetBytes("curv").CopyTo(data, 0);
+        BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan(8, 4), 1);
+        ushort raw = (ushort)Math.Round(Math.Clamp(gamma * 256, 0, ushort.MaxValue));
+        BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(12, 2), raw);
+        SetTagData(signature, data);
+    }
+
+    /// <summary>Set a <c>curv</c>-type tag with an arbitrary lookup table.</summary>
+    public void SetTagCurveTable(string signature, ushort[] table)
+    {
+        if (table == null) throw new ArgumentNullException(nameof(table));
+        var data = new byte[12 + table.Length * 2];
+        Encoding.ASCII.GetBytes("curv").CopyTo(data, 0);
+        BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan(8, 4), (uint)table.Length);
+        for (int i = 0; i < table.Length; i++)
+            BinaryPrimitives.WriteUInt16BigEndian(data.AsSpan(12 + i * 2, 2), table[i]);
+        SetTagData(signature, data);
+    }
+
+    // ---- Convenience properties for common tags ----
+
+    /// <summary>The profile's human-readable description ("desc" tag).</summary>
+    public string? Description
+    {
+        get => GetTagText("desc");
+        set { if (value == null) RemoveTag("desc"); else SetTagText("desc", value); }
+    }
+
+    /// <summary>The profile's copyright string ("cprt" tag).</summary>
+    public string? Copyright
+    {
+        get => GetTagText("cprt");
+        set { if (value == null) RemoveTag("cprt"); else SetTagText("cprt", value); }
+    }
+
+    /// <summary>The profile's media white point ("wtpt" tag).</summary>
+    public VipsColorXyz? WhitePoint
+    {
+        get => GetTagXyz("wtpt");
+        set { if (value is VipsColorXyz xyz) SetTagXyz("wtpt", xyz); else RemoveTag("wtpt"); }
+    }
+
+    /// <summary>The profile's media black point ("bkpt" tag).</summary>
+    public VipsColorXyz? BlackPoint
+    {
+        get => GetTagXyz("bkpt");
+        set { if (value is VipsColorXyz xyz) SetTagXyz("bkpt", xyz); else RemoveTag("bkpt"); }
+    }
+
+    /// <summary>RGB profile primary — red column of the XYZ matrix ("rXYZ" tag).</summary>
+    public VipsColorXyz? RedPrimary
+    {
+        get => GetTagXyz("rXYZ");
+        set { if (value is VipsColorXyz xyz) SetTagXyz("rXYZ", xyz); else RemoveTag("rXYZ"); }
+    }
+
+    /// <summary>RGB profile primary — green column ("gXYZ" tag).</summary>
+    public VipsColorXyz? GreenPrimary
+    {
+        get => GetTagXyz("gXYZ");
+        set { if (value is VipsColorXyz xyz) SetTagXyz("gXYZ", xyz); else RemoveTag("gXYZ"); }
+    }
+
+    /// <summary>RGB profile primary — blue column ("bXYZ" tag).</summary>
+    public VipsColorXyz? BluePrimary
+    {
+        get => GetTagXyz("bXYZ");
+        set { if (value is VipsColorXyz xyz) SetTagXyz("bXYZ", xyz); else RemoveTag("bXYZ"); }
+    }
+
     // ---------- Parsing ----------
 
     /// <summary>
@@ -363,6 +538,100 @@ public sealed class VipsIccProfile
         "8CLR" => VipsIccColorSpace.EightColor,
         _ => VipsIccColorSpace.Unknown,
     };
+
+    // ---- Tag-type decoders ----
+
+    private static string? DecodeText(byte[] tagData)
+    {
+        if (tagData.Length < 8) return null;
+        int len = 0;
+        while (8 + len < tagData.Length && tagData[8 + len] != 0) len++;
+        return Encoding.ASCII.GetString(tagData, 8, len);
+    }
+
+    private static string? DecodeDesc(byte[] tagData)
+    {
+        if (tagData.Length < 12) return null;
+        uint asciiCount = BinaryPrimitives.ReadUInt32BigEndian(tagData.AsSpan(8, 4));
+        if (12 + asciiCount > tagData.Length) return null;
+        int len = (int)asciiCount;
+        if (len > 0 && tagData[12 + len - 1] == 0) len--;
+        return Encoding.ASCII.GetString(tagData, 12, len);
+    }
+
+    private static string? DecodeMluc(byte[] tagData, string preferredLang = "en")
+    {
+        if (tagData.Length < 16) return null;
+        uint numRecords = BinaryPrimitives.ReadUInt32BigEndian(tagData.AsSpan(8, 4));
+        uint recordSize = BinaryPrimitives.ReadUInt32BigEndian(tagData.AsSpan(12, 4));
+        if (recordSize != 12 || numRecords == 0) return null;
+        if (16 + numRecords * 12 > tagData.Length) return null;
+
+        int bestOffset = -1, bestLength = 0;
+        bool bestIsPreferred = false;
+        for (uint i = 0; i < numRecords; i++)
+        {
+            int recOff = 16 + (int)i * 12;
+            string lang = Encoding.ASCII.GetString(tagData, recOff, 2);
+            uint strLen = BinaryPrimitives.ReadUInt32BigEndian(tagData.AsSpan(recOff + 4, 4));
+            uint strOff = BinaryPrimitives.ReadUInt32BigEndian(tagData.AsSpan(recOff + 8, 4));
+            if (strOff + strLen > tagData.Length) continue;
+            bool isPreferred = string.Equals(lang, preferredLang, StringComparison.OrdinalIgnoreCase);
+            if (bestOffset < 0 || (isPreferred && !bestIsPreferred))
+            {
+                bestOffset = (int)strOff;
+                bestLength = (int)strLen;
+                bestIsPreferred = isPreferred;
+                if (isPreferred) break;
+            }
+        }
+        if (bestOffset < 0) return null;
+        return Encoding.BigEndianUnicode.GetString(tagData, bestOffset, bestLength);
+    }
+
+    // ---- Tag-type encoders ----
+
+    private static byte[] EncodeText(string text)
+    {
+        var ascii = Encoding.ASCII.GetBytes(text + "\0");
+        var output = new byte[8 + ascii.Length];
+        Encoding.ASCII.GetBytes("text").CopyTo(output, 0);
+        ascii.CopyTo(output, 8);
+        return output;
+    }
+
+    private static byte[] EncodeDesc(string text)
+    {
+        // ICC v2 textDescriptionType — ASCII portion + zero Unicode +
+        // zero ScriptCode (a 67-byte fixed-length ScriptCode field).
+        var ascii = Encoding.ASCII.GetBytes(text + "\0");
+        // 8 (header) + 4 (ascii count) + N (ascii) + 4 (Unicode lang) +
+        // 4 (Unicode count) + 1 (ScriptCode) + 1 (ScriptCode count) + 67
+        int totalSize = 8 + 4 + ascii.Length + 4 + 4 + 1 + 1 + 67;
+        var output = new byte[totalSize];
+        Encoding.ASCII.GetBytes("desc").CopyTo(output, 0);
+        BinaryPrimitives.WriteUInt32BigEndian(output.AsSpan(8, 4), (uint)ascii.Length);
+        ascii.CopyTo(output, 12);
+        // Trailing Unicode + ScriptCode fields stay zero.
+        return output;
+    }
+
+    private static byte[] EncodeMluc(string text, string lang = "en", string country = "US")
+    {
+        // Single-record mluc: header + 1 record (12 bytes) + UTF-16BE string.
+        var stringBytes = Encoding.BigEndianUnicode.GetBytes(text);
+        int totalSize = 16 + 12 + stringBytes.Length;
+        var output = new byte[totalSize];
+        Encoding.ASCII.GetBytes("mluc").CopyTo(output, 0);
+        BinaryPrimitives.WriteUInt32BigEndian(output.AsSpan(8, 4), 1);   // 1 record
+        BinaryPrimitives.WriteUInt32BigEndian(output.AsSpan(12, 4), 12); // record size
+        Encoding.ASCII.GetBytes((lang + "  ").Substring(0, 2)).CopyTo(output, 16);
+        Encoding.ASCII.GetBytes((country + "  ").Substring(0, 2)).CopyTo(output, 18);
+        BinaryPrimitives.WriteUInt32BigEndian(output.AsSpan(20, 4), (uint)stringBytes.Length);
+        BinaryPrimitives.WriteUInt32BigEndian(output.AsSpan(24, 4), 28);  // string offset
+        stringBytes.CopyTo(output, 28);
+        return output;
+    }
 
     private static string EncodeColorSpace(VipsIccColorSpace cs) => cs switch
     {
