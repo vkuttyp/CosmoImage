@@ -155,4 +155,22 @@ public static class VipsFields
     public static void SetIptcProfile(this VipsImage image,
         CosmoImage.Operations.Metadata.VipsIptcProfile profile)
         => image.SetBlob("iptc", profile.ToBytes());
+
+    /// <summary>
+    /// Parse the image's ICC profile blob into a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsIccProfile"/>.
+    /// Returns <c>null</c> when no ICC profile is present or the blob
+    /// is malformed (no <c>"acsp"</c> magic).
+    /// </summary>
+    public static CosmoImage.Operations.Metadata.VipsIccProfile? GetIccProfileTyped(this VipsImage image)
+        => CosmoImage.Operations.Metadata.VipsIccProfile.TryParse(image.GetBlob("icc"));
+
+    /// <summary>
+    /// Serialize a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsIccProfile"/>
+    /// back into the image's ICC blob. Overwrites any existing data.
+    /// </summary>
+    public static void SetIccProfileTyped(this VipsImage image,
+        CosmoImage.Operations.Metadata.VipsIccProfile profile)
+        => image.SetBlob("icc", profile.ToBytes());
 }
