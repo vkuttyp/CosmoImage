@@ -1,19 +1,24 @@
 using System;
+using System.IO;
+using System.IO.Compression;
 using CosmoImage.Core;
 
 namespace CosmoImage.Loaders;
 
 /// <summary>
-/// Pure-managed TIFF pixel decoder for the baseline uncompressed case.
-/// Handles classic TIFF (32-bit offsets), Compression=None, chunky
-/// PlanarConfiguration, single-page IFDs, strip-based layout, both
-/// byte orders, BitsPerSample 8/16, and PhotometricInterpretation
-/// 0 (WhiteIsZero), 1 (BlackIsZero), 2 (RGB), 3 (Palette).
+/// Pure-managed TIFF pixel decoder. Handles classic TIFF (32-bit
+/// offsets), chunky PlanarConfiguration, single-page IFDs, strip-based
+/// layout, both byte orders, BitsPerSample 8/16, and
+/// PhotometricInterpretation 0 (WhiteIsZero), 1 (BlackIsZero), 2 (RGB),
+/// 3 (Palette). Compression schemes supported:
+///   1 = None,
+///   8 / 32946 = Deflate (zlib-wrapped),
+///   32773 = PackBits.
 ///
 /// <para>Returns <c>null</c> for everything else (BigTIFF, multi-page,
-/// tiled, compressed, planar=2, FillOrder=2, predictor != 1, sample
-/// formats other than unsigned int, exotic SamplesPerPixel). Callers
-/// fall back to the Magick.NET path.</para>
+/// tiled, LZW, JPEG-compressed, planar=2, FillOrder=2, predictor != 1,
+/// sample formats other than unsigned int, exotic SamplesPerPixel).
+/// Callers fall back to the Magick.NET path.</para>
 /// </summary>
 internal static class PureTiffDecoder
 {
@@ -90,10 +95,11 @@ internal static class PureTiffDecoder
 
         if (tiled) return null;
         if (width <= 0 || height <= 0) return null;
-        if (compression != 1) return null;
+        if (compression != 1 && compression != 8 && compression != 32946 && compression != 32773)
+            return null;
         if (planarConfig != 1) return null;
         if (fillOrder != 1) return null;
-        if (predictor != 1) return null;
+        if (predictor != 1 && predictor != 2) return null;
 
         int bps = (int)bitsPerSample[0];
         if (bps != 8 && bps != 16) return null;
@@ -132,17 +138,27 @@ internal static class PureTiffDecoder
         long totalIn = checked(height * inRowStride);
         if (totalIn > int.MaxValue) return null;
 
-        // Gather strip bytes into a flat raw buffer.
+        // Gather strip bytes into a flat raw buffer, decompressing per strip.
         var raw = new byte[totalIn];
         long y = 0;
         for (int s = 0; s < stripOffsets.Length; s++)
         {
             long off = stripOffsets[s];
+            long enc = stripByteCounts[s];
             long stripRows = Math.Min(rowsPerStrip, height - y);
             if (stripRows <= 0) break;
             long expected = stripRows * inRowStride;
-            if (off < 0 || off + expected > bytes.Length) return null;
-            Buffer.BlockCopy(bytes, (int)off, raw, (int)(y * inRowStride), (int)expected);
+            if (off < 0 || enc < 0 || off + enc > bytes.Length) return null;
+            int dst = (int)(y * inRowStride);
+
+            bool ok = compression switch
+            {
+                1 => CopyRaw(bytes, (int)off, (int)enc, raw, dst, (int)expected),
+                32773 => DecompressPackBits(bytes, (int)off, (int)enc, raw, dst, (int)expected),
+                8 or 32946 => DecompressDeflate(bytes, (int)off, (int)enc, raw, dst, (int)expected),
+                _ => false,
+            };
+            if (!ok) return null;
             y += stripRows;
         }
         if (y != height) return null;
@@ -151,6 +167,13 @@ internal static class PureTiffDecoder
         // VipsImage convention; PurePngDecoder does the same).
         if (bps == 16 && !le)
             ByteSwap16InPlace(raw);
+
+        // Predictor 2 = horizontal differencing — each sample is stored
+        // as the wrap-around difference from the previous sample on the
+        // same row. Reverse by left-to-right accumulation. Operates on
+        // host-LE values for 16-bit (after the byte-swap above).
+        if (predictor == 2)
+            ApplyHorizontalUnpredictor(raw, (int)width, (int)height, spp, bps);
 
         // Apply photometric transformation.
         byte[] outPixels;
@@ -198,6 +221,46 @@ internal static class PureTiffDecoder
             YRes = 1.0,
             PixelsLazy = new Lazy<byte[]>(() => outPixels),
         };
+    }
+
+    private static void ApplyHorizontalUnpredictor(byte[] buf, int width, int height, int spp, int bps)
+    {
+        if (bps == 8)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                int rowBase = y * width * spp;
+                for (int x = 1; x < width; x++)
+                {
+                    int p = rowBase + x * spp;
+                    int prev = p - spp;
+                    for (int c = 0; c < spp; c++)
+                        buf[p + c] = (byte)(buf[p + c] + buf[prev + c]);
+                }
+            }
+        }
+        else  // 16-bit, host-LE
+        {
+            int sampleStride = spp * 2;
+            for (int y = 0; y < height; y++)
+            {
+                int rowBase = y * width * sampleStride;
+                for (int x = 1; x < width; x++)
+                {
+                    int p = rowBase + x * sampleStride;
+                    int prev = p - sampleStride;
+                    for (int c = 0; c < spp; c++)
+                    {
+                        int pp = p + c * 2, pv = prev + c * 2;
+                        ushort cur = (ushort)(buf[pp] | (buf[pp + 1] << 8));
+                        ushort prv = (ushort)(buf[pv] | (buf[pv + 1] << 8));
+                        ushort sum = (ushort)(cur + prv);
+                        buf[pp] = (byte)sum;
+                        buf[pp + 1] = (byte)(sum >> 8);
+                    }
+                }
+            }
+        }
     }
 
     private static void InvertSamples(byte[] buf, int width, int height, int spp, int bps, int alphaAtSample)
@@ -277,6 +340,80 @@ internal static class PureTiffDecoder
         for (int i = 0; i + 1 < buf.Length; i += 2)
         {
             (buf[i], buf[i + 1]) = (buf[i + 1], buf[i]);
+        }
+    }
+
+    /// <summary>
+    /// Copy <paramref name="expected"/> uncompressed bytes from
+    /// <c>src[srcOff..]</c> into <c>dst[dstOff..]</c>. Encoded length
+    /// must be at least the expected length (some encoders pad strips).
+    /// </summary>
+    private static bool CopyRaw(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, int expected)
+    {
+        if (srcLen < expected) return false;
+        Buffer.BlockCopy(src, srcOff, dst, dstOff, expected);
+        return true;
+    }
+
+    /// <summary>
+    /// PackBits RLE decompress (TIFF Compression=32773). Each run is
+    /// prefixed by a signed control byte n: n in [0,127] copies n+1
+    /// literal bytes; n in [-127,-1] replicates the next byte (-n)+1
+    /// times; n == -128 is a no-op.
+    /// </summary>
+    private static bool DecompressPackBits(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, int expected)
+    {
+        int sp = srcOff, sEnd = srcOff + srcLen;
+        int dp = dstOff, dEnd = dstOff + expected;
+        while (sp < sEnd && dp < dEnd)
+        {
+            sbyte n = (sbyte)src[sp++];
+            if (n >= 0)
+            {
+                int run = n + 1;
+                if (sp + run > sEnd || dp + run > dEnd) return false;
+                Buffer.BlockCopy(src, sp, dst, dp, run);
+                sp += run; dp += run;
+            }
+            else if (n != -128)
+            {
+                int run = -n + 1;
+                if (sp >= sEnd || dp + run > dEnd) return false;
+                byte v = src[sp++];
+                for (int i = 0; i < run; i++) dst[dp++] = v;
+            }
+            // n == -128 is a noop per the PackBits spec.
+        }
+        return dp == dEnd;
+    }
+
+    /// <summary>
+    /// zlib-wrapped Deflate (TIFF Compression=8, "Adobe Deflate", or
+    /// 32946, the older PKZIP alias — both produce byte-identical
+    /// streams). Raw-deflate (no zlib header) is rare but unsupported
+    /// here; falls through to Magick.
+    /// </summary>
+    private static bool DecompressDeflate(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, int expected)
+    {
+        try
+        {
+            using var ms = new MemoryStream(src, srcOff, srcLen);
+            using var z = new ZLibStream(ms, CompressionMode.Decompress);
+            int read = 0;
+            while (read < expected)
+            {
+                int n = z.Read(dst, dstOff + read, expected - read);
+                if (n == 0) return false;
+                read += n;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
