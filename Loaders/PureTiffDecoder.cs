@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using CosmoImage.Core;
@@ -32,9 +34,71 @@ internal static class PureTiffDecoder
         else return null;
 
         ushort magic = ReadU16(bytes, 2, le);
-        if (magic != 0x002A) return null;  // BigTIFF or invalid
+        if (magic != 0x002A) return null;
 
         uint ifdOffset = ReadU32(bytes, 4, le);
+        if (ifdOffset == 0) return null;
+
+        var first = DecodeIfd(bytes, le, ifdOffset, out uint nextIfd);
+        if (first == null) return null;
+        if (nextIfd == 0) return first;
+
+        // Multi-page chain. Walk it; require uniform dimensions/bands/format
+        // since the flat-buffer "stack pages vertically" representation
+        // (used by animated GIF/WebP/HEIF too) can't carry heterogeneous
+        // pages. Heterogeneous → null → caller falls back to Magick.
+        var pages = new List<VipsImage> { first };
+        uint cur = nextIfd;
+        while (cur != 0)
+        {
+            // Cycle / DoS guard.
+            if (pages.Count > 4096) return null;
+            var page = DecodeIfd(bytes, le, cur, out uint next);
+            if (page == null) return null;
+            if (page.Width != first.Width || page.Height != first.Height
+                || page.Bands != first.Bands || page.BandFormat != first.BandFormat
+                || page.Interpretation != first.Interpretation)
+                return null;
+            pages.Add(page);
+            cur = next;
+        }
+
+        int frameW = first.Width, frameH = first.Height;
+        int pelBytes = first.SizeOfPel;
+        int frameBytes = frameW * frameH * pelBytes;
+        var stacked = new byte[(long)frameBytes * pages.Count];
+        for (int i = 0; i < pages.Count; i++)
+        {
+            var src = pages[i].PixelsLazy!.Value;
+            Buffer.BlockCopy(src, 0, stacked, i * frameBytes, frameBytes);
+        }
+
+        var stitched = new VipsImage
+        {
+            Width = frameW,
+            Height = frameH * pages.Count,
+            Bands = first.Bands,
+            BandFormat = first.BandFormat,
+            Interpretation = first.Interpretation,
+            Coding = VipsCoding.None,
+            XRes = 1.0,
+            YRes = 1.0,
+            PixelsLazy = new Lazy<byte[]>(() => stacked),
+        };
+        stitched.Metadata["n-pages"] = pages.Count.ToString(CultureInfo.InvariantCulture);
+        stitched.Metadata["page-height"] = frameH.ToString(CultureInfo.InvariantCulture);
+        return stitched;
+    }
+
+    /// <summary>
+    /// Decode a single IFD at <paramref name="ifdOffset"/> and report the
+    /// <c>nextIfd</c> pointer so the multi-page walker can chain. Returns
+    /// <c>null</c> for unsupported configurations (compression, planar,
+    /// tiled, exotic SamplesPerPixel, etc.).
+    /// </summary>
+    private static VipsImage? DecodeIfd(byte[] bytes, bool le, uint ifdOffset, out uint nextIfd)
+    {
+        nextIfd = 0;
         if (ifdOffset == 0 || ifdOffset + 6 > bytes.Length) return null;
 
         ushort numEntries = ReadU16(bytes, (int)ifdOffset, le);
@@ -42,9 +106,7 @@ internal static class PureTiffDecoder
         int afterEntries = entriesStart + numEntries * 12;
         if (afterEntries + 4 > bytes.Length) return null;
 
-        // Multi-page → punt to Magick.
-        uint nextIfd = ReadU32(bytes, afterEntries, le);
-        if (nextIfd != 0) return null;
+        nextIfd = ReadU32(bytes, afterEntries, le);
 
         long width = -1, height = -1;
         long compression = 1;
