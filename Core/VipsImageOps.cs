@@ -335,6 +335,14 @@ public static partial class VipsImageOps
         return Run(new VipsResize { In = input, Scale = scale, VScale = vScale, Kernel = kernel });
     }
 
+    /// <summary>
+    /// Resize with full mode + anchor + pad-colour control. Mirrors
+    /// ImageSharp's <c>image.Mutate(c =&gt; c.Resize(new ResizeOptions { ... }))</c>.
+    /// See <see cref="VipsResizeMode"/> for fit modes.
+    /// </summary>
+    public static VipsImage Resize(VipsImage input, VipsResizeOptions options)
+        => VipsResizeWithOptions.Apply(input, options);
+
     // ===== Color =====
     // From Operations/Color/VipsLinearize.cs
     /// <summary>

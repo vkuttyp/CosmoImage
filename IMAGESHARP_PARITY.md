@@ -147,7 +147,7 @@ of theirs we don't have, a few of ours they don't.
 
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
-| `Resize(size, sampler, options)` with Pad/Crop/BoxPad/Max/Min/Stretch modes + anchor | 🟡 `Resize(scale)` + `Thumbnail(w, h, crop)`; full mode/anchor matrix not exposed |
+| `Resize(size, sampler, options)` with Pad/Crop/BoxPad/Max/Min/Stretch modes + anchor | ✅ `VipsImageOps.Resize(input, VipsResizeOptions)` (round 81) — full mode (Stretch/Crop/Pad/BoxPad/Max/Min) + 9-position anchor (`VipsCompass`) + per-band PadColor + Kernel choice. Plus existing `Resize(scale)` and `Thumbnail(w, h, crop)` |
 | `Resize(size, sampler)` | ✅ — we have 10 kernels (Nearest, Linear, Cubic, Mitchell, Lanczos2/3/5, Hermite, BicubicSharper/Smoother) |
 | `Rotate(degrees, sampler)` | ✅ `Rotate` |
 | `Skew(degreesX, degreesY)` | ✅ named `Skew(dx, dy)` over `Affine` |
