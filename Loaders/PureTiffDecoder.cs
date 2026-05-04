@@ -196,7 +196,9 @@ internal static class PureTiffDecoder
             return null;
         if (planarConfig != 1) return null;
         if (fillOrder != 1) return null;
-        if (predictor != 1 && predictor != 2) return null;
+        // Predictor 1 = none, 2 = horizontal differencing (int),
+        // 3 = floating-point predictor (byte-shuffled diff, FP only).
+        if (predictor != 1 && predictor != 2 && predictor != 3) return null;
 
         int bps = (int)bitsPerSample[0];
         for (int i = 0; i < bitsPerSample.Length; i++)
@@ -211,7 +213,9 @@ internal static class PureTiffDecoder
         if (sampleFmt != 1 && sampleFmt != 3) return null;
         if (sampleFmt == 1 && bps != 8 && bps != 16) return null;
         if (sampleFmt == 3 && bps != 32) return null;
-        if (sampleFmt == 3 && predictor != 1) return null;
+        // Predictor 2 doesn't apply to float; predictor 3 only applies to float.
+        if (sampleFmt == 1 && predictor == 3) return null;
+        if (sampleFmt == 3 && predictor == 2) return null;
 
         int spp = (int)samplesPerPixel;
         if (spp < 1 || spp > 4) return null;
@@ -357,6 +361,9 @@ internal static class PureTiffDecoder
         }
         if (y != height) return false;
 
+        // Predictor=3 reverse runs FIRST, on stored byte order; then byte-swap;
+        // then predictor=2 (which is mutually exclusive with predictor=3).
+        if (predictor == 3) ApplyFloatUnpredictor(raw, width, height, spp);
         if (!le)
         {
             if (bps == 16) ByteSwap16InPlace(raw);
@@ -400,6 +407,7 @@ internal static class PureTiffDecoder
                 if (!Decompress(bytes, (int)off, (int)enc, tile, 0, (int)tileSize, compression))
                     return false;
 
+                if (predictor == 3) ApplyFloatUnpredictor(tile, tileWidth, tileLength, spp);
                 if (!le)
                 {
                     if (bps == 16) ByteSwap16InPlace(tile);
@@ -433,6 +441,45 @@ internal static class PureTiffDecoder
         8 or 32946 => DecompressDeflate(src, srcOff, srcLen, dst, dstOff, expected),
         _ => false,
     };
+
+    /// <summary>
+    /// Reverse the TIFF "floating-point predictor" (Predictor=3, Adobe
+    /// Technote 3). Per row: horizontal byte accumulate (cancels the
+    /// encoder's byte-by-byte differencing), then de-shuffle the
+    /// byte-significance grouping. Bytes operate on the stored byte
+    /// order — caller byte-swaps to host LE afterwards if needed.
+    /// </summary>
+    private static void ApplyFloatUnpredictor(byte[] buf, int width, int height, int spp)
+    {
+        int samplesPerRow = width * spp;
+        int rowBytes = samplesPerRow * 4;
+        var tmp = new byte[rowBytes];
+
+        for (int y = 0; y < height; y++)
+        {
+            int rowOff = y * rowBytes;
+
+            // Step 1: horizontal byte accumulator across the entire row,
+            // ignoring sample boundaries (the predictor operates on
+            // already-shuffled bytes).
+            for (int i = 1; i < rowBytes; i++)
+                buf[rowOff + i] = (byte)(buf[rowOff + i] + buf[rowOff + i - 1]);
+
+            // Step 2: byte de-shuffle. Stored layout per row is byte-major:
+            //   [b0_0, b0_1, ..., b0_{S-1}, b1_0, b1_1, ..., b3_{S-1}]
+            // Natural layout is sample-major:
+            //   [s0_b0, s0_b1, s0_b2, s0_b3, s1_b0, ...]
+            // where S = samplesPerRow.
+            Buffer.BlockCopy(buf, rowOff, tmp, 0, rowBytes);
+            for (int i = 0; i < samplesPerRow; i++)
+            {
+                buf[rowOff + i * 4 + 0] = tmp[0 * samplesPerRow + i];
+                buf[rowOff + i * 4 + 1] = tmp[1 * samplesPerRow + i];
+                buf[rowOff + i * 4 + 2] = tmp[2 * samplesPerRow + i];
+                buf[rowOff + i * 4 + 3] = tmp[3 * samplesPerRow + i];
+            }
+        }
+    }
 
     private static void ApplyHorizontalUnpredictor(byte[] buf, int width, int height, int spp, int bps)
     {
