@@ -90,6 +90,21 @@ public sealed class VipsConfiguration
     }
 
     /// <summary>
+    /// Backing allocator for transient pixel buffers on images loaded
+    /// via this configuration. Defaults to <see cref="ArrayPoolAllocator.Shared"/>;
+    /// set to <see cref="BareAllocator.Shared"/> for plain
+    /// <c>new byte[]</c> allocation, or to a custom
+    /// <see cref="IVipsAllocator"/> for telemetry / quotas / etc.
+    ///
+    /// <para>The configuration sets <see cref="VipsImage.Allocator"/>
+    /// on every image loaded through
+    /// <see cref="Loaders.VipsIdentify.LoadAsync(System.IO.Stream, VipsConfiguration, System.Threading.CancellationToken)"/>;
+    /// downstream operations on the loaded image then route their
+    /// transient buffers through it.</para>
+    /// </summary>
+    public IVipsAllocator Allocator { get; set; } = ArrayPoolAllocator.Shared;
+
+    /// <summary>
     /// Drop every registered format and re-seed the built-ins
     /// (PNG / JPEG / WebP / GIF / TIFF / BMP / QOI / HEIF / JXL /
     /// JP2K / PDF / SVG / HDR / FITS / NIfTI / MAT / PNM / TGA).

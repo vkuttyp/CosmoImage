@@ -112,8 +112,14 @@ public static class VipsIdentify
     {
         if (configuration == null) throw new ArgumentNullException(nameof(configuration));
         var match = await configuration.FindMatchAsync(source, ct);
-        if (match != null) return await match.LoadAsync(source, ct);
-        throw new NotSupportedException("Could not detect image format from stream content.");
+        if (match == null)
+            throw new NotSupportedException("Could not detect image format from stream content.");
+        var image = await match.LoadAsync(source, ct);
+        // Loaders construct VipsImage with the default allocator; thread
+        // the configuration's allocator through so downstream transient
+        // buffers go through the user's chosen pool / telemetry hook.
+        if (image != null) image.Allocator = configuration.Allocator;
+        return image;
     }
 
     /// <summary>
