@@ -651,6 +651,15 @@ public static partial class VipsImageOps
     public static VipsPath TextOnPath(VipsTextOptions opts, VipsPath targetPath, double offset = 0)
         => VipsTextOps.TextOnPath(opts, targetPath, offset);
 
+    /// <summary>Measure the layout-box bounds of shaped text without rasterising.</summary>
+    public static VipsTextSize MeasureText(VipsTextOptions opts) => VipsTextOps.MeasureText(opts);
+
+    /// <summary>Measure the tight glyph-bounding box (sidebearings excluded).</summary>
+    public static VipsTextSize MeasureTextBounds(VipsTextOptions opts) => VipsTextOps.MeasureBounds(opts);
+
+    /// <summary>Count the number of (wrapped + explicit) lines the text would occupy.</summary>
+    public static int CountTextLines(VipsTextOptions opts) => VipsTextOps.CountLines(opts);
+
     // From Operations/Drawing/VipsDrawRect.cs
     public static VipsImage DrawRect(VipsImage input, int left, int top, int width, int height, byte[] ink, bool fill = false)
     {

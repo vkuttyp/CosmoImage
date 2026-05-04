@@ -140,6 +140,14 @@ public sealed class VipsTextOptions
 }
 
 /// <summary>
+/// Bounding rectangle of a piece of shaped text. <see cref="X"/> /
+/// <see cref="Y"/> are the top-left corner in destination coords;
+/// <see cref="Width"/> / <see cref="Height"/> are the extents of
+/// the laid-out glyph block.
+/// </summary>
+public readonly record struct VipsTextSize(double X, double Y, double Width, double Height);
+
+/// <summary>
 /// Shaped text rendering via <c>SixLabors.Fonts</c>. Pipeline:
 /// load font → shape glyphs (kerning + ligatures + basic OpenType
 /// features handled by SixLabors) → emit each glyph's outline as
@@ -181,8 +189,58 @@ public static class VipsTextOps
     {
         if (opts == null) throw new ArgumentNullException(nameof(opts));
         if (string.IsNullOrEmpty(opts.Text)) return new VipsPath();
-        var font = LoadFont(opts);
+        var textOptions = BuildTextOptions(opts);
         var renderer = new VipsGlyphRenderer((TextDecorations)opts.Decorations);
+        TextRenderer.RenderTextTo(renderer, opts.Text, textOptions);
+        return renderer.Path;
+    }
+
+    /// <summary>
+    /// Measure the bounding rectangle of <paramref name="opts"/>'s
+    /// text without rasterising. Returns the layout box (width = pen
+    /// advance per longest line; height = lines × line-spacing). For
+    /// empty input, returns a zero-size rectangle at the origin.
+    /// </summary>
+    public static VipsTextSize MeasureText(VipsTextOptions opts)
+    {
+        if (opts == null) throw new ArgumentNullException(nameof(opts));
+        if (string.IsNullOrEmpty(opts.Text))
+            return new VipsTextSize(opts.X, opts.Y, 0, 0);
+        var textOptions = BuildTextOptions(opts);
+        var r = TextMeasurer.MeasureSize(opts.Text, textOptions);
+        return new VipsTextSize(r.X, r.Y, r.Width, r.Height);
+    }
+
+    /// <summary>
+    /// Measure the tight glyph-bounding rectangle (sidebearings
+    /// excluded; descenders / ascenders included). Useful when
+    /// centring text around its visual mass rather than its
+    /// pen-advance bbox.
+    /// </summary>
+    public static VipsTextSize MeasureBounds(VipsTextOptions opts)
+    {
+        if (opts == null) throw new ArgumentNullException(nameof(opts));
+        if (string.IsNullOrEmpty(opts.Text))
+            return new VipsTextSize(opts.X, opts.Y, 0, 0);
+        var textOptions = BuildTextOptions(opts);
+        var r = TextMeasurer.MeasureBounds(opts.Text, textOptions);
+        return new VipsTextSize(r.X, r.Y, r.Width, r.Height);
+    }
+
+    /// <summary>
+    /// Number of lines the text would occupy after wrapping (counts
+    /// explicit <c>\n</c> + soft wraps).
+    /// </summary>
+    public static int CountLines(VipsTextOptions opts)
+    {
+        if (opts == null) throw new ArgumentNullException(nameof(opts));
+        if (string.IsNullOrEmpty(opts.Text)) return 0;
+        return TextMeasurer.CountLines(opts.Text, BuildTextOptions(opts));
+    }
+
+    private static TextOptions BuildTextOptions(VipsTextOptions opts)
+    {
+        var font = LoadFont(opts);
         // Note: SL.Fonts' HorizontalAlignment enum order differs from
         // the natural Left/Center/Right — explicit map.
         var hAlign = opts.HAlign switch
@@ -231,8 +289,7 @@ public static class VipsTextOps
             }
             textOptions.FeatureTags = tags;
         }
-        TextRenderer.RenderTextTo(renderer, opts.Text, textOptions);
-        return renderer.Path;
+        return textOptions;
     }
 
     /// <summary>
