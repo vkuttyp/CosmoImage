@@ -216,7 +216,8 @@ internal static class PureTiffDecoder
         int spp = (int)samplesPerPixel;
         if (spp < 1 || spp > 4) return null;
 
-        if (photometric != 0 && photometric != 1 && photometric != 2 && photometric != 3) return null;
+        if (photometric != 0 && photometric != 1 && photometric != 2
+            && photometric != 3 && photometric != 5) return null;
         // Float samples don't have a meaningful "invert" or palette
         // interpretation — restrict to plain BlackIsZero / RGB.
         if (sampleFmt == 3 && photometric != 1 && photometric != 2) return null;
@@ -228,11 +229,17 @@ internal static class PureTiffDecoder
         {
             if (spp != 3 && spp != 4) return null;
         }
-        else  // palette — int-only
+        else if (photometric == 3)  // palette — int-only
         {
             if (spp != 1) return null;
             int expected = 3 * (1 << bps);
             if (colorMap.Length != expected) return null;
+        }
+        else  // photometric == 5, CMYK
+        {
+            // 4 inks (CMYK); some prepress files add spot inks via
+            // ExtraSamples which we don't currently support — limit to spp=4.
+            if (spp != 4) return null;
         }
 
         int bytesPerSample = bps / 8;
@@ -295,11 +302,17 @@ internal static class PureTiffDecoder
             outBands = spp;
             interp = VipsInterpretation.RGB;
         }
-        else  // palette
+        else if (photometric == 3)  // palette
         {
             outPixels = ExpandPalette(raw, (int)width, (int)height, bps, colorMap);
             outBands = 3;
             interp = VipsInterpretation.RGB;
+        }
+        else  // photometric == 5, CMYK
+        {
+            outPixels = raw;
+            outBands = spp;
+            interp = VipsInterpretation.CMYK;
         }
 
         return new VipsImage
