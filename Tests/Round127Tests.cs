@@ -228,6 +228,197 @@ public class Round127Tests
         Assert.Equal(VipsBandFormat.Float, img.BandFormat);
     }
 
+    /// <summary>
+    /// Build a single-part scanline EXR with an explicit compression
+    /// scheme. <paramref name="compress"/> is invoked per scanline to
+    /// produce the encoded payload (after the spec's
+    /// predictor + byte-interleave preprocessing).
+    /// </summary>
+    public static byte[] BuildCompressedExr(float[] rgba, int width, int height,
+        bool hasAlpha, byte compressionCode, Func<byte[], byte[]> compress)
+    {
+        using var ms = new MemoryStream();
+        WriteI32(ms, 0x01312F76);
+        WriteI32(ms, 2);
+        WriteAttribute(ms, "channels", "chlist", buf =>
+        {
+            if (hasAlpha) WriteChannel(buf, "A");
+            WriteChannel(buf, "B");
+            WriteChannel(buf, "G");
+            WriteChannel(buf, "R");
+            buf.WriteByte(0);
+        });
+        WriteAttribute(ms, "compression", "compression", buf => buf.WriteByte(compressionCode));
+        WriteAttribute(ms, "dataWindow", "box2i", buf =>
+        { WriteI32(buf, 0); WriteI32(buf, 0); WriteI32(buf, width - 1); WriteI32(buf, height - 1); });
+        WriteAttribute(ms, "displayWindow", "box2i", buf =>
+        { WriteI32(buf, 0); WriteI32(buf, 0); WriteI32(buf, width - 1); WriteI32(buf, height - 1); });
+        WriteAttribute(ms, "lineOrder", "lineOrder", buf => buf.WriteByte(0));
+        WriteAttribute(ms, "pixelAspectRatio", "float", buf => WriteF32(buf, 1.0f));
+        WriteAttribute(ms, "screenWindowCenter", "v2f", buf => { WriteF32(buf, 0); WriteF32(buf, 0); });
+        WriteAttribute(ms, "screenWindowWidth", "float", buf => WriteF32(buf, 1.0f));
+        ms.WriteByte(0);
+
+        long offsetTablePos = ms.Position;
+        for (int y = 0; y < height; y++) WriteI64(ms, 0);
+
+        int channelsInFile = hasAlpha ? 4 : 3;
+
+        for (int y = 0; y < height; y++)
+        {
+            // Build raw scanline (per-channel-then-per-pixel, alphabetical channel order).
+            var raw = new byte[channelsInFile * width * 2];
+            int rp = 0;
+            if (hasAlpha)
+                for (int x = 0; x < width; x++) WriteHalfTo(raw, ref rp, rgba[(y * width + x) * 4 + 3]);
+            for (int x = 0; x < width; x++) WriteHalfTo(raw, ref rp, rgba[(y * width + x) * 4 + 2]);
+            for (int x = 0; x < width; x++) WriteHalfTo(raw, ref rp, rgba[(y * width + x) * 4 + 1]);
+            for (int x = 0; x < width; x++) WriteHalfTo(raw, ref rp, rgba[(y * width + x) * 4 + 0]);
+
+            // Spec order: interleave FIRST, then forward delta-predictor on
+            // the interleaved buffer.
+            var interleaved = new byte[raw.Length];
+            int half = (raw.Length + 1) / 2;
+            for (int i = 0; i < raw.Length; i++)
+                interleaved[i / 2 + ((i & 1) == 0 ? 0 : half)] = raw[i];
+
+            // Forward delta-predictor: capture original prev before overwriting.
+            byte prev = interleaved[0];
+            for (int i = 1; i < interleaved.Length; i++)
+            {
+                byte cur = interleaved[i];
+                interleaved[i] = (byte)(cur - prev + 128);
+                prev = cur;
+            }
+
+            byte[] compressed = compress(interleaved);
+            // EXR convention: if compressed is bigger than raw, ship raw.
+            byte[] payload = compressed.Length < raw.Length ? compressed : raw;
+
+            long blockStart = ms.Position;
+            long savedPos = ms.Position;
+            ms.Position = offsetTablePos + y * 8;
+            WriteI64(ms, blockStart);
+            ms.Position = savedPos;
+
+            WriteI32(ms, y);
+            WriteI32(ms, payload.Length);
+            ms.Write(payload, 0, payload.Length);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static void WriteHalfTo(byte[] buf, ref int p, float v)
+    {
+        ushort h = BitConverter.HalfToUInt16Bits((Half)v);
+        buf[p++] = (byte)h;
+        buf[p++] = (byte)(h >> 8);
+    }
+
+    private static byte[] ZlibCompress(byte[] raw)
+    {
+        using var ms = new MemoryStream();
+        using (var z = new System.IO.Compression.ZLibStream(ms,
+            System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
+        {
+            z.Write(raw, 0, raw.Length);
+        }
+        return ms.ToArray();
+    }
+
+    private static byte[] RleCompress(byte[] raw)
+    {
+        // OpenEXR's RLE encoder: scans for runs of repeated bytes,
+        // emits literal blocks for unique bytes. Output format matches
+        // the decoder above.
+        using var ms = new MemoryStream();
+        int p = 0;
+        while (p < raw.Length)
+        {
+            int runStart = p;
+            byte v = raw[p];
+            int runLen = 1;
+            while (p + runLen < raw.Length && raw[p + runLen] == v && runLen < 128) runLen++;
+            if (runLen >= 3)
+            {
+                ms.WriteByte((byte)(sbyte)(-(runLen - 1)));
+                ms.WriteByte(v);
+                p += runLen;
+            }
+            else
+            {
+                int litStart = p;
+                int litLen = 0;
+                while (p < raw.Length && litLen < 128)
+                {
+                    int look = 1;
+                    while (p + look < raw.Length && raw[p + look] == raw[p] && look < 3) look++;
+                    if (look >= 3) break;
+                    p++;
+                    litLen++;
+                }
+                ms.WriteByte((byte)(litLen - 1));
+                ms.Write(raw, litStart, litLen);
+            }
+        }
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void Pure_ZipsRgbHalf_RoundTrips()
+    {
+        int w = 32, h = 8;
+        var rgba = new float[w * h * 4];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int o = (y * w + x) * 4;
+                rgba[o] = x * 0.05f;
+                rgba[o + 1] = y * 0.1f;
+                rgba[o + 2] = (x + y) * 0.025f;
+            }
+        var exr = BuildCompressedExr(rgba, w, h, hasAlpha: false, compressionCode: 2, ZlibCompress);
+        var img = PureExrDecoder.TryDecode(exr);
+        Assert.NotNull(img);
+        Assert.Equal(w, img!.Width);
+        Assert.Equal(3, img.Bands);
+
+        var got = ReadFloats(img.PixelsLazy!.Value);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int o = (y * w + x) * 3;
+                AssertHalfPrecision(rgba[(y * w + x) * 4], got[o]);
+                AssertHalfPrecision(rgba[(y * w + x) * 4 + 1], got[o + 1]);
+                AssertHalfPrecision(rgba[(y * w + x) * 4 + 2], got[o + 2]);
+            }
+    }
+
+    [Fact]
+    public void Pure_RleRgbHalf_RoundTrips()
+    {
+        int w = 32, h = 4;
+        // Highly compressible (constant color) so RLE actually engages.
+        var rgba = new float[w * h * 4];
+        for (int i = 0; i < w * h; i++)
+        {
+            rgba[i * 4] = 0.5f;
+            rgba[i * 4 + 1] = 0.25f;
+            rgba[i * 4 + 2] = 0.75f;
+        }
+        var exr = BuildCompressedExr(rgba, w, h, hasAlpha: false, compressionCode: 1, RleCompress);
+        var img = PureExrDecoder.TryDecode(exr);
+        Assert.NotNull(img);
+        var got = ReadFloats(img!.PixelsLazy!.Value);
+        for (int i = 0; i < w * h; i++)
+        {
+            AssertHalfPrecision(0.5f, got[i * 3]);
+            AssertHalfPrecision(0.25f, got[i * 3 + 1]);
+            AssertHalfPrecision(0.75f, got[i * 3 + 2]);
+        }
+    }
+
     [Fact]
     public async Task IsExr_DetectsMagic()
     {

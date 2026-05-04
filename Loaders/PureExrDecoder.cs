@@ -1,6 +1,8 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Text;
 using CosmoImage.Core;
 
@@ -50,8 +52,10 @@ internal static class PureExrDecoder
         if (!ParseAttributes(bytes, ref p, longNames, header)) return null;
         if (!header.IsValid()) return null;
 
-        // Validate: scanline order, supported compression, supported channel set.
-        if (header.Compression != 0) return null;          // NO_COMPRESSION only here
+        // Supported compressors so far: NO_COMPRESSION (=0), RLE (=1), ZIPS (=2).
+        // ZIP / PIZ / PXR24 / B44 / DWA come in later rounds.
+        if (header.Compression != 0 && header.Compression != 1 && header.Compression != 2)
+            return null;
         if (header.LineOrder != 0 && header.LineOrder != 1) return null;
 
         // Determine output bands based on which channels are present.
@@ -82,6 +86,11 @@ internal static class PureExrDecoder
         long fileRowBytes = 0;
         foreach (var c in header.Channels) fileRowBytes += BytesPerChannelSample(c.PixelType) * width;
 
+        // Per-scanline scratch buffer for compressed paths.
+        byte[]? rowScratch = null;
+        if (header.Compression != 0)
+            rowScratch = new byte[fileRowBytes];
+
         for (int y = 0; y < height; y++)
         {
             long off = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offsetTableStart + y * 8, 8));
@@ -91,13 +100,26 @@ internal static class PureExrDecoder
             int rowDataOff = (int)off + 8;
             if (rowDataOff + dataSize > bytes.Length) return null;
             if (yCoord < header.DataWindow.YMin || yCoord > header.DataWindow.YMax) return null;
-            // For LineOrder=0 the file has scanlines in increasing-Y; for
-            // LineOrder=1 they're decreasing-Y. Either way, yCoord tells
-            // us where this block belongs.
             int outY = yCoord - header.DataWindow.YMin;
-            if ((long)dataSize < fileRowBytes) return null;  // uncompressed
 
-            DemuxScanline(bytes, rowDataOff, header.Channels, channelOrder, width, pixels, outY, outBands);
+            byte[] rowSource;
+            int rowSourceOff;
+            if (header.Compression == 0)
+            {
+                if ((long)dataSize < fileRowBytes) return null;
+                rowSource = bytes;
+                rowSourceOff = rowDataOff;
+            }
+            else
+            {
+                if (!DecompressBlock(header.Compression, bytes, rowDataOff, dataSize,
+                    rowScratch!, (int)fileRowBytes))
+                    return null;
+                rowSource = rowScratch!;
+                rowSourceOff = 0;
+            }
+
+            DemuxScanline(rowSource, rowSourceOff, header.Channels, channelOrder, width, pixels, outY, outBands);
         }
 
         return new VipsImage
@@ -196,6 +218,106 @@ internal static class PureExrDecoder
     public const int PixelTypeUint = 0;
     public const int PixelTypeHalf = 1;
     public const int PixelTypeFloat = 2;
+
+    /// <summary>
+    /// Decompress one EXR scanline block into <paramref name="dst"/>
+    /// of length <paramref name="expected"/>. Handles the post-decompress
+    /// reorder (interleaved-byte-pair de-interleave + delta-predictor
+    /// reverse) shared by RLE and ZIPS.
+    /// </summary>
+    private static bool DecompressBlock(int compression, byte[] src, int srcOff, int srcLen,
+        byte[] dst, int expected)
+    {
+        // Some blocks ship uncompressed even when the file declares a
+        // compressor — that happens when the encoded form would have been
+        // bigger. EXR signals this by setting dataSize == expected.
+        if (srcLen == expected)
+        {
+            Buffer.BlockCopy(src, srcOff, dst, 0, expected);
+            return true;
+        }
+
+        // First inflate / RLE-expand into the scratch in interleaved+delta form.
+        var scratch = new byte[expected];
+        bool ok = compression switch
+        {
+            1 => RleDecompress(src, srcOff, srcLen, scratch, expected),
+            2 => ZlibDecompress(src, srcOff, srcLen, scratch, expected),
+            _ => false,
+        };
+        if (!ok) return false;
+
+        // Reverse delta-predictor: cur += prev - 128 (mod 256).
+        for (int i = 1; i < expected; i++)
+        {
+            int v = scratch[i - 1] + scratch[i] - 128;
+            scratch[i] = (byte)v;
+        }
+
+        // De-interleave: dst[2i] from first half, dst[2i+1] from second half.
+        int half = (expected + 1) / 2;
+        int t1 = 0, t2 = half;
+        for (int i = 0; i < expected; )
+        {
+            dst[i++] = scratch[t1++];
+            if (i < expected) dst[i++] = scratch[t2++];
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// EXR's RLE: signed control byte n in [-127, -1] → next byte
+    /// replicated (-n + 1) times; n in [0, 127] → next n+1 bytes literal.
+    /// (Unlike PackBits, n = -128 is a valid run-of-129 here.)
+    /// </summary>
+    private static bool RleDecompress(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int expected)
+    {
+        int sp = srcOff, sEnd = srcOff + srcLen;
+        int dp = 0;
+        while (sp < sEnd && dp < expected)
+        {
+            sbyte n = (sbyte)src[sp++];
+            if (n < 0)
+            {
+                int run = -n + 1;
+                if (sp >= sEnd || dp + run > expected) return false;
+                byte v = src[sp++];
+                for (int i = 0; i < run; i++) dst[dp++] = v;
+            }
+            else
+            {
+                int run = n + 1;
+                if (sp + run > sEnd || dp + run > expected) return false;
+                Buffer.BlockCopy(src, sp, dst, dp, run);
+                sp += run;
+                dp += run;
+            }
+        }
+        return dp == expected;
+    }
+
+    private static bool ZlibDecompress(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int expected)
+    {
+        try
+        {
+            using var ms = new MemoryStream(src, srcOff, srcLen);
+            using var z = new ZLibStream(ms, CompressionMode.Decompress);
+            int read = 0;
+            while (read < expected)
+            {
+                int n = z.Read(dst, read, expected - read);
+                if (n == 0) return false;
+                read += n;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>Decode a 16-bit IEEE 754 half-precision float to <see cref="float"/>.</summary>
     private static float HalfToFloat(ushort h)
