@@ -22,13 +22,19 @@ namespace CosmoImage.Operations.Color;
 /// </summary>
 public sealed class VipsIccLutCmm
 {
+    private enum Pcs { Xyz, Lab }
+
     private readonly LutTransform _forward;
     private readonly LutTransform _reverse;
+    private readonly Pcs _srcPcs;
+    private readonly Pcs _dstPcs;
 
-    private VipsIccLutCmm(LutTransform forward, LutTransform reverse)
+    private VipsIccLutCmm(LutTransform forward, LutTransform reverse, Pcs srcPcs, Pcs dstPcs)
     {
         _forward = forward;
         _reverse = reverse;
+        _srcPcs = srcPcs;
+        _dstPcs = dstPcs;
     }
 
     /// <summary>Channels expected on the source side (3 for RGB, 4 for CMYK).</summary>
@@ -47,7 +53,13 @@ public sealed class VipsIccLutCmm
         // Device sides can be 1..4 (Gray / Lab / RGB / CMYK).
         if (fwd.InputChannels < 1 || fwd.InputChannels > 4) return null;
         if (rev.OutputChannels < 1 || rev.OutputChannels > 4) return null;
-        return new VipsIccLutCmm(fwd, rev);
+
+        // Determine each profile's PCS. Default to XYZ for unknown
+        // profiles (matches ICC v2 default).
+        Pcs srcPcs = src.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
+        Pcs dstPcs = dst.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
+
+        return new VipsIccLutCmm(fwd, rev, srcPcs, dstPcs);
     }
 
     /// <summary>
@@ -78,6 +90,7 @@ public sealed class VipsIccLutCmm
             for (int c = 0; c < srcCh; c++) inBuf[c] = src[sp + c] / 255.0;
 
             _forward.Apply(inBuf.Slice(0, srcCh), pcs);
+            if (_srcPcs != _dstPcs) ConvertPcs(pcs, _srcPcs, _dstPcs);
             _reverse.Apply(pcs, outBuf.Slice(0, dstCh));
 
             for (int c = 0; c < dstCh; c++) dst[dp + c] = ToByte(outBuf[c]);
@@ -97,6 +110,80 @@ public sealed class VipsIccLutCmm
         if (v <= 0) return 0;
         if (v >= 1) return 255;
         return (byte)(v * 255.0 + 0.5);
+    }
+
+    /// <summary>
+    /// Convert normalized PCS values from <paramref name="from"/> to
+    /// <paramref name="to"/> in place. Decodes the source's encoding
+    /// to absolute Lab/XYZ, runs the standard CIE conversion, then
+    /// re-encodes for the destination's normalized [0, 1] range.
+    /// </summary>
+    private static void ConvertPcs(Span<double> v, Pcs from, Pcs to)
+    {
+        // ICC encoded XYZ: the maximum normalized value 1.0 = uint16 65535
+        // maps to ABS XYZ ≈ 65535/32768 = 1.999969...
+        const double XyzScale = 65535.0 / 32768.0;
+
+        if (from == Pcs.Lab && to == Pcs.Xyz)
+        {
+            double L = v[0] * 100.0;
+            double a = v[1] * 256.0 - 128.0;
+            double b = v[2] * 256.0 - 128.0;
+            LabToXyz(L, a, b, out double X, out double Y, out double Z);
+            v[0] = Math.Clamp(X / XyzScale, 0, 1);
+            v[1] = Math.Clamp(Y / XyzScale, 0, 1);
+            v[2] = Math.Clamp(Z / XyzScale, 0, 1);
+        }
+        else if (from == Pcs.Xyz && to == Pcs.Lab)
+        {
+            double X = v[0] * XyzScale;
+            double Y = v[1] * XyzScale;
+            double Z = v[2] * XyzScale;
+            XyzToLab(X, Y, Z, out double L, out double a, out double b);
+            v[0] = Math.Clamp(L / 100.0, 0, 1);
+            v[1] = Math.Clamp((a + 128.0) / 256.0, 0, 1);
+            v[2] = Math.Clamp((b + 128.0) / 256.0, 0, 1);
+        }
+    }
+
+    // CIE D50 white point as used by ICC profiles.
+    private const double D50X = 0.96422;
+    private const double D50Y = 1.00000;
+    private const double D50Z = 0.82521;
+    private const double LabEpsilon = 216.0 / 24389.0;       // (6/29)^3
+    private const double LabKappa = 24389.0 / 27.0;          // (29/3)^3
+
+    private static void LabToXyz(double L, double a, double b, out double X, out double Y, out double Z)
+    {
+        double fy = (L + 16.0) / 116.0;
+        double fx = a / 500.0 + fy;
+        double fz = fy - b / 200.0;
+        X = D50X * LabFInv(fx);
+        Y = D50Y * LabFInv(fy);
+        Z = D50Z * LabFInv(fz);
+    }
+
+    private static void XyzToLab(double X, double Y, double Z, out double L, out double a, out double b)
+    {
+        double fx = LabF(X / D50X);
+        double fy = LabF(Y / D50Y);
+        double fz = LabF(Z / D50Z);
+        L = 116.0 * fy - 16.0;
+        a = 500.0 * (fx - fy);
+        b = 200.0 * (fy - fz);
+    }
+
+    private static double LabF(double t)
+    {
+        if (t > LabEpsilon) return Math.Cbrt(t);
+        return (LabKappa * t + 16.0) / 116.0;
+    }
+
+    private static double LabFInv(double t)
+    {
+        double t3 = t * t * t;
+        if (t3 > LabEpsilon) return t3;
+        return (116.0 * t - 16.0) / LabKappa;
     }
 }
 
