@@ -173,4 +173,22 @@ public static class VipsFields
     public static void SetIccProfileTyped(this VipsImage image,
         CosmoImage.Operations.Metadata.VipsIccProfile profile)
         => image.SetBlob("icc", profile.ToBytes());
+
+    /// <summary>
+    /// Parse the image's XMP blob into a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsXmpProfile"/>
+    /// (XDocument-backed). Returns <c>null</c> when no XMP is present
+    /// or the blob isn't valid XML.
+    /// </summary>
+    public static CosmoImage.Operations.Metadata.VipsXmpProfile? GetXmpProfile(this VipsImage image)
+        => CosmoImage.Operations.Metadata.VipsXmpProfile.TryParse(image.GetBlob("xmp"));
+
+    /// <summary>
+    /// Serialize a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsXmpProfile"/>
+    /// back into the image's XMP blob. Overwrites any existing data.
+    /// </summary>
+    public static void SetXmpProfile(this VipsImage image,
+        CosmoImage.Operations.Metadata.VipsXmpProfile profile)
+        => image.SetBlob("xmp", profile.ToBytes());
 }
