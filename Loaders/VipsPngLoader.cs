@@ -176,6 +176,11 @@ public static class VipsPngLoader
 
         image.PixelsLazy = new Lazy<byte[]>(() =>
         {
+            // Try the pure-managed decoder first (8-bit non-interlaced
+            // common cases). Fall back to StbImageSharp for 16-bit /
+            // interlaced / unsupported configurations.
+            var pure = PurePngDecoder.TryDecode(imageBytes, out _);
+            if (pure != null) return pure;
             var result = ImageResult.FromMemory(imageBytes, ColorComponents.Default)
                 ?? throw new InvalidOperationException("PNG decode failed");
             return result.Data;
