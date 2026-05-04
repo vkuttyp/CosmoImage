@@ -292,7 +292,7 @@ profile API ImageSharp ships is a meaningful gap.
 | :--- | :--- | :--- |
 | Stream-based load (no full-buffer hop) | ✅ — every decoder | 🟡 `LoadStreamingAsync` opt-in on every Stream-capable format; PNG/PDF still byte-buffer (decoder limit) |
 | Stream-based save | ✅ | ✅ — every saver is `PipeWriter`-based |
-| `MemoryAllocator` configurable | ✅ — every buffer goes through it | 🟡 `IVipsAllocator` plumbed through transient buffers (`VipsRegion`, `OrderedStripSink`); long-lived buffers (`PixelsLazy`, `MemorySink.Pixels`) bypass |
+| `MemoryAllocator` configurable | ✅ — every buffer goes through it | 🟡 `IVipsAllocator` plumbed through transient buffers (`VipsRegion`, `OrderedStripSink`) and opt-in for `MemorySink` long-lived buffers (round 94 — pass an `IVipsAllocator` to the constructor; sink is `IDisposable` for the pool-return). Default behaviour unchanged (`BareAllocator` = `new byte[]`). `PixelsLazy` factories still use plain `new byte[]` — converting them needs a per-call ownership story |
 | `ArrayPool` integration | ✅ — `ArrayPoolMemoryAllocator` default | ✅ — `ArrayPoolAllocator.Shared` default |
 | Per-image allocator override | ✅ via `Configuration` | ✅ via `VipsImage.Allocator` |
 | Pool-rented decoded pixel buffers | ✅ | ❌ — decoded buffers are `new byte[]` |

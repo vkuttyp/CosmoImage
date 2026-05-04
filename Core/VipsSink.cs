@@ -191,25 +191,67 @@ public sealed class OrderedStripSink : VipsSink
 /// region of the shared buffer, no locking needed. Equivalent to libvips
 /// <c>vips_sink_memory</c>.
 /// </summary>
-public sealed class MemorySink : VipsSink
+public sealed class MemorySink : VipsSink, IDisposable
 {
     private readonly byte[] _buffer;
     private readonly int _stride;
+    private readonly int _logicalLength;
+    private readonly IVipsAllocator _allocator;
+    private bool _returned;
 
+    /// <summary>
     /// The materialized buffer. Valid after <see cref="VipsSink.RunAsync"/>
     /// completes. Layout: row-major, contiguous, stride = Width × SizeOfPel.
+    /// <para>NOTE: when this sink is constructed with a pooled
+    /// <see cref="IVipsAllocator"/>, the returned buffer may be
+    /// oversized — use <see cref="LogicalLength"/> for the contents
+    /// length, never <c>Pixels.Length</c>.</para>
+    /// </summary>
     public byte[] Pixels => _buffer;
 
+    /// <summary>Logical content length in bytes (Width · Height · SizeOfPel).</summary>
+    public int LogicalLength => _logicalLength;
+
     public MemorySink(VipsImage image)
-        : this(image, TileSizeFromHint(image).W, TileSizeFromHint(image).H)
+        : this(image, TileSizeFromHint(image).W, TileSizeFromHint(image).H, BareAllocator.Shared)
     {
     }
 
     public MemorySink(VipsImage image, int tileWidth, int tileHeight)
+        : this(image, tileWidth, tileHeight, BareAllocator.Shared)
+    {
+    }
+
+    /// <summary>
+    /// Construct with an explicit allocator for the long-lived pixel
+    /// buffer. Default <see cref="BareAllocator.Shared"/> = <c>new byte[]</c>;
+    /// pass an <see cref="ArrayPoolAllocator"/> (or custom
+    /// <see cref="IVipsAllocator"/>) to opt into pooling.
+    /// <para><b>Lifecycle:</b> when using a pooled allocator the
+    /// caller MUST call <see cref="Dispose"/> after consuming
+    /// <see cref="Pixels"/> to return the buffer. The
+    /// <see cref="BareAllocator"/> default makes Dispose a no-op so
+    /// existing call sites that don't dispose stay correct.</para>
+    /// </summary>
+    public MemorySink(VipsImage image, IVipsAllocator allocator)
+        : this(image, TileSizeFromHint(image).W, TileSizeFromHint(image).H, allocator)
+    {
+    }
+
+    public MemorySink(VipsImage image, int tileWidth, int tileHeight, IVipsAllocator allocator)
         : base(image, tileWidth, tileHeight)
     {
         _stride = image.Width * image.SizeOfPel;
-        _buffer = new byte[_stride * image.Height];
+        _logicalLength = _stride * image.Height;
+        _allocator = allocator ?? throw new ArgumentNullException(nameof(allocator));
+        _buffer = _allocator.Rent(_logicalLength);
+    }
+
+    public void Dispose()
+    {
+        if (_returned) return;
+        _returned = true;
+        _allocator.Return(_buffer);
     }
 
     protected override void ConsumeTile(int workerId, VipsRegion region, VipsRect tile)
