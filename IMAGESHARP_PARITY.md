@@ -246,13 +246,13 @@ typed structs for each space:
 | `CieLab`, `CieLch`, `CieLchuv`, `CieLuv` | ✅ all four — `VipsColorLab` / `VipsColorLch` (round 79) + `VipsColorLuv` / `VipsColorLchuv` (round 80, CIE 1976 UCS) via `VipsColorConvert` |
 | `CieXyz`, `CieXyy` | ✅ `VipsColorXyz` (D65, normalised Y=1) (round 79) + `VipsColorXyy` chromaticity form (round 80) |
 | `Cmyk` | ✅ `VipsColorCmyk` value type + RGB↔CMYK conversion via `VipsColorConvert` (round 79) |
-| `HunterLab` | ❌ |
-| `LmsBradford`, `LmsCAT02`, `LmsCAT97s` | 🟡 `VipsColorLms` with Bradford transform via `VipsColorConvert.XyzToLms` / `LmsToXyz` (round 80). CAT02 and CAT97s matrices still missing |
-| `YCbCr` | ❌ — internal in JPEG decode only |
+| `HunterLab` | ✅ `VipsColorHunterLab` (D65 reference white; `Ka` and `Kb` scaled per the modern CIE references) via `VipsColorConvert.XyzToHunterLab` / `HunterLabToXyz` (round 82) |
+| `LmsBradford`, `LmsCAT02`, `LmsCAT97s` | ✅ all three matrices — `VipsColorLms` (round 80) via `XyzToLms(xyz, method)` / `LmsToXyz(lms, method)` taking `VipsLmsAdaptation.Bradford` (default) / `Cat02` / `Cat97s` (round 82). Inverses derived numerically via 3×3 inverter for accuracy |
+| `YCbCr` | ✅ `VipsColorYCbCr` value type + `RgbToYCbCr` / `YCbCrToRgb` via `VipsColorConvert` (round 82) — BT.601 / JPEG full-range; chroma uses 0.5 = neutral offset |
 | Chromatic adaptation | ✅ `VipsColorConvert.ChromaticAdapt(xyz, fromWP, toWP)` (round 80) — Bradford von Kries transform with LMS pivot |
 | White-point (D65, D50, etc.) | ✅ `VipsWhitePoint` enum + `WhitePointXyz` accessor — D65 / D50 / D55 / D75 / A / E (round 80) |
 | `ColorConverter.Convert<TFrom, TTo>(...)` | ✅ `VipsColorConvert.Convert<TFrom, TTo>` (round 79) — generic dispatcher routing through RGB / XYZ. Direct pairwise methods also available (RgbToHsl, RgbToHsv, RgbToCmyk, RgbToXyz, XyzToLab, LabToLch). Identity case skips conversion |
-| `ColorMatrix` (4×4 with alpha channel) | 🟡 we have `Recomb` (3×3 RGB) |
+| `ColorMatrix` (4×4 with alpha channel) | ✅ `VipsImageOps.ColorMatrix(input, matrix)` — 4×5 matrix transform (4×4 mix + 1 translation column) on RGBA pixels, mirroring ImageSharp's `Filter(ColorMatrix)`. Per-image op alongside the per-value `VipsColorConvert` family |
 
 Same gap as the libvips colour matrix. Both libvips and ImageSharp
 treat the colourspace graph as a first-class citizen; CosmoImage
