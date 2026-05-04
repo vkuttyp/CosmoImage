@@ -194,7 +194,8 @@ internal static class PureTiffDecoder
         if (compression != 1 && compression != 5 && compression != 8
             && compression != 32946 && compression != 32773)
             return null;
-        if (planarConfig != 1) return null;
+        if (planarConfig != 1 && planarConfig != 2) return null;
+        if (planarConfig == 2 && tiled) return null;  // tiled+planar combo deferred
         if (fillOrder != 1) return null;
         // Predictor 1 = none, 2 = horizontal differencing (int),
         // 3 = floating-point predictor (byte-shuffled diff, FP only).
@@ -261,6 +262,51 @@ internal static class PureTiffDecoder
                 spp, bytesPerSample, bps, (int)compression, (int)predictor, le,
                 tileOffsets, tileByteCounts))
                 return null;
+        }
+        else if (planarConfig == 2)
+        {
+            // Per-channel strips: SPP × stripsPerPlane offsets, each
+            // strip carries one channel's worth of data. Decode each
+            // plane independently into its own buffer, then interleave.
+            if (rowsPerStrip < 0) rowsPerStrip = height;
+            int stripsPerPlane = (int)((height + rowsPerStrip - 1) / rowsPerStrip);
+            if (stripOffsets.Length != stripByteCounts.Length) return null;
+            if (stripOffsets.Length != (long)stripsPerPlane * spp) return null;
+
+            int planeSize = (int)((long)width * height * bytesPerSample);
+            long planeRowStride = (long)width * bytesPerSample;
+            var planes = new byte[spp][];
+            for (int c = 0; c < spp; c++)
+            {
+                planes[c] = new byte[planeSize];
+                var planeOffsets = new long[stripsPerPlane];
+                var planeCounts = new long[stripsPerPlane];
+                for (int s = 0; s < stripsPerPlane; s++)
+                {
+                    planeOffsets[s] = stripOffsets[c * stripsPerPlane + s];
+                    planeCounts[s] = stripByteCounts[c * stripsPerPlane + s];
+                }
+                if (!DecodeStrips(bytes, planes[c], (int)width, (int)height, (int)rowsPerStrip,
+                    spp: 1, bytesPerSample, bps, (int)compression, (int)predictor, le,
+                    planeRowStride, planeOffsets, planeCounts))
+                    return null;
+            }
+
+            // Interleave planes into chunky raw, byte-by-byte (handles
+            // any bytesPerSample without special-casing).
+            for (int y = 0; y < height; y++)
+            {
+                int rowBase = y * (int)inRowStride;
+                int planeRowBase = y * (int)planeRowStride;
+                for (int x = 0; x < width; x++)
+                {
+                    int chunkPx = rowBase + x * spp * bytesPerSample;
+                    int planePx = planeRowBase + x * bytesPerSample;
+                    for (int c = 0; c < spp; c++)
+                        for (int b = 0; b < bytesPerSample; b++)
+                            raw[chunkPx + c * bytesPerSample + b] = planes[c][planePx + b];
+                }
+            }
         }
         else
         {
