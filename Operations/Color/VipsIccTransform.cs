@@ -18,18 +18,23 @@ public class VipsIccTransform : VipsOperation
     {
         if (In == null || OutputProfile == null) return -1;
 
-        // Pre-build the pure CMM if both profiles are Matrix/TRC RGB
-        // (the 90% case: sRGB / AdobeRGB / Display-P3 / etc.). This is
-        // a one-time cost paid in Build, so the per-pixel inner loop
-        // in Generate stays tight. Returns null for LUT-based or
-        // CMYK/Lab profiles — those fall back to Magick below.
-        VipsIccCmm? cmm = null;
+        // Pre-build a pure CMM if possible. Try Matrix/TRC first (the 90%
+        // case — sRGB / AdobeRGB / Display-P3 / etc., precomputed LUTs);
+        // fall through to the LUT-based CMM (printer / scanner profiles
+        // using mft2); finally fall back to Magick for anything else
+        // (mAB / mBA, CMYK destination, Lab in unusual encodings).
+        VipsIccCmm? matrixCmm = null;
+        VipsIccLutCmm? lutCmm = null;
         if (InputProfile != null)
         {
             var srcParsed = VipsIccProfile.TryParse(InputProfile);
             var dstParsed = VipsIccProfile.TryParse(OutputProfile);
             if (srcParsed != null && dstParsed != null)
-                cmm = VipsIccCmm.TryBuild(srcParsed, dstParsed);
+            {
+                matrixCmm = VipsIccCmm.TryBuild(srcParsed, dstParsed);
+                if (matrixCmm == null)
+                    lutCmm = VipsIccLutCmm.TryBuild(srcParsed, dstParsed);
+            }
         }
 
         Out = new VipsImage
@@ -46,7 +51,13 @@ public class VipsIccTransform : VipsOperation
             GenerateFn = Generate,
             StopFn = VipsSeq.StopOne,
             ClientA = In,
-            ClientB = new TransformContext { InputProfile = InputProfile, OutputProfile = OutputProfile, Cmm = cmm },
+            ClientB = new TransformContext
+            {
+                InputProfile = InputProfile,
+                OutputProfile = OutputProfile,
+                Cmm = matrixCmm,
+                LutCmm = lutCmm,
+            },
         };
         Out.CopyMetadataFrom(In);
         Out.SetPipeline(VipsDemandStyle.Any, In);
@@ -59,6 +70,7 @@ public class VipsIccTransform : VipsOperation
         public byte[]? InputProfile;
         public byte[]? OutputProfile;
         public VipsIccCmm? Cmm;
+        public VipsIccLutCmm? LutCmm;
     }
 
     public override int GetCacheKey()
@@ -84,8 +96,32 @@ public class VipsIccTransform : VipsOperation
         int bands = @in.Bands;
         if (ctx.Cmm != null && (bands == 3 || bands == 4))
             return GeneratePureCmm(inRegion, outRegion, r, bands, ctx.Cmm);
+        if (ctx.LutCmm != null && (bands == 3 || bands == 4))
+            return GeneratePureLutCmm(inRegion, outRegion, r, bands, ctx.LutCmm);
 
         return GenerateMagick(inRegion, outRegion, r, bands, ctx.InputProfile, ctx.OutputProfile!);
+    }
+
+    /// <summary>
+    /// Pure-CMM path for LUT-based profiles. Same row-by-row pattern as
+    /// the Matrix/TRC fast path but goes through the trilinear-CLUT
+    /// pipeline; per-pixel cost is higher but stays in pure managed code.
+    /// </summary>
+    private static int GeneratePureLutCmm(VipsRegion inRegion, VipsRegion outRegion,
+        VipsRect r, int bands, VipsIccLutCmm cmm)
+    {
+        int rowBytes = r.Width * bands;
+        var rowBuf = new byte[rowBytes];
+        var dstBuf = new byte[rowBytes];
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inLine = inRegion.GetAddress(r.Left, r.Top + y);
+            inLine.Slice(0, rowBytes).CopyTo(rowBuf);
+            cmm.Apply(rowBuf, 0, dstBuf, 0, r.Width, bands);
+            var outLine = outRegion.GetAddress(r.Left, r.Top + y);
+            dstBuf.AsSpan(0, rowBytes).CopyTo(outLine);
+        }
+        return 0;
     }
 
     /// <summary>

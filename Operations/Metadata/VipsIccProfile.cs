@@ -82,6 +82,24 @@ public enum VipsIccRenderingIntent
 /// <c>rXYZ</c> / curves / LUT-AtoB / etc. — is deferred to later
 /// rounds).</para>
 /// </summary>
+public sealed class IccMft2
+{
+    /// <summary>Number of input channels (1..4 in practice).</summary>
+    public int InputChannels { get; init; }
+    /// <summary>Number of output channels (1..4 in practice).</summary>
+    public int OutputChannels { get; init; }
+    /// <summary>Grid points per CLUT axis (same in every dimension).</summary>
+    public int GridSize { get; init; }
+    /// <summary>3×3 matrix applied to XYZ-input profiles after the input curves; identity for non-XYZ inputs.</summary>
+    public double[,] Matrix { get; init; } = new double[3, 3];
+    /// <summary>Per-input-channel input curves: each table has the same length.</summary>
+    public ushort[][] InputTables { get; init; } = Array.Empty<ushort[]>();
+    /// <summary>Flattened CLUT: <c>GridSize^InputChannels * OutputChannels</c> entries.</summary>
+    public ushort[] Clut { get; init; } = Array.Empty<ushort>();
+    /// <summary>Per-output-channel output curves.</summary>
+    public ushort[][] OutputTables { get; init; } = Array.Empty<ushort[]>();
+}
+
 public sealed class VipsIccProfile
 {
     // ---- Header fields ----
@@ -338,6 +356,87 @@ public sealed class VipsIccProfile
             double b = table[Math.Min(i + 1, n - 1)] / 65535.0;
             return a + (b - a) * frac;
         };
+    }
+
+    /// <summary>
+    /// Decode a <c>mft2</c>-type tag (lut16Type, ICC v2 / v4 section 10.10).
+    /// Carries an n-input m-output pipeline:
+    ///   input table per input channel → optional 3×3 matrix (XYZ profiles
+    ///   only) → 3D CLUT with trilinear interp → output table per output
+    ///   channel. Tables and CLUT entries are uint16 (range 0..65535).
+    ///   The matrix uses s15Fixed16 encoding.
+    ///
+    /// <para>Returns <c>null</c> for missing tags or shapes the parser
+    /// can't recognise.</para>
+    /// </summary>
+    public IccMft2? GetTagMft2(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 52) return null;
+        if (Encoding.ASCII.GetString(data, 0, 4) != "mft2") return null;
+
+        int inCh = data[8];
+        int outCh = data[9];
+        int grid = data[10];
+        if (inCh < 1 || inCh > 4 || outCh < 1 || outCh > 4 || grid < 2 || grid > 255)
+            return null;
+
+        var matrix = new double[3, 3];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+                matrix[i, j] = ReadS15Fixed16(data, 12 + (i * 3 + j) * 4);
+
+        int n = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(48, 2));  // input table size
+        int m = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(50, 2));  // output table size
+        if (n < 2 || m < 2) return null;
+
+        long need = 52L + 2L * inCh * n + 2L * Pow(grid, inCh) * outCh + 2L * outCh * m;
+        if (data.Length < need) return null;
+
+        var inputTables = new ushort[inCh][];
+        int p = 52;
+        for (int c = 0; c < inCh; c++)
+        {
+            inputTables[c] = new ushort[n];
+            for (int k = 0; k < n; k++)
+                inputTables[c][k] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(p + k * 2, 2));
+            p += n * 2;
+        }
+
+        long clutEntries = (long)Pow(grid, inCh) * outCh;
+        var clut = new ushort[clutEntries];
+        for (long k = 0; k < clutEntries; k++)
+        {
+            clut[k] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(p + (int)k * 2, 2));
+        }
+        p += (int)clutEntries * 2;
+
+        var outputTables = new ushort[outCh][];
+        for (int c = 0; c < outCh; c++)
+        {
+            outputTables[c] = new ushort[m];
+            for (int k = 0; k < m; k++)
+                outputTables[c][k] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(p + k * 2, 2));
+            p += m * 2;
+        }
+
+        return new IccMft2
+        {
+            InputChannels = inCh,
+            OutputChannels = outCh,
+            GridSize = grid,
+            Matrix = matrix,
+            InputTables = inputTables,
+            Clut = clut,
+            OutputTables = outputTables,
+        };
+    }
+
+    private static int Pow(int b, int e)
+    {
+        int r = 1;
+        for (int i = 0; i < e; i++) r *= b;
+        return r;
     }
 
     private static Func<double, double> BuildParametricEvaluator(int fn, double[] p)
