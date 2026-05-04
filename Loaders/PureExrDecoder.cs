@@ -87,9 +87,16 @@ internal static class PureExrDecoder
         if (tiled)
         {
             if (header.Tiles == null) return null;
-            // Only ONE_LEVEL mode for now (mode bits 0-3 == 0).
-            if ((header.Tiles.Value.Mode & 0x0F) != 0) return null;
-            return DecodeTiled(bytes, p, header, channelOrder, width, height, outBands);
+            int levelMode = header.Tiles.Value.Mode & 0x0F;
+            int roundingMode = (header.Tiles.Value.Mode >> 4) & 0x0F;
+            // ONE_LEVEL (=0), MIPMAP_LEVELS (=1), RIPMAP_LEVELS (=2).
+            // For MIPMAP/RIPMAP we expose level 0 (full resolution) only —
+            // sub-levels are walked past in the offset table for bounds
+            // validation but their tile entries are skipped.
+            if (levelMode != 0 && levelMode != 1 && levelMode != 2) return null;
+            if (roundingMode != 0 && roundingMode != 1) return null;
+            return DecodeTiled(bytes, p, header, channelOrder, width, height, outBands,
+                levelMode, roundingMode);
         }
 
         // After attributes (terminated by a single null byte), the
@@ -279,7 +286,8 @@ internal static class PureExrDecoder
     /// only the tile width and a 2D placement in the output image.
     /// </summary>
     private static VipsImage? DecodeTiled(byte[] bytes, int offsetTableStart,
-        ExrHeader header, int[] channelOrder, int width, int height, int outBands)
+        ExrHeader header, int[] channelOrder, int width, int height, int outBands,
+        int levelMode, int roundingMode)
     {
         int tileW = header.Tiles!.Value.XSize;
         int tileH = header.Tiles!.Value.YSize;
@@ -287,8 +295,16 @@ internal static class PureExrDecoder
 
         int tilesX = (width + tileW - 1) / tileW;
         int tilesY = (height + tileH - 1) / tileH;
-        long numTiles = (long)tilesX * tilesY;
-        long need = (long)offsetTableStart + 8L * numTiles;
+        long numLevel0Tiles = (long)tilesX * tilesY;
+
+        // Total entries in the offset table = sum of tile counts across
+        // all levels. Level 0 always comes first in both MIPMAP and
+        // RIPMAP orderings, so we only walk the first numLevel0Tiles
+        // entries — but we still need the total to bounds-check that the
+        // table fits in the file.
+        long totalTileEntries = ComputeOffsetTableEntries(
+            levelMode, roundingMode, width, height, tileW, tileH);
+        long need = (long)offsetTableStart + 8L * totalTileEntries;
         if (need > bytes.Length) return null;
 
         // Tile data is stored exactly like a scanline block but with rows
@@ -302,7 +318,7 @@ internal static class PureExrDecoder
 
         var pixels = new float[(long)width * height * outBands];
 
-        for (long t = 0; t < numTiles; t++)
+        for (long t = 0; t < numLevel0Tiles; t++)
         {
             long off = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offsetTableStart + (int)t * 8, 8));
             if (off < 0 || off + 20 > bytes.Length) return null;
@@ -310,7 +326,10 @@ internal static class PureExrDecoder
             int tileY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 4, 4));
             int levelX = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 8, 4));
             int levelY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 12, 4));
-            if (levelX != 0 || levelY != 0) return null;  // ONE_LEVEL only
+            // The first numLevel0Tiles entries are always level (0,0) in
+            // both MIPMAP (level k offsets follow level k-1) and RIPMAP
+            // (lx outer? ly outer? — either way (0,0) is first).
+            if (levelX != 0 || levelY != 0) return null;
             int dataSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 16, 4));
             int tileDataOff = (int)off + 20;
             if (tileDataOff + dataSize > bytes.Length) return null;
@@ -383,6 +402,73 @@ internal static class PureExrDecoder
         int total = 0;
         foreach (var c in channels) total += BytesPerChannelSample(c.PixelType);
         return total;
+    }
+
+    /// <summary>
+    /// Total entries in a tiled file's offset table for the given level
+    /// mode and rounding. ONE_LEVEL = full-image tile count; MIPMAP =
+    /// sum across square levels; RIPMAP = sum across (lx, ly) cross
+    /// product. Used only for bounds-checking the table — the decoder
+    /// itself only consumes level-0 entries.
+    /// </summary>
+    private static long ComputeOffsetTableEntries(int levelMode, int roundingMode,
+        int width, int height, int tileW, int tileH)
+    {
+        if (levelMode == 0)
+        {
+            long tx = (width + tileW - 1) / tileW;
+            long ty = (height + tileH - 1) / tileH;
+            return tx * ty;
+        }
+        if (levelMode == 1)
+        {
+            int n = Math.Max(width, height);
+            int numLevels = LogN(n, roundingMode) + 1;
+            long total = 0;
+            for (int l = 0; l < numLevels; l++)
+            {
+                int wL = LevelSize(width, l, roundingMode);
+                int hL = LevelSize(height, l, roundingMode);
+                long tx = (wL + tileW - 1) / tileW;
+                long ty = (hL + tileH - 1) / tileH;
+                total += tx * ty;
+            }
+            return total;
+        }
+        // RIPMAP_LEVELS
+        int numXLevels = LogN(width, roundingMode) + 1;
+        int numYLevels = LogN(height, roundingMode) + 1;
+        long totalR = 0;
+        for (int ly = 0; ly < numYLevels; ly++)
+        {
+            int hL = LevelSize(height, ly, roundingMode);
+            for (int lx = 0; lx < numXLevels; lx++)
+            {
+                int wL = LevelSize(width, lx, roundingMode);
+                long tx = (wL + tileW - 1) / tileW;
+                long ty = (hL + tileH - 1) / tileH;
+                totalR += tx * ty;
+            }
+        }
+        return totalR;
+    }
+
+    private static int LogN(int x, int roundingMode)
+    {
+        // ROUND_DOWN = 0 → floor(log2(x)); ROUND_UP = 1 → ceil(log2(x)).
+        if (x <= 1) return 0;
+        int floor = 0; int v = x;
+        while (v > 1) { floor++; v >>= 1; }
+        if (roundingMode == 0) return floor;
+        return ((1 << floor) == x) ? floor : floor + 1;
+    }
+
+    private static int LevelSize(int n, int level, int roundingMode)
+    {
+        int v = roundingMode == 0
+            ? n >> level
+            : (n + (1 << level) - 1) >> level;
+        return Math.Max(v, 1);
     }
 
     /// <summary>
