@@ -79,8 +79,8 @@ threaded through `VipsEnumsExtensions.SizeOf`) and the three
 | **PNG** | Pure managed; full + APNG (animated), interlace | ✅ pure-managed `PurePngDecoder` (rounds 102, 104) — 8-bit AND 16-bit color types 0/2/3/4/6 with `tRNS` expansion (8-bit and 16-bit variants); filter unfilter (None/Sub/Up/Avg/Paeth); Adam7 interlace (round 104 — 7-pass scatter into the canvas, per-pass independent filter context); endianness-aware uint16 conversion (PNG BE → host LE for the existing UShort convention). Pure-managed `PureApngDecoder` (round 103) — animated PNG read with `dispose_op` / `blend_op` frame composition. StbImageSharp dependency now used only for 1/2/4-bit depths (rare; can be added later) |
 | **BMP** | Pure managed; full | 🟡 pure-C# fast path now covers (round 107): 1 / 4 / 8 bpp paletted with BGR0-encoded palette, 16 bpp RGB555 (5-bit channels expanded to 8 by replicating MSBs into low bits), 24 bpp BGR, 32 bpp BGRA, and BI_RLE8 (run-length encoded 8 bpp with end-of-line / end-of-bitmap / delta / absolute escape codes). Magick fallback remains for BI_RLE4, BI_BITFIELDS, V4 / V5 colour-space variants |
 | **TGA** | Pure managed | 🟡 pure-C# fast path (types 2/3/10/11) |
-| **WebP** | Pure managed; full lossy + lossless + animated | 🟡 via Magick.NET (animated load works) |
-| **TIFF** | Pure managed; LZW / Deflate / PackBits / JPEG-in-TIFF, multi-page | 🟡 via Magick; multi-page + Ptif pyramid + OME-XML metadata |
+| **WebP** | Pure managed; full lossy + lossless + animated | 🟡 pure-managed VP8L lossless decoder (round 113) — full bitstream, all four transforms (predictor / cross-color / subtract-green / color-indexing), color cache, LZ77, meta-Huffman. VP8X-wrapped VP8L (round 120) also pure for files that carry ICC/EXIF/XMP metadata. VP8 lossy + animated still via Magick. |
+| **TIFF** | Pure managed; LZW / Deflate / PackBits / JPEG-in-TIFF, multi-page | ✅ pure-managed `PureTiffDecoder` (rounds 109-119) — uncompressed + LZW + Deflate (zip code 8/32946) + PackBits, predictor=2 (horizontal differencing) + predictor=3 (FP byte-shuffle), multi-page IFD chain, tiled layout, BigTIFF (8-byte offsets, magic 0x002B), 32-bit IEEE float samples, CMYK photometric, plus existing OME-TIFF metadata + Ptif pyramid output. JPEG-in-TIFF (Compression=7) + planar=2 still fall through to Magick. |
 | **GIF** | Pure managed; animated, LZW | 🟡 pure-managed `PureGifDecoder` (round 106) — full GIF87a / GIF89a decode with LZW decompression (variable bit-width 3..12 bits, dynamic dictionary, KwKwK case), Graphics Control Extension (delay / transparency / disposal NONE/BACKGROUND/PREVIOUS), interlaced frames (4-pass de-interlace), global + local colour tables, frame composition onto the logical screen canvas. Outputs stacked-frames RGBA matching the existing animated convention. Magick.NET stays as fallback for malformed streams |
 | **PBM/PGM/PPM** | Pure managed (P1-P6) | ✅ pure-C# (P1-P6); PAM via Magick |
 | **QOI** | Pure managed; full QOI v1.0 | ✅ pure-C# (full QOI v1.0) |
@@ -94,7 +94,7 @@ threaded through `VipsEnumsExtensions.SizeOf`) and the three
 | **CSV / Matrix** | ❌ | ✅ pure-C# |
 | **JPEG XL** | ❌ | ❌ |
 | **JPEG 2000** | ❌ | ❌ |
-| **OpenEXR** | ❌ | ❌ |
+| **OpenEXR** | ❌ | 🟡 pure-managed `PureExrDecoder` (rounds 127-131) — header + attribute parser, scanline NO_COMPRESSION + RLE + ZIPS + ZIP + PXR24, single-level tiled layout, HALF pixel type, R/G/B/A + Y channel sets. PIZ primitives (wavelet + Huffman + bitmap LUT) validated in isolation in round 132 but the integration vs libimf-encoded bitstreams has residual issues, so PIZ is unwired at the dispatcher. B44 / B44A / DWAA / DWAB / FLOAT / UINT pixel types / multi-part files / mipmap levels / deep data still missing. |
 | **OpenSlide / DICOM / dcraw** | ❌ | ❌ |
 | **Output: pyramidal TIFF (Ptif)** | ❌ | ✅ |
 | **Output: dzsave (Deep Zoom DZI)** | ❌ | ✅ |
@@ -254,9 +254,11 @@ typed structs for each space:
 | `ColorConverter.Convert<TFrom, TTo>(...)` | ✅ `VipsColorConvert.Convert<TFrom, TTo>` (round 79) — generic dispatcher routing through RGB / XYZ. Direct pairwise methods also available (RgbToHsl, RgbToHsv, RgbToCmyk, RgbToXyz, XyzToLab, LabToLch). Identity case skips conversion |
 | `ColorMatrix` (4×4 with alpha channel) | ✅ `VipsImageOps.ColorMatrix(input, matrix)` — 4×5 matrix transform (4×4 mix + 1 translation column) on RGBA pixels, mirroring ImageSharp's `Filter(ColorMatrix)`. Per-image op alongside the per-value `VipsColorConvert` family |
 
-Same gap as the libvips colour matrix. Both libvips and ImageSharp
-treat the colourspace graph as a first-class citizen; CosmoImage
-doesn't yet.
+Color-space coverage is now at parity-or-better — value types for every
+ImageSharp colour space, full conversion graph through `VipsColorConvert`,
+chromatic adaptation, and a real ICC CMM (Matrix/TRC fast path + full
+LUT-based profile support) that exceeds ImageSharp's RGB-matrix
+approximation.
 
 ---
 
@@ -269,20 +271,23 @@ doesn't yet.
 | EXIF profile editing | ✅ | ✅ via `VipsExifProfile.SetValue<T>` + `Remove(tag)` + `SetExifProfile` round-trip (round 83) |
 | IPTC profile (read + write) | ✅ | ✅ `VipsIptcProfile` (round 84) — typed parser + serializer for IIM Application-Record streams; supports repeatable tags (Keywords, Byline, etc.) as `IReadOnlyList<string>`; UTF-8; standard 2-byte and extended 4-byte length forms; entries from non-Application records are silently skipped. Bridge methods `VipsImage.GetIptcProfile()` / `SetIptcProfile()`. Format-specific extraction (JPEG APP13 / 8BIM unwrap) deferred — users attach the IIM bytes directly via the bridge for now |
 | ICC profile structure parsing | ✅ — `IccProfile` with header + tag table | ✅ `VipsIccProfile` (rounds 85, 88) — typed header + tag-table indexed by 4-char signature with per-tag-type decoders. Round 88 added: `text` / `desc` / `mluc` for text tags (`Description` / `Copyright` properties auto-pick mluc on v4, desc/text on v2); `XYZ` decoding (`WhitePoint` / `BlackPoint` / `RedPrimary` / `GreenPrimary` / `BluePrimary` for `wtpt` / `bkpt` / `rXYZ` / `gXYZ` / `bXYZ`); `curv` decoding via `GetTagCurveGamma` / `GetTagCurveTable` (handles identity / single-gamma u8Fixed8 / N-entry LUT). LUT-AtoB / parametric curves / named-color tables / chromaticity tag still missing (rare on consumer profiles) |
-| ICC profile applied at sink (proper CMM) | 🟡 — uses RGB-matrix approximation | 🟡 — uses Magick.NET as one-shot |
+| ICC profile applied at sink (proper CMM) | 🟡 — uses RGB-matrix approximation | ✅ pure-managed CMM (rounds 114, 121-126): Matrix/TRC fast path with precomputed forward + inverse LUTs (round 114, sRGB / AdobeRGB / Display-P3 / etc.) + LUT-based profiles via lut16Type ('mft2'), lut8Type ('mft1'), lutAtoBType ('mAB '), lutBtoAType ('mBA ') (rounds 121-122, 124) + n-linear CLUT covering Gray / Lab / RGB / CMYK device sides + mixed src/dst band counts (RGB↔CMYK transforms via round 123) + Lab↔XYZ PCS conversion (round 125, standard CIE formulas with D50 white point) + rendering intent selection (round 126: Perceptual / RelativeColorimetric / Saturation tag slots with fallback). Legacy Magick path retained for profiles outside the modeled set (mpet multiProcessElementsType, black-point compensation). |
 | XMP DOM | ✅ via `SixLabors.Fonts` extension | ✅ `VipsXmpProfile` (round 86) — XDocument-backed DOM with typed accessors for the four standard XMP value shapes (simple, `rdf:Bag`, `rdf:Seq`, language-alternative `rdf:Alt` with `xml:lang`). Standard namespace constants (Dc / Xmp / Exif / Tiff / Photoshop / Iptc4XmpCore). Direct `Document` access for advanced use. xpacket markers stripped on parse, re-emitted on serialize. Bridge methods `VipsImage.GetXmpProfile()` / `SetXmpProfile()` |
 | Format-specific metadata (PNG text chunks, JPEG comments, GIF comments) | ✅ structured | ✅ typed extensions on `VipsImage` (round 98): `GetPngText` / `SetPngText` / `RemovePngText` / `GetAllPngText` / `SetAllPngText` for PNG `tEXt` / `iTXt` keywords (with `PngTextKeywords` constants for the spec-standard names — Title / Author / Description / Copyright / CreationTime / Software / Disclaimer / Warning / Source / Comment); `GetJpegComment` / `SetJpegComment` / `RemoveJpegComment` for the JPEG COM marker; `GetGifComment` / `SetGifComment` / `RemoveGifComment` for the GIF Comment Extension. Storage namespaced on `Metadata` dict (`png:text:*`, `jpeg:comment`, `gif:comment`); loader/saver pickup is per-format work for future rounds |
 | `VipsFields` typed accessors | n/a (their typed-profile API serves the same purpose) | ✅ `GetInt/Double/DoubleArray/Blob` + well-known shortcuts |
 | FITS / NIfTI header round-trip | ❌ | ✅ via `Metadata["fits:*"]` / `["nifti:*"]` |
 | OME-TIFF parsing | ❌ | ✅ `VipsOmeTiff` typed accessors |
 
-CosmoImage carries the metadata bytes losslessly across format
-boundaries (a JPEG → AVIF round-trip preserves all three blob types)
-but doesn't parse them into typed objects the way ImageSharp does.
-For a typical web-image workflow (preserve EXIF, strip on resize,
-inject XMP) the byte-blob model is enough; for editing-style metadata
-(rotate the EXIF orientation, set a DateTime tag, etc.) the typed
-profile API ImageSharp ships is a meaningful gap.
+Typed profile access is now substantially complete: `VipsExifProfile`
+(incl. GPS sub-IFD), `VipsIptcProfile`, `VipsIccProfile` (with
+parametric-curve / mft1 / mft2 / mAB / mBA tag-type decoders),
+`VipsXmpProfile` (XDocument DOM with simple / Bag / Seq / Alt-lang
+accessors), plus typed accessors for PNG `tEXt` / `iTXt`, JPEG COM,
+and GIF Comment Extension. Editing workflows (rotate EXIF orientation,
+set a DateTime tag, edit XMP keywords) work without reaching for
+Magick. Format-specific extraction inside container formats (JPEG
+APP13 8BIM-wrapped IPTC) deferred — users attach the IIM bytes
+directly via the bridge.
 
 ---
 
@@ -345,6 +350,16 @@ Worth itemising — not all the gap goes one way.
   OpenSeadragon. ImageSharp doesn't have this.
 - **OME-TIFF metadata** with typed `VipsOmeTiff` accessors for
   microscopy / pathology workflows.
+- **Pure-managed TIFF, including BigTIFF, tiles, predictor=2/3, multi-page,
+  and 32-bit float samples** — covers the geospatial / scientific-imaging
+  cases ImageSharp doesn't reach. JPEG-in-TIFF is the only fallback to
+  Magick.
+- **Pure-managed WebP VP8L lossless** decoder including the four
+  spatial transforms, color cache, and meta-Huffman partitioning.
+- **Real pure-managed ICC CMM** — Matrix/TRC fast path + LUT-based
+  profiles (mft1 / mft2 / mAB / mBA) + n-linear CLUT for CMYK + Lab↔XYZ
+  PCS conversion + rendering intents. ImageSharp uses an RGB-matrix
+  approximation; CosmoImage does the real CIE math.
 - **Permissive licensing only** — CosmoImage was specifically built
   to escape the SixLabors split-license. ImageSharp is dual-licensed
   (Apache 2.0 for non-commercial, paid for commercial use over
@@ -360,28 +375,32 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | :--- | :--- |
 | Core architecture (lazy vs eager — different by design) | n/a — different model |
 | Pixel formats (struct types) | ✅ 25 of ~25 (round 60 added the `Half` family — `BandFormat.Half = 10` enum value plus `HalfSingle` / `HalfVector2` / `HalfVector4` IPixel structs) |
-| Codecs (modern web formats) | 🟢 most covered, often via Magick |
-| Codecs (scientific / niche) | 🟢 we exceed ImageSharp here |
-| Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, many via Magick |
+| Codecs (modern web formats) | 🟢 PNG / APNG / JPEG / GIF / TIFF / BMP-most-cases / QOI / WebP-lossless all pure-managed; WebP-lossy + animated still via Magick |
+| Codecs (scientific / niche) | 🟢 we exceed ImageSharp here (HDR / FITS / NIfTI / MAT / CSV; PDF render via Docnet); OpenEXR partial (rounds 127-131) |
+| Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, a few via Magick |
 | Drawing & vector graphics | ✅ rounds 61–70 shipped path builder (move / line / cubic / quadratic / arc / close) + shape factories + all 6 brushes (solid / linear / radial / path / image / pattern) + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping + path-vs-path booleans (intersect / union / subtract via Greiner-Hormann) |
-| Color spaces | 🟡 only sRGB↔linear + RGB-matrix ops |
-| Metadata typed access | ❌ raw bytes only |
-| `MemoryAllocator` integration | 🟡 transient buffers only |
+| Color spaces | ✅ all ImageSharp colour types (Hsl / Hsv / Lab / Lch / Luv / Lchuv / Xyz / Xyy / Cmyk / HunterLab / LMS / YCbCr) + chromatic adaptation + full ICC CMM (Matrix/TRC + LUT-based + Lab↔XYZ PCS + rendering intents, rounds 79-82, 114, 121-126) |
+| Metadata typed access | ✅ `VipsExifProfile` (incl. GPS) / `VipsIptcProfile` / `VipsIccProfile` / `VipsXmpProfile` + format-specific (PNG text chunks, JPEG COM, GIF Comment) — rounds 83-88, 98 |
+| `MemoryAllocator` integration | 🟡 transient buffers + `MemorySink` long-lived; decoded `PixelsLazy` buffers still `new byte[]` |
 | Streaming load | 🟢 opt-in on every Stream-capable format |
 | Image.IdentifyAsync (single entry point) | ✅ `IdentifyAsync(stream)` + `LoadAsync(stream)` (round 54) |
-| Configuration registry | ❌ |
+| Configuration registry | ✅ `VipsConfiguration.Default.Register(IVipsImageFormat)` for decoders + encoders + extension-based save dispatch (rounds 89-93, 108) |
 
 The headline conclusion: CosmoImage covers the **mainline web-image
 pipeline** (load, transform, save with proper colour-managed Float
-intermediates) at parity-or-better with ImageSharp, including formats
-ImageSharp doesn't ship at all. We're behind on the **typed-pixel
-ecosystem** (~21 missing pixel structs, no generic op surface) and
-the **vector-graphics drawing layer** (entirely missing). The drawing
-gap is probably permanent — that's its own discipline; the typed-pixel
-gap is closable but follows the broader `Image<TPixel>` generic-op-
-surface direction tracked in `TODO_PARITY.md`.
+intermediates) at parity-or-better with ImageSharp. The pixel-format
+zoo, vector-drawing surface, typed-metadata access, and ICC color
+management are now done. Remaining gaps are all **codec-completion
+work** — WebP VP8 lossy + animated, the rest of OpenEXR (PIZ
+integration, B44, DWA, multi-part, deep data), and the niche codecs
+(JPEG XL, JPEG 2000, DICOM, OpenSlide, dcraw). Each of those is its
+own multi-week project. The architectural gap (eager `Image<TPixel>`
+vs lazy demand-driven) stays permanent by design; the typed-generic-op
+surface is closable but follows a broader direction tracked in
+`TODO_PARITY.md`.
 
 ---
 
-*Last updated: 2026-05-02. Compares CosmoImage's current state at
-233 passing tests against the ImageSharp 3.x API surface.*
+*Last updated: 2026-05-04. Compares CosmoImage's current state at
+1315 passing tests (HEAD `badd203`, through round 132) against the
+ImageSharp 3.x API surface.*
