@@ -118,10 +118,15 @@ internal abstract class LutTransform
     /// </summary>
     public static LutTransform? TryFromTag(VipsIccProfile profile, string tagSig)
     {
-        var mft2 = profile.GetTagMft2(tagSig);
-        if (mft2 != null) return new Mft2Transform(mft2);
+        // Try forms in newest-to-oldest order: mAB/mBA (v4 modern),
+        // mft2 (v2 16-bit), mft1 (v2 8-bit). mft1 maps to IccMft2 with
+        // 8→16-bit scaling so the same pipeline runs for both.
         var lutAB = profile.GetTagLutAB(tagSig);
         if (lutAB != null) return new LutABTransform(lutAB);
+        var mft2 = profile.GetTagMft2(tagSig);
+        if (mft2 != null) return new Mft2Transform(mft2);
+        var mft1 = profile.GetTagMft1(tagSig);
+        if (mft1 != null) return new Mft2Transform(mft1);
         return null;
     }
 

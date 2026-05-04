@@ -476,6 +476,72 @@ public sealed class VipsIccProfile
     }
 
     /// <summary>
+    /// Decode a <c>mft1</c>-type tag (lut8Type, ICC v2 section 10.9).
+    /// Older 8-bit cousin of mft2: input/output curves are fixed at
+    /// 256 entries, CLUT entries are 8-bit. Returns the data scaled
+    /// up to the same <see cref="IccMft2"/> representation used by
+    /// mft2 (entries × 257 to fill 0..65535) so callers can route
+    /// both through the same pipeline.
+    /// </summary>
+    public IccMft2? GetTagMft1(string signature)
+    {
+        var data = GetTagData(signature);
+        if (data == null || data.Length < 48) return null;
+        if (Encoding.ASCII.GetString(data, 0, 4) != "mft1") return null;
+
+        int inCh = data[8];
+        int outCh = data[9];
+        int grid = data[10];
+        if (inCh < 1 || inCh > 4 || outCh < 1 || outCh > 4 || grid < 2 || grid > 255)
+            return null;
+
+        var matrix = new double[3, 3];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+                matrix[i, j] = ReadS15Fixed16(data, 12 + (i * 3 + j) * 4);
+
+        const int n = 256;
+        long need = 48L + (long)inCh * n + (long)Pow(grid, inCh) * outCh + (long)outCh * n;
+        if (data.Length < need) return null;
+
+        var inputTables = new ushort[inCh][];
+        int p = 48;
+        for (int c = 0; c < inCh; c++)
+        {
+            inputTables[c] = new ushort[n];
+            for (int k = 0; k < n; k++)
+                inputTables[c][k] = (ushort)(data[p + k] * 257);
+            p += n;
+        }
+
+        long clutEntries = (long)Pow(grid, inCh) * outCh;
+        var clut = new ushort[clutEntries];
+        for (long k = 0; k < clutEntries; k++)
+            clut[k] = (ushort)(data[p + (int)k] * 257);
+        p += (int)clutEntries;
+
+        var outputTables = new ushort[outCh][];
+        for (int c = 0; c < outCh; c++)
+        {
+            outputTables[c] = new ushort[n];
+            for (int k = 0; k < n; k++)
+                outputTables[c][k] = (ushort)(data[p + k] * 257);
+            p += n;
+        }
+
+        return new IccMft2
+        {
+            InputChannels = inCh,
+            OutputChannels = outCh,
+            GridSize = grid,
+            Matrix = matrix,
+            InputTables = inputTables,
+            Clut = clut,
+            OutputTables = outputTables,
+        };
+    }
+
+    /// <summary>
     /// Decode a <c>mAB </c> (lutAtoBType) or <c>mBA </c> (lutBtoAType)
     /// tag. Returns <c>null</c> for missing tags or shapes the parser
     /// can't recognise. <paramref name="signature"/> is the tag slot
