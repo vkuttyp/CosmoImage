@@ -11,6 +11,8 @@ public enum VipsEdgeKernel
     Prewitt = 1,
     /// <summary>3×3 isotropic 2nd derivative; single-kernel zero-crossing edge.</summary>
     Laplacian = 2,
+    /// <summary>3×3 Sobel variant with 6/10/6 weighting (instead of 1/2/1).</summary>
+    Kayyali = 3,
 }
 
 /// <summary>
@@ -79,6 +81,7 @@ public class VipsEdgeKernelOp : VipsOperation
                     VipsEdgeKernel.Roberts => Roberts(inReg, @in, gx, gy),
                     VipsEdgeKernel.Prewitt => Prewitt(inReg, @in, gx, gy),
                     VipsEdgeKernel.Laplacian => Laplacian(inReg, @in, gx, gy),
+                    VipsEdgeKernel.Kayyali => Kayyali(inReg, @in, gx, gy),
                     _ => 0,
                 };
                 outAddr[x] = result;
@@ -119,6 +122,29 @@ public class VipsEdgeKernelOp : VipsOperation
         int gx = -p00 + p02 - p10 + p12 - p20 + p22;
         int gy = -p00 - p01 - p02 + p20 + p21 + p22;
         return (byte)Math.Clamp(Math.Sqrt(gx * gx + gy * gy), 0, 255);
+    }
+
+    private static byte Kayyali(VipsRegion reg, VipsImage @in, int x, int y)
+    {
+        int p00 = Sample(reg, @in, x - 1, y - 1);
+        int p01 = Sample(reg, @in, x,     y - 1);
+        int p02 = Sample(reg, @in, x + 1, y - 1);
+        int p10 = Sample(reg, @in, x - 1, y);
+        int p12 = Sample(reg, @in, x + 1, y);
+        int p20 = Sample(reg, @in, x - 1, y + 1);
+        int p21 = Sample(reg, @in, x,     y + 1);
+        int p22 = Sample(reg, @in, x + 1, y + 1);
+        // Kayyali: Sobel-shaped but with 6/10/6 corner/edge weights
+        // (vs Sobel's 1/2/1). Stronger response on diagonal edges.
+        int gx =  6 * p00 +              -6 * p02
+               + 10 * p10 +             -10 * p12
+               +  6 * p20 +              -6 * p22;
+        int gy = -6 * p00 - 10 * p01 -  6 * p02
+               +  6 * p20 + 10 * p21 +  6 * p22;
+        // Normalize: kernel max = sqrt((6+10+6)·255)² × 2 ≈ 11k. Divide
+        // by ~22 to fit 0..255 range (matches the Sobel-style scaling).
+        double mag = Math.Sqrt((double)gx * gx + (double)gy * gy) / 22.0;
+        return (byte)Math.Clamp(mag, 0, 255);
     }
 
     private static byte Laplacian(VipsRegion reg, VipsImage @in, int x, int y)

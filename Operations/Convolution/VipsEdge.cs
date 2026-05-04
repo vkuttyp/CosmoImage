@@ -10,6 +10,7 @@ public enum VipsEdgeMethod
     Roberts = 3,
     Prewitt = 4,
     Laplacian = 5,
+    Kayyali = 6,
 }
 
 /// <summary>
@@ -36,6 +37,7 @@ public static class VipsEdge
             VipsEdgeMethod.Roberts => VipsImageOps.EdgeKernel(input, VipsEdgeKernel.Roberts),
             VipsEdgeMethod.Prewitt => VipsImageOps.EdgeKernel(input, VipsEdgeKernel.Prewitt),
             VipsEdgeMethod.Laplacian => VipsImageOps.EdgeKernel(input, VipsEdgeKernel.Laplacian),
+            VipsEdgeMethod.Kayyali => VipsImageOps.EdgeKernel(input, VipsEdgeKernel.Kayyali),
             _ => throw new ArgumentOutOfRangeException(nameof(method)),
         };
     }

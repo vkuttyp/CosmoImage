@@ -404,6 +404,92 @@ public sealed partial class VipsPath
         return result;
     }
 
+    /// <summary>
+    /// Produce a parallel-offset path at perpendicular distance
+    /// <paramref name="distance"/>. Positive shifts to the right of
+    /// the path's tangent direction (rotate-tangent-90°-clockwise);
+    /// negative shifts to the left. Distinct from <see cref="Outline"/>,
+    /// which builds the closed band on BOTH sides for stroking — this
+    /// returns a single parallel polyline.
+    ///
+    /// <para>Bezier curves are flattened first; result is a polyline
+    /// path. Corner vertices use miter offset (the bisector of the
+    /// two adjacent edge-perpendiculars); for sharp corners the
+    /// miter distance grows large — clamp the input geometry if you
+    /// need a hard upper bound.</para>
+    /// </summary>
+    public VipsPath Offset(double distance)
+    {
+        var subpaths = FlattenForSimplify();
+        var result = new VipsPath();
+        foreach (var (points, closed) in subpaths)
+        {
+            var offset = OffsetPolyline(points, distance, closed);
+            if (offset.Count < 2) continue;
+            result.MoveTo(offset[0].x, offset[0].y);
+            for (int i = 1; i < offset.Count; i++)
+                result.LineTo(offset[i].x, offset[i].y);
+            if (closed) result.Close();
+        }
+        return result;
+    }
+
+    private static List<(double x, double y)> OffsetPolyline(
+        List<(double x, double y)> poly, double distance, bool closed)
+    {
+        int n = poly.Count;
+        var result = new List<(double, double)>(n);
+        if (n < 2) return result;
+        for (int i = 0; i < n; i++)
+        {
+            // Right-hand perpendicular (rotate edge direction 90° clockwise)
+            // for the incoming and outgoing edges; the corner offset is
+            // along the angle bisector with miter scaling.
+            double inPx = 0, inPy = 0, outPx = 0, outPy = 0;
+            bool hasIn = (i > 0) || closed;
+            bool hasOut = (i < n - 1) || closed;
+            if (hasIn)
+            {
+                var prev = poly[(i - 1 + n) % n];
+                var here = poly[i];
+                double dx = here.x - prev.x, dy = here.y - prev.y;
+                double len = Math.Sqrt(dx * dx + dy * dy);
+                if (len > 1e-9) { inPx = -dy / len; inPy = dx / len; }
+            }
+            if (hasOut)
+            {
+                var here = poly[i];
+                var next = poly[(i + 1) % n];
+                double dx = next.x - here.x, dy = next.y - here.y;
+                double len = Math.Sqrt(dx * dx + dy * dy);
+                if (len > 1e-9) { outPx = -dy / len; outPy = dx / len; }
+            }
+            // Pick offset direction. Endpoints of an open polyline use a
+            // single edge's perpendicular; interior vertices use the
+            // bisector with miter scaling.
+            double ox, oy;
+            if (!hasIn) { ox = outPx; oy = outPy; }
+            else if (!hasOut) { ox = inPx; oy = inPy; }
+            else
+            {
+                double bx = inPx + outPx, by = inPy + outPy;
+                double bl = Math.Sqrt(bx * bx + by * by);
+                if (bl < 1e-9) { ox = outPx; oy = outPy; }
+                else
+                {
+                    bx /= bl; by /= bl;
+                    // Miter scaling: distance / cos(half-angle) where
+                    // cos = bisector·in_perp.
+                    double cos = bx * inPx + by * inPy;
+                    double miter = Math.Abs(cos) > 1e-3 ? 1.0 / cos : 1.0;
+                    ox = bx * miter; oy = by * miter;
+                }
+            }
+            result.Add((poly[i].x + distance * ox, poly[i].y + distance * oy));
+        }
+        return result;
+    }
+
     private List<(List<(double x, double y)> Points, bool Closed)> FlattenForSimplify()
     {
         var result = new List<(List<(double, double)>, bool)>();

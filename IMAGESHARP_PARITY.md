@@ -158,7 +158,7 @@ of theirs we don't have, a few of ours they don't.
 | `AutoOrient()` | ✅ |
 | `Flip(FlipMode)` | ✅ |
 | `Transform(matrix, sampler)` | 🟡 covered by `Affine` |
-| `DetectEdges(filter)` (Sobel/Roberts/Prewitt/Kayyali/Kirsch/Laplacian variants) | 🟡 `Edge(method)` dispatcher: Sobel, Compass (= Kirsch), Canny, Roberts, Prewitt, Laplacian. Kayyali still missing |
+| `DetectEdges(filter)` (Sobel/Roberts/Prewitt/Kayyali/Kirsch/Laplacian variants) | ✅ `Edge(method)` dispatcher: Sobel, Compass (= Kirsch), Canny, Roberts, Prewitt, Laplacian, Kayyali (round 95) |
 
 ### Convolution / Blur
 
@@ -166,7 +166,7 @@ of theirs we don't have, a few of ours they don't.
 | :--- | :--- |
 | `BoxBlur(radius)` | ✅ `BoxBlur(radius, passes)` running-sum (round 49) |
 | `GaussianBlur(sigma)` | ✅ `GaussBlur` |
-| `GaussianSharpen(sigma)` | 🟡 covered by `UnsharpMask` |
+| `GaussianSharpen(sigma)` | ✅ `GaussianSharpen(sigma)` (round 95) — thin wrapper over `UnsharpMask(sigma, amount=1.0)` |
 | `DetectEdges(EdgeDetectorKernel)` (8+ kernels) | 🟡 same as above — Sobel/Compass/Canny/Roberts/Prewitt/Laplacian via the `Edge(method)` dispatcher |
 
 ### Quantization / Dithering
@@ -193,7 +193,7 @@ of theirs we don't have, a few of ours they don't.
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
 | `DrawImage(source, location, opacity, blendMode)` (full PorterDuff: Normal, Multiply, Add, Subtract, Screen, Darken, Lighten, Overlay, HardLight, …) | ✅ `DrawImage(base, overlay, x, y, mode, opacity)` and `CompositeBlend(base, overlay, mode, opacity)` — 13 modes (Normal/Multiply/Screen/Overlay/Darken/Lighten/HardLight/SoftLight/Difference/Exclusion/Add/Subtract/ColorDodge) |
-| `Fill(color, region)` | 🟡 covered by `DrawRect(... fill: true)` for rect; no general region fill |
+| `Fill(color, region)` | ✅ `Fill(canvas, color, region)` (round 95) — region as a `VipsPath`; thin wrapper over `FillPath` with a `VipsSolidBrush`. Plus the existing rectangle convenience and `DrawRect(fill:true)` |
 | `Clear(color)` | ✅ `Clear(input, color…)` fills the entire canvas |
 
 CosmoImage extras not in ImageSharp:
@@ -222,7 +222,7 @@ text. ImageSharp has all of:
 | Clipping regions (intersect / union / difference) | ✅ | ✅ rectangular `clipRect` parameter on FillPath / StrokePath / StrokeLine etc. (round 66) AND full path-vs-path booleans via `VipsPath.Intersect` / `Union` / `Subtract` (round 68 — Greiner-Hormann polygon clipping; curves flattened first; non-degenerate inputs only) |
 | Affine path transforms | ✅ | ✅ `VipsPath.Transform(a, b, c, d, tx, ty)` + `Translate` / `Scale` / `Rotate` / `RotateAround` (round 66). Returns a new path; transforms endpoints AND Bezier control points |
 | Tessellation (path → triangles) | ✅ | 🟡 `VipsPath.Tessellate()` (round 76) — ear-clipping triangulation, returns flat `(x, y)` triplets ready for GPU vertex buffers. Bezier curves flatten first; each closed sub-path tessellates independently (no automatic hole subtraction — run `Subtract` first for shapes like glyph 'O') |
-| Path operations: outline expansion, offset, simplify | ✅ | 🟡 `VipsPath.Outline(width, cap, join, miterLimit)` (round 71 — exposes the stroke outline as a fillable path) + `VipsPath.Simplify(tolerance)` (round 71 — Douglas-Peucker; flattens curves first, returns polyline path). Independent path-offset (offset by N without producing a closed band) not yet exposed |
+| Path operations: outline expansion, offset, simplify | ✅ | ✅ `VipsPath.Outline(width, cap, join, miterLimit)` (round 71 — closed stroke band) + `VipsPath.Simplify(tolerance)` (round 71 — Douglas-Peucker) + `VipsPath.Offset(distance)` (round 95 — single-side parallel offset with miter-bisector corners). Bezier curves flatten first |
 | Text rendering with full glyph shaping (via `SixLabors.Fonts`) | ✅ HarfBuzz-equivalent shaping, ligatures, kerning, RTL/LTR/BiDi | ✅ rounds 72–77 — `VipsTextOps.DrawText` / `TextToPath` backed by `SixLabors.Fonts` (kerning, ligatures, full OpenType shaping). Multi-line layout (`\n`, `WrappingLength`, `LineSpacing`, `HAlign`, `WordBreak`, `Justify`); decorations (Underline / Strikeout / Overline as flags); writing mode (`LayoutMode` Horizontal* / Vertical*); reading direction (`TextDirection` LeftToRight / RightToLeft / Auto with Unicode BiDi resolution); opt-in `OpenTypeFeatures` (4-char tags — `smcp`, `ss01`, `frac`, `dlig`, etc.). Legacy `VipsImageOps.Text` (Magick.NET label render) still available for one-shot label generation |
 | Text on path | ✅ | ✅ `VipsTextOps.TextOnPath(opts, targetPath, offset)` (round 74) — shapes text at origin, flattens glyph outlines to polylines, then warps each point onto the target via arc-length parameterisation. Tangent-aware so glyphs rotate to follow path direction. `offset` shifts perpendicular (positive = below path). Single sub-path target only |
 | Text wrapping / measuring | ✅ | ✅ wrapping via `VipsTextOptions.WrappingLength` + word break + alignment (round 73). Measuring via `VipsTextOps.MeasureText` (layout box) / `MeasureBounds` (tight glyph bbox) / `CountLines` (round 78) |

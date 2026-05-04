@@ -532,6 +532,15 @@ public static partial class VipsImageOps
         return Run(new VipsUnsharpMask { In = input, Sigma = sigma, Amount = amount });
     }
 
+    /// <summary>
+    /// Gaussian sharpen — blur with σ, subtract, add back amplified detail.
+    /// Mirrors ImageSharp's <c>GaussianSharpen(sigma)</c>; thin wrapper over
+    /// <see cref="UnsharpMask"/> with <c>amount = 1.0</c> (the standard
+    /// sharpen recipe).
+    /// </summary>
+    public static VipsImage GaussianSharpen(VipsImage input, double sigma = 1.0)
+        => UnsharpMask(input, sigma, amount: 1.0);
+
     // From Operations/Convolution/VipsConv.cs
     public static VipsImage Conv(VipsImage input, double[,] mask)
     {
@@ -1862,6 +1871,14 @@ public static partial class VipsImageOps
     public static VipsImage Fill(VipsImage input, IVipsBrush brush,
         double x, double y, double w, double h, bool aa = true)
         => FillPath(input, VipsPath.Rectangle(x, y, w, h), brush, aa);
+
+    /// <summary>
+    /// Fill an arbitrary region with a solid colour. Mirrors
+    /// ImageSharp's <c>Fill(color, region)</c> — equivalent to
+    /// <see cref="FillPath"/> with a <see cref="VipsSolidBrush"/>.
+    /// </summary>
+    public static VipsImage Fill(VipsImage input, byte[] color, VipsPath region, bool aa = true)
+        => FillPath(input, region, new VipsSolidBrush(color), aa);
 
     /// <summary>Convenience: fill a circle at (cx, cy) with the given radius.</summary>
     public static VipsImage FillCircle(VipsImage input, IVipsBrush brush,
