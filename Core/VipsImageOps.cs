@@ -1951,6 +1951,20 @@ public static partial class VipsImageOps
     public static VipsImage Quantize(VipsImage input, int colors = 256, bool dither = true)
         => Run(new VipsQuantize { In = input, Colors = colors, Dither = dither });
 
+    /// <summary>
+    /// Quantize via a pluggable <see cref="IVipsQuantizer"/>. Mirrors
+    /// ImageSharp's <c>Quantize(IQuantizer)</c>. Use this overload to
+    /// inject a custom quantization algorithm (or a tuned
+    /// <see cref="MagickQuantizer"/>); the simpler
+    /// <see cref="Quantize(VipsImage, int, bool)"/> overload routes
+    /// through the default Magick implementation.
+    /// </summary>
+    public static VipsImage Quantize(VipsImage input, IVipsQuantizer quantizer)
+    {
+        if (quantizer == null) throw new ArgumentNullException(nameof(quantizer));
+        return quantizer.Apply(input);
+    }
+
     // ===== Savers =====
     // From Savers/VipsApngSaver.cs
     /// <summary>

@@ -91,16 +91,11 @@ public class VipsQuantize : VipsOperation
                     DitherMethod = dither ? DitherMethod.FloydSteinberg : DitherMethod.No,
                 });
 
-                int stride = width * bands;
-                var outBuf = new byte[stride * height];
-                using var pixels = img.GetPixels();
-                for (int y = 0; y < height; y++)
-                {
-                    var row = pixels.GetArea(0, y, (uint)width, 1)
-                        ?? throw new InvalidOperationException($"Quantize: pixel row {y} returned null");
-                    Array.Copy(row, 0, outBuf, y * stride, stride);
-                }
-                return outBuf;
+                // Quantize switches storage to palette-indexed; round-trip
+                // through raw output so we get back direct-colour bytes.
+                img.Settings.Format = rawFormat;
+                img.Settings.Depth = 8;
+                return img.ToByteArray(rawFormat);
             })
         };
 
