@@ -262,18 +262,20 @@ public class Round121Tests
     }
 
     [Fact]
-    public void LutCmm_TryBuildReturnsNullForChannelMismatch()
+    public void LutCmm_TryBuildReturnsNullForPcsMismatch()
     {
-        // 4-input profile (e.g., CMYK) — out of scope for this round.
+        // PCS is always 3-channel (XYZ or Lab). A profile whose A2B0
+        // outputs 4 channels (impossible per spec, but a useful guard
+        // against malformed profiles) → null → caller falls back.
         var identity = new double[3, 3] { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
-        var fourCh = BuildMft2(
-            inCh: 4, outCh: 3, grid: 5, curveLen: 256,
+        var fourOutMft2 = BuildMft2(
+            inCh: 3, outCh: 4, grid: 5, curveLen: 256,
             identity,
             inputCurve: (c, k) => (ushort)k,
             clutEntry: (idx, c) => 0,
             outputCurve: (c, k) => (ushort)k);
         var threeChIdent = BuildHalveMft2();
-        var src = VipsIccProfile.TryParse(BuildSyntheticProfile(fourCh, fourCh))!;
+        var src = VipsIccProfile.TryParse(BuildSyntheticProfile(fourOutMft2, fourOutMft2))!;
         var dst = VipsIccProfile.TryParse(BuildSyntheticProfile(threeChIdent, threeChIdent))!;
         Assert.Null(VipsIccLutCmm.TryBuild(src, dst));
     }

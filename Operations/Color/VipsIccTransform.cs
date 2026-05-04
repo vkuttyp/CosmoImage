@@ -37,11 +37,18 @@ public class VipsIccTransform : VipsOperation
             }
         }
 
+        // Determine destination band count. Matrix/TRC always lands in
+        // 3-channel RGB; LUT path may produce CMYK (4 channels). Both
+        // pass through alpha when the source carries it.
+        int dstBands = 3;
+        if (lutCmm != null) dstBands = lutCmm.DstChannels;
+        if (In.Bands == dstBands + 1 || In.Bands == 4 && dstBands == 3) dstBands = In.Bands;
+
         Out = new VipsImage
         {
             Width = In.Width,
             Height = In.Height,
-            Bands = 3, // Target profile is usually RGB
+            Bands = dstBands,
             BandFormat = VipsBandFormat.UChar,
             Interpretation = Intent,
             Coding = In.Coding,
@@ -57,6 +64,7 @@ public class VipsIccTransform : VipsOperation
                 OutputProfile = OutputProfile,
                 Cmm = matrixCmm,
                 LutCmm = lutCmm,
+                DstBands = dstBands,
             },
         };
         Out.CopyMetadataFrom(In);
@@ -71,6 +79,7 @@ public class VipsIccTransform : VipsOperation
         public byte[]? OutputProfile;
         public VipsIccCmm? Cmm;
         public VipsIccLutCmm? LutCmm;
+        public int DstBands;
     }
 
     public override int GetCacheKey()
@@ -93,33 +102,36 @@ public class VipsIccTransform : VipsOperation
 
         if (inRegion.Prepare(r) != 0) return -1;
 
-        int bands = @in.Bands;
-        if (ctx.Cmm != null && (bands == 3 || bands == 4))
-            return GeneratePureCmm(inRegion, outRegion, r, bands, ctx.Cmm);
-        if (ctx.LutCmm != null && (bands == 3 || bands == 4))
-            return GeneratePureLutCmm(inRegion, outRegion, r, bands, ctx.LutCmm);
+        int srcBands = @in.Bands;
+        int dstBands = ctx.DstBands;
+        if (ctx.Cmm != null && srcBands == dstBands && (srcBands == 3 || srcBands == 4))
+            return GeneratePureCmm(inRegion, outRegion, r, srcBands, ctx.Cmm);
+        if (ctx.LutCmm != null)
+            return GeneratePureLutCmm(inRegion, outRegion, r, srcBands, dstBands, ctx.LutCmm);
 
-        return GenerateMagick(inRegion, outRegion, r, bands, ctx.InputProfile, ctx.OutputProfile!);
+        return GenerateMagick(inRegion, outRegion, r, srcBands, ctx.InputProfile, ctx.OutputProfile!);
     }
 
     /// <summary>
     /// Pure-CMM path for LUT-based profiles. Same row-by-row pattern as
-    /// the Matrix/TRC fast path but goes through the trilinear-CLUT
-    /// pipeline; per-pixel cost is higher but stays in pure managed code.
+    /// the Matrix/TRC fast path but goes through the n-linear-CLUT
+    /// pipeline. Source and destination band counts may differ
+    /// (RGB → CMYK or vice versa).
     /// </summary>
     private static int GeneratePureLutCmm(VipsRegion inRegion, VipsRegion outRegion,
-        VipsRect r, int bands, VipsIccLutCmm cmm)
+        VipsRect r, int srcBands, int dstBands, VipsIccLutCmm cmm)
     {
-        int rowBytes = r.Width * bands;
-        var rowBuf = new byte[rowBytes];
-        var dstBuf = new byte[rowBytes];
+        int srcRowBytes = r.Width * srcBands;
+        int dstRowBytes = r.Width * dstBands;
+        var rowBuf = new byte[srcRowBytes];
+        var dstBuf = new byte[dstRowBytes];
         for (int y = 0; y < r.Height; y++)
         {
             var inLine = inRegion.GetAddress(r.Left, r.Top + y);
-            inLine.Slice(0, rowBytes).CopyTo(rowBuf);
-            cmm.Apply(rowBuf, 0, dstBuf, 0, r.Width, bands);
+            inLine.Slice(0, srcRowBytes).CopyTo(rowBuf);
+            cmm.Apply(rowBuf, 0, srcBands, dstBuf, 0, dstBands, r.Width);
             var outLine = outRegion.GetAddress(r.Left, r.Top + y);
-            dstBuf.AsSpan(0, rowBytes).CopyTo(outLine);
+            dstBuf.AsSpan(0, dstRowBytes).CopyTo(outLine);
         }
         return 0;
     }

@@ -31,44 +31,66 @@ public sealed class VipsIccLutCmm
         _reverse = reverse;
     }
 
+    /// <summary>Channels expected on the source side (3 for RGB, 4 for CMYK).</summary>
+    public int SrcChannels => _forward.InputChannels;
+    /// <summary>Channels produced on the destination side.</summary>
+    public int DstChannels => _reverse.OutputChannels;
+
     public static VipsIccLutCmm? TryBuild(VipsIccProfile src, VipsIccProfile dst)
     {
         if (src == null || dst == null) return null;
         var fwd = LutTransform.TryFromTag(src, "A2B0");
         var rev = LutTransform.TryFromTag(dst, "B2A0");
         if (fwd == null || rev == null) return null;
-        // RGB-ish only: 3-channel device input (or output for B2A) for now.
-        if (fwd.InputChannels != 3 || fwd.OutputChannels != 3) return null;
-        if (rev.InputChannels != 3 || rev.OutputChannels != 3) return null;
+        // PCS is always 3D — both transforms must agree at the seam.
+        if (fwd.OutputChannels != 3 || rev.InputChannels != 3) return null;
+        // Device sides can be 1..4 (Gray / Lab / RGB / CMYK).
+        if (fwd.InputChannels < 1 || fwd.InputChannels > 4) return null;
+        if (rev.OutputChannels < 1 || rev.OutputChannels > 4) return null;
         return new VipsIccLutCmm(fwd, rev);
     }
 
-    public void Apply(byte[] src, int srcOff, byte[] dst, int dstOff, int count, int bands)
+    /// <summary>
+    /// Apply the transform pixel-by-pixel.
+    /// <paramref name="srcBands"/> may include trailing alpha
+    /// (<c>srcBands</c> = <see cref="SrcChannels"/> + 1); same for
+    /// <paramref name="dstBands"/>. Alpha passes through to the output
+    /// when both sides have one — otherwise it's dropped.
+    /// </summary>
+    public void Apply(byte[] src, int srcOff, int srcBands,
+        byte[] dst, int dstOff, int dstBands, int count)
     {
-        if (bands != 3 && bands != 4)
-            throw new ArgumentException("VipsIccLutCmm requires 3- or 4-band data", nameof(bands));
+        int srcCh = SrcChannels;
+        int dstCh = DstChannels;
+        if (srcBands < srcCh) throw new ArgumentException($"srcBands {srcBands} < required {srcCh}", nameof(srcBands));
+        if (dstBands < dstCh) throw new ArgumentException($"dstBands {dstBands} < required {dstCh}", nameof(dstBands));
 
-        Span<double> inBuf = stackalloc double[3];
+        Span<double> inBuf = stackalloc double[4];
         Span<double> pcs = stackalloc double[3];
-        Span<double> outBuf = stackalloc double[3];
+        Span<double> outBuf = stackalloc double[4];
+
+        bool passAlpha = srcBands > srcCh && dstBands > dstCh;
 
         for (int i = 0; i < count; i++)
         {
-            int sp = srcOff + i * bands;
-            int dp = dstOff + i * bands;
-            inBuf[0] = src[sp]     / 255.0;
-            inBuf[1] = src[sp + 1] / 255.0;
-            inBuf[2] = src[sp + 2] / 255.0;
+            int sp = srcOff + i * srcBands;
+            int dp = dstOff + i * dstBands;
+            for (int c = 0; c < srcCh; c++) inBuf[c] = src[sp + c] / 255.0;
 
-            _forward.Apply(inBuf, pcs);
-            _reverse.Apply(pcs, outBuf);
+            _forward.Apply(inBuf.Slice(0, srcCh), pcs);
+            _reverse.Apply(pcs, outBuf.Slice(0, dstCh));
 
-            dst[dp]     = ToByte(outBuf[0]);
-            dst[dp + 1] = ToByte(outBuf[1]);
-            dst[dp + 2] = ToByte(outBuf[2]);
-            if (bands == 4) dst[dp + 3] = src[sp + 3];
+            for (int c = 0; c < dstCh; c++) dst[dp + c] = ToByte(outBuf[c]);
+            if (passAlpha) dst[dp + dstCh] = src[sp + srcCh];
         }
     }
+
+    /// <summary>
+    /// Convenience overload for same-band-count transforms (the common
+    /// case where srcBands == dstBands == channels [+ alpha]).
+    /// </summary>
+    public void Apply(byte[] src, int srcOff, byte[] dst, int dstOff, int count, int bands)
+        => Apply(src, srcOff, bands, dst, dstOff, bands, count);
 
     private static byte ToByte(double v)
     {
@@ -117,45 +139,45 @@ internal abstract class LutTransform
     }
 
     /// <summary>
-    /// 3D trilinear interpolation through a flat CLUT. Rows iterate
-    /// the slowest axis, columns the fastest — same convention used
-    /// by both mft2 and mAB CLUT layouts.
+    /// N-linear interpolation through a flat CLUT (1..4 input dimensions).
+    /// Visits every corner of the surrounding hypercube (2^n corners),
+    /// computing the product of axis weights and accumulating into each
+    /// output channel. Slower than hand-rolled trilinear for 3D, but
+    /// uniform code that handles CMYK 4D CLUTs without separate paths.
     /// </summary>
-    protected static void TrilinearLookup3(ushort[] clut, int[] grids, int outCh,
+    protected static void NLinearLookup(ushort[] clut, int[] grids, int outCh,
         ReadOnlySpan<double> input, Span<double> output)
     {
-        int g0 = grids[0], g1 = grids[1], g2 = grids[2];
-        double xa = Math.Clamp(input[0], 0, 1) * (g0 - 1);
-        double xb = Math.Clamp(input[1], 0, 1) * (g1 - 1);
-        double xc = Math.Clamp(input[2], 0, 1) * (g2 - 1);
-        int ia0 = (int)xa, ib0 = (int)xb, ic0 = (int)xc;
-        int ia1 = Math.Min(ia0 + 1, g0 - 1);
-        int ib1 = Math.Min(ib0 + 1, g1 - 1);
-        int ic1 = Math.Min(ic0 + 1, g2 - 1);
-        double fa = xa - ia0, fb = xb - ib0, fc = xc - ic0;
+        int n = grids.Length;
+        Span<int> i0 = stackalloc int[8];   // up to 8 input dims
+        Span<double> frac = stackalloc double[8];
+        for (int k = 0; k < n; k++)
+        {
+            double v = Math.Clamp(input[k], 0, 1) * (grids[k] - 1);
+            int ik = (int)v;
+            if (ik >= grids[k] - 1) { ik = grids[k] - 1; frac[k] = 0; }
+            else frac[k] = v - ik;
+            i0[k] = ik;
+        }
 
-        int Idx(int aa, int bb, int cc, int ch) => ((aa * g1 + bb) * g2 + cc) * outCh + ch;
-
+        int totalCorners = 1 << n;
         for (int ch = 0; ch < outCh && ch < output.Length; ch++)
         {
-            double v000 = clut[Idx(ia0, ib0, ic0, ch)] / 65535.0;
-            double v001 = clut[Idx(ia0, ib0, ic1, ch)] / 65535.0;
-            double v010 = clut[Idx(ia0, ib1, ic0, ch)] / 65535.0;
-            double v011 = clut[Idx(ia0, ib1, ic1, ch)] / 65535.0;
-            double v100 = clut[Idx(ia1, ib0, ic0, ch)] / 65535.0;
-            double v101 = clut[Idx(ia1, ib0, ic1, ch)] / 65535.0;
-            double v110 = clut[Idx(ia1, ib1, ic0, ch)] / 65535.0;
-            double v111 = clut[Idx(ia1, ib1, ic1, ch)] / 65535.0;
-
-            double v00 = v000 * (1 - fc) + v001 * fc;
-            double v01 = v010 * (1 - fc) + v011 * fc;
-            double v10 = v100 * (1 - fc) + v101 * fc;
-            double v11 = v110 * (1 - fc) + v111 * fc;
-
-            double v0 = v00 * (1 - fb) + v01 * fb;
-            double v1 = v10 * (1 - fb) + v11 * fb;
-
-            output[ch] = v0 * (1 - fa) + v1 * fa;
+            double sum = 0;
+            for (int corner = 0; corner < totalCorners; corner++)
+            {
+                long idx = 0;
+                double weight = 1.0;
+                for (int k = 0; k < n; k++)
+                {
+                    bool high = (corner & (1 << k)) != 0;
+                    int ik = high ? Math.Min(i0[k] + 1, grids[k] - 1) : i0[k];
+                    idx = idx * grids[k] + ik;
+                    weight *= high ? frac[k] : (1 - frac[k]);
+                }
+                sum += clut[idx * outCh + ch] * weight;
+            }
+            output[ch] = sum / 65535.0;
         }
     }
 }
@@ -170,26 +192,32 @@ internal sealed class Mft2Transform : LutTransform
 
     public override void Apply(ReadOnlySpan<double> input, Span<double> output)
     {
-        Span<double> v = stackalloc double[3];
+        int inCh = _m.InputChannels;
+        int outCh = _m.OutputChannels;
+        Span<double> v = stackalloc double[4];
+
         // Input curves.
-        v[0] = LookupCurve(_m.InputTables[0], input[0]);
-        v[1] = LookupCurve(_m.InputTables[1], input[1]);
-        v[2] = LookupCurve(_m.InputTables[2], input[2]);
+        for (int i = 0; i < inCh; i++)
+            v[i] = LookupCurve(_m.InputTables[i], input[i]);
 
-        // 3×3 matrix. (Identity for non-XYZ inputs in well-formed profiles.)
-        Span<double> mv = stackalloc double[3];
-        for (int i = 0; i < 3; i++)
-            mv[i] = _m.Matrix[i, 0] * v[0] + _m.Matrix[i, 1] * v[1] + _m.Matrix[i, 2] * v[2];
+        // 3×3 matrix only applies to 3-channel input (XYZ profiles).
+        if (inCh == 3)
+        {
+            Span<double> mv = stackalloc double[3];
+            for (int i = 0; i < 3; i++)
+                mv[i] = _m.Matrix[i, 0] * v[0] + _m.Matrix[i, 1] * v[1] + _m.Matrix[i, 2] * v[2];
+            v[0] = mv[0]; v[1] = mv[1]; v[2] = mv[2];
+        }
 
-        // 3D CLUT trilinear.
-        Span<double> clutOut = stackalloc double[3];
-        var grids = new[] { _m.GridSize, _m.GridSize, _m.GridSize };
-        TrilinearLookup3(_m.Clut, grids, _m.OutputChannels, mv, clutOut);
+        // CLUT n-linear lookup.
+        Span<double> clutOut = stackalloc double[4];
+        Span<int> grids = stackalloc int[inCh];
+        for (int i = 0; i < inCh; i++) grids[i] = _m.GridSize;
+        NLinearLookup(_m.Clut, grids.ToArray(), outCh, v.Slice(0, inCh), clutOut);
 
         // Output curves.
-        output[0] = LookupCurve(_m.OutputTables[0], clutOut[0]);
-        output[1] = LookupCurve(_m.OutputTables[1], clutOut[1]);
-        output[2] = LookupCurve(_m.OutputTables[2], clutOut[2]);
+        for (int c = 0; c < outCh; c++)
+            output[c] = LookupCurve(_m.OutputTables[c], clutOut[c]);
     }
 }
 
@@ -208,54 +236,66 @@ internal sealed class LutABTransform : LutTransform
 
     public override void Apply(ReadOnlySpan<double> input, Span<double> output)
     {
-        Span<double> tmp = stackalloc double[3];
-        input.CopyTo(tmp);
+        Span<double> tmp = stackalloc double[4];
+        Span<double> tmp2 = stackalloc double[4];
+        int curLen = input.Length;
+        for (int i = 0; i < curLen; i++) tmp[i] = input[i];
 
         if (_t.IsAtoB)
         {
-            ApplyCurves(_t.ACurves, tmp);
-            ApplyClut(tmp, tmp);
-            ApplyCurves(_t.MCurves, tmp);
-            ApplyMatrix(tmp);
-            ApplyCurves(_t.BCurves, tmp);
+            // mAB: A curves (inCh) → CLUT (inCh→outCh, normally outCh=3)
+            // → M curves (3) → matrix (3×4) → B curves (outCh).
+            ApplyCurves(_t.ACurves, tmp, curLen);
+            curLen = ApplyClut(tmp, curLen, tmp2);
+            ApplyCurves(_t.MCurves, tmp, Math.Min(curLen, 3));
+            if (curLen >= 3) ApplyMatrix(tmp);
+            ApplyCurves(_t.BCurves, tmp, curLen);
         }
         else
         {
-            ApplyCurves(_t.BCurves, tmp);
-            ApplyMatrix(tmp);
-            ApplyCurves(_t.MCurves, tmp);
-            ApplyClut(tmp, tmp);
-            ApplyCurves(_t.ACurves, tmp);
+            // mBA: B curves (3) → matrix (3×4) → M curves (3)
+            // → CLUT (3→outCh) → A curves (outCh).
+            ApplyCurves(_t.BCurves, tmp, curLen);
+            if (curLen >= 3) ApplyMatrix(tmp);
+            ApplyCurves(_t.MCurves, tmp, Math.Min(curLen, 3));
+            curLen = ApplyClut(tmp, curLen, tmp2);
+            ApplyCurves(_t.ACurves, tmp, curLen);
         }
 
-        for (int i = 0; i < 3 && i < output.Length; i++) output[i] = tmp[i];
+        for (int i = 0; i < curLen && i < output.Length; i++) output[i] = tmp[i];
     }
 
-    private static void ApplyCurves(Func<double, double>[]? curves, Span<double> v)
+    private static void ApplyCurves(Func<double, double>[]? curves, Span<double> v, int n)
     {
         if (curves == null) return;
-        int n = Math.Min(curves.Length, v.Length);
-        for (int i = 0; i < n; i++) v[i] = curves[i](v[i]);
+        int count = Math.Min(curves.Length, n);
+        for (int i = 0; i < count; i++) v[i] = curves[i](v[i]);
     }
 
     private void ApplyMatrix(Span<double> v)
     {
         var m = _t.Matrix;
         if (m == null) return;
-        // Output = M[3×3] * input + M[*, 3].
         double r0 = m[0, 0] * v[0] + m[0, 1] * v[1] + m[0, 2] * v[2] + m[0, 3];
         double r1 = m[1, 0] * v[0] + m[1, 1] * v[1] + m[1, 2] * v[2] + m[1, 3];
         double r2 = m[2, 0] * v[0] + m[2, 1] * v[1] + m[2, 2] * v[2] + m[2, 3];
         v[0] = r0; v[1] = r1; v[2] = r2;
     }
 
-    private void ApplyClut(ReadOnlySpan<double> input, Span<double> output)
+    /// <summary>
+    /// Apply the CLUT step in place. Input has <paramref name="inLen"/>
+    /// channels; on return, the buffer holds the CLUT's output (which
+    /// may be a different number of channels). Returns the new channel
+    /// count. Uses <paramref name="scratch"/> as a temp so the source
+    /// values aren't overwritten before being used as indices.
+    /// </summary>
+    private int ApplyClut(Span<double> v, int inLen, Span<double> scratch)
     {
         var clut = _t.Clut;
-        if (clut == null) return;
-        // Currently only 3-input CLUTs supported; higher-dim (CMYK) is
-        // future work.
-        if (clut.InputChannels != 3) return;
-        TrilinearLookup3(clut.Data, clut.GridSizes, clut.OutputChannels, input, output);
+        if (clut == null) return inLen;
+        if (clut.InputChannels != inLen) return inLen;  // shape mismatch; skip
+        NLinearLookup(clut.Data, clut.GridSizes, clut.OutputChannels, v.Slice(0, inLen), scratch);
+        for (int i = 0; i < clut.OutputChannels; i++) v[i] = scratch[i];
+        return clut.OutputChannels;
     }
 }
