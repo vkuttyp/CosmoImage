@@ -9,6 +9,7 @@ using Xunit;
 
 namespace CosmoImage.Tests;
 
+[Collection("VipsConfiguration")]
 public class Round89Tests : IDisposable
 {
     /// <summary>
@@ -63,7 +64,7 @@ public class Round89Tests : IDisposable
         }
     }
 
-    public void Dispose() => VipsConfiguration.Default.Clear();
+    public void Dispose() => VipsConfiguration.Default.Reset();
 
     private static IVipsSource SourceForMagic(string magic)
     {

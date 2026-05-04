@@ -92,41 +92,13 @@ public static class VipsIdentify
 
     public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken ct = default)
     {
-        // Custom providers registered on VipsConfiguration.Default win
-        // sniff conflicts — they're consulted before the built-in switch.
-        var custom = await VipsConfiguration.Default.FindMatchAsync(source, ct);
-        if (custom != null) return await custom.LoadAsync(source, ct);
-
-        var format = await DetectAsync(source, ct);
-        return format switch
-        {
-            VipsImageFormat.Png => await VipsPngLoader.LoadAsync(source, ct),
-            VipsImageFormat.Jpeg => await VipsJpegLoader.LoadAsync(source, ct),
-            VipsImageFormat.Webp => await VipsWebpLoader.LoadAsync(source, ct),
-            VipsImageFormat.Gif => await VipsGifLoader.LoadAsync(source, ct),
-            VipsImageFormat.Tiff => await VipsTiffLoader.LoadAsync(source, ct),
-            VipsImageFormat.Bmp => await VipsBmpLoader.LoadAsync(source, ct),
-            VipsImageFormat.Qoi => await VipsQoiLoader.LoadAsync(source, ct),
-            VipsImageFormat.Heif => await VipsHeifLoader.LoadAsync(source, ct),
-            VipsImageFormat.Avif => await VipsHeifLoader.LoadAsync(source, ct),
-            // JXL / JP2K only have header-only readers in CosmoImage; full
-            // pixel decode would need a real codec. Surface as NotSupported
-            // so callers know to use a typed loader directly.
-            VipsImageFormat.Jxl =>
-                throw new NotSupportedException("JXL pixel load is not supported; use VipsJxlLoader.LoadHeaderAsync."),
-            VipsImageFormat.Jp2k =>
-                throw new NotSupportedException("JP2K pixel load is not supported; use VipsJp2kLoader.LoadHeaderAsync."),
-            VipsImageFormat.Pdf => await VipsPdfLoader.LoadAsync(source,
-                page: 0, n: 1, dpi: 72, cancellationToken: ct),
-            VipsImageFormat.Svg => await VipsSvgLoader.LoadAsync(source, 0, 0, ct),
-            VipsImageFormat.Hdr => await VipsHdrLoader.LoadAsync(source, ct),
-            VipsImageFormat.Fits => await VipsFitsLoader.LoadAsync(source, ct),
-            VipsImageFormat.Nifti => await VipsNiftiLoader.LoadAsync(source, ct),
-            VipsImageFormat.Mat => await VipsMatLoader.LoadAsync(source, ct),
-            VipsImageFormat.Pnm => await VipsPnmLoader.LoadAsync(source, ct),
-            VipsImageFormat.Tga => await VipsTgaLoader.LoadAsync(source, ct),
-            _ => throw new NotSupportedException("Could not detect image format from stream content."),
-        };
+        // Walk VipsConfiguration.Default (custom + built-in formats);
+        // first sniffer to claim the source wins. Newer registrations
+        // are tried first, so user-registered formats can override
+        // built-ins for the same magic bytes.
+        var match = await VipsConfiguration.Default.FindMatchAsync(source, ct);
+        if (match != null) return await match.LoadAsync(source, ct);
+        throw new NotSupportedException("Could not detect image format from stream content.");
     }
 
     /// <summary>

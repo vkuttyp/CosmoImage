@@ -74,7 +74,36 @@ public sealed class VipsConfiguration
     private readonly List<IVipsImageFormat> _formats = new();
 
     /// <summary>The process-wide default configuration used by every implicit dispatch.</summary>
-    public static VipsConfiguration Default { get; } = new();
+    public static VipsConfiguration Default { get; } = CreateDefault();
+
+    private static VipsConfiguration CreateDefault()
+    {
+        var c = new VipsConfiguration();
+        c.SeedBuiltIns();
+        return c;
+    }
+
+    /// <summary>
+    /// Drop every registered format and re-seed the built-ins
+    /// (PNG / JPEG / WebP / GIF / TIFF / BMP / QOI / HEIF / JXL /
+    /// JP2K / PDF / SVG / HDR / FITS / NIfTI / MAT / PNM / TGA).
+    /// Useful for tests that want a known starting state.
+    /// </summary>
+    public void Reset()
+    {
+        _formats.Clear();
+        SeedBuiltIns();
+    }
+
+    private void SeedBuiltIns()
+    {
+        // Built-ins are registered in REVERSE priority order — the
+        // reverse-walk in FindMatchAsync hits the most distinctive
+        // magic first (PNG, JPEG, ...) and the magic-less fallbacks
+        // (PNM, TGA) last.
+        foreach (var fmt in CosmoImage.Loaders.BuiltInImageFormats.All())
+            _formats.Add(fmt);
+    }
 
     /// <summary>Register a custom format provider. Newer registrations take precedence.</summary>
     public void Register(IVipsImageFormat format)
@@ -93,18 +122,19 @@ public sealed class VipsConfiguration
     public void Clear() => _formats.Clear();
 
     /// <summary>
-    /// Walk registered providers in registration order; return the
-    /// first whose sniffer claims the source. <c>null</c> means no
-    /// custom provider matched (caller should fall through to the
-    /// built-in dispatch).
+    /// Walk registered providers in reverse registration order
+    /// (newest first); return the first whose sniffer claims the
+    /// source. <c>null</c> means no provider matched. Snapshots the
+    /// formats list before iterating so concurrent mutation
+    /// (e.g., test cleanup running in parallel) doesn't trip the loop.
     /// </summary>
     internal async ValueTask<IVipsImageFormat?> FindMatchAsync(IVipsSource source, CancellationToken ct)
     {
-        // Walk in reverse so newer registrations win sniff conflicts.
-        for (int i = _formats.Count - 1; i >= 0; i--)
+        var snapshot = _formats.ToArray();
+        for (int i = snapshot.Length - 1; i >= 0; i--)
         {
-            if (await _formats[i].CanDecodeAsync(source, ct))
-                return _formats[i];
+            if (await snapshot[i].CanDecodeAsync(source, ct))
+                return snapshot[i];
         }
         return null;
     }
@@ -117,9 +147,10 @@ public sealed class VipsConfiguration
     public IVipsImageFormat? FindByName(string name)
     {
         if (name == null) return null;
-        for (int i = _formats.Count - 1; i >= 0; i--)
-            if (string.Equals(_formats[i].Name, name, StringComparison.OrdinalIgnoreCase))
-                return _formats[i];
+        var snapshot = _formats.ToArray();
+        for (int i = snapshot.Length - 1; i >= 0; i--)
+            if (string.Equals(snapshot[i].Name, name, StringComparison.OrdinalIgnoreCase))
+                return snapshot[i];
         return null;
     }
 

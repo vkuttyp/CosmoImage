@@ -7,6 +7,7 @@ using Xunit;
 
 namespace CosmoImage.Tests;
 
+[Collection("VipsConfiguration")]
 public class Round54Tests
 {
     private static VipsImage UCharSolid(int w, int h, int bands, byte v)

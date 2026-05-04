@@ -9,6 +9,7 @@ using Xunit;
 
 namespace CosmoImage.Tests;
 
+[Collection("VipsConfiguration")]
 public class Round90Tests : IDisposable
 {
     /// <summary>
@@ -112,7 +113,7 @@ public class Round90Tests : IDisposable
             => ValueTask.FromResult<VipsImage?>(null);
     }
 
-    public void Dispose() => VipsConfiguration.Default.Clear();
+    public void Dispose() => VipsConfiguration.Default.Reset();
 
     private static VipsImage MakeSolidImage(int w, int h, int bands, byte fill)
     {
