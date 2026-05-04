@@ -52,12 +52,12 @@ internal static class PureExrDecoder
         if (!ParseAttributes(bytes, ref p, longNames, header)) return null;
         if (!header.IsValid()) return null;
 
-        // Supported compressors so far: NO_COMPRESSION (=0), RLE (=1),
-        // ZIPS (=2), ZIP (=3). PIZ / PXR24 / B44 / DWA come in later rounds.
+        // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PXR24.
+        // PIZ / B44 / DWA come in later rounds.
         int scanlinesPerBlock = header.Compression switch
         {
             0 or 1 or 2 => 1,
-            3 => 16,
+            3 or 5 => 16,
             _ => -1,
         };
         if (scanlinesPerBlock < 0) return null;
@@ -131,7 +131,7 @@ internal static class PureExrDecoder
             else
             {
                 if (!DecompressBlock(header.Compression, bytes, blockDataOff, dataSize,
-                    blockScratch!, blockBytes))
+                    blockScratch!, blockBytes, rowsInBlock, header.Channels, width))
                     return null;
                 blockSource = blockScratch!;
                 blockSourceOff = 0;
@@ -320,7 +320,7 @@ internal static class PureExrDecoder
             else
             {
                 if (!DecompressBlock(header.Compression, bytes, tileDataOff, dataSize,
-                    tileScratch!, (int)tileBytes))
+                    tileScratch!, (int)tileBytes, rowsInTile, header.Channels, colsInTile))
                     return null;
                 tileSource = tileScratch!;
                 tileSourceOff = 0;
@@ -366,24 +366,27 @@ internal static class PureExrDecoder
     }
 
     /// <summary>
-    /// Decompress one EXR scanline block into <paramref name="dst"/>
-    /// of length <paramref name="expected"/>. Handles the post-decompress
-    /// reorder (interleaved-byte-pair de-interleave + delta-predictor
-    /// reverse) shared by RLE and ZIPS.
+    /// Decompress one EXR scanline/tile block into <paramref name="dst"/>.
+    /// Per-compression dispatch: RLE/ZIPS/ZIP share zlib-or-RLE + reverse
+    /// predictor + de-interleave. PXR24 routes through its own per-pixel
+    /// delta path which needs the row geometry to reset the accumulator
+    /// at channel boundaries.
     /// </summary>
     private static bool DecompressBlock(int compression, byte[] src, int srcOff, int srcLen,
-        byte[] dst, int expected)
+        byte[] dst, int expected, int rows, List<ExrChannel> channels, int width)
     {
-        // Some blocks ship uncompressed even when the file declares a
-        // compressor — that happens when the encoded form would have been
-        // bigger. EXR signals this by setting dataSize == expected.
         if (srcLen == expected)
         {
             Buffer.BlockCopy(src, srcOff, dst, 0, expected);
             return true;
         }
 
-        // First inflate / RLE-expand into the scratch in interleaved+delta form.
+        if (compression == 5)
+        {
+            int rowBytes = expected / Math.Max(1, rows);
+            return DecompressPxr24Geom(src, srcOff, srcLen, dst, rows, rowBytes, channels, width);
+        }
+
         var scratch = new byte[expected];
         bool ok = compression switch
         {
@@ -409,6 +412,50 @@ internal static class PureExrDecoder
         {
             dst[i++] = scratch[t1++];
             if (i < expected) dst[i++] = scratch[t2++];
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// PXR24 (compression=5) decompress. The encoded form is zlib-
+    /// compressed per-channel-per-row [high_bytes; low_bytes] streams
+    /// with a per-pixel 16-bit delta predictor that resets at channel
+    /// boundaries within each row. Caller supplies row count and width
+    /// so we can walk the inflated buffer with the right stride.
+    ///
+    /// HALF channels only here; FLOAT (3-byte truncated) and UINT
+    /// (4-byte) come in a future round.
+    /// </summary>
+    private static bool DecompressPxr24Geom(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int rows, int rowBytes, List<ExrChannel> channels, int width)
+    {
+        int total = rows * rowBytes;
+        var inflated = new byte[total];
+        if (!ZlibDecompress(src, srcOff, srcLen, inflated, total)) return false;
+
+        // Inflated layout: for each row, for each channel, [high_bytes (W), low_bytes (W)].
+        // dst layout: for each row, for each channel, [pixel0_lo, pixel0_hi, pixel1_lo, pixel1_hi, ...]
+        //   (HALF stored little-endian: low byte first.)
+        int sp = 0;
+        int dp = 0;
+        for (int r = 0; r < rows; r++)
+        {
+            foreach (var ch in channels)
+            {
+                if (ch.PixelType != PixelTypeHalf) return false;  // FLOAT/UINT future
+                ushort prev = 0;
+                for (int x = 0; x < width; x++)
+                {
+                    byte hi = inflated[sp + x];
+                    byte lo = inflated[sp + width + x];
+                    ushort delta = (ushort)((hi << 8) | lo);
+                    prev = (ushort)(prev + delta);
+                    dst[dp + x * 2]     = (byte)prev;          // low byte (host LE)
+                    dst[dp + x * 2 + 1] = (byte)(prev >> 8);   // high byte
+                }
+                sp += 2 * width;
+                dp += 2 * width;
+            }
         }
         return true;
     }
