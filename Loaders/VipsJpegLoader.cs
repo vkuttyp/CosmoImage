@@ -158,6 +158,10 @@ public static class VipsJpegLoader
         // is lazy — the first downstream Prepare forces materialization, but
         // header-only callers (LoadHeaderAsync) never trigger it. Downstream
         // ops alias this buffer in their Prepare path with no per-tile copy.
+        // Pre-detect color space ONCE (the lazy may run multiple times in
+        // some pipelines; the JPEG markers don't change between runs).
+        var colorSpace = DetectJpegColorSpace(jpegBytes, bands);
+
         var pixelsLazy = new Lazy<byte[]>(() =>
         {
             int stride = width * bands;
@@ -166,6 +170,11 @@ public static class VipsJpegLoader
             innerDecoder.SetInput(jpegBytes);
             innerDecoder.SetOutputWriter(new SimpleOutputWriter(width, height, bands, buf));
             innerDecoder.Decode();
+            // SimpleOutputWriter writes raw component samples interleaved
+            // at offsets 0/1/2 of each pixel — for a default JFIF JPEG
+            // those are Y, Cb, Cr, which need conversion to RGB before
+            // we hand the buffer back labeled as RGB.
+            ConvertColorSpace(buf, width, height, bands, colorSpace);
             return buf;
         });
 
@@ -270,6 +279,7 @@ public static class VipsJpegLoader
         var pixels = new byte[width * bands * height];
         decoder.SetOutputWriter(new SimpleOutputWriter(width, height, bands, pixels));
         decoder.Decode();
+        ConvertColorSpace(pixels, width, height, bands, DetectJpegColorSpace(jpegBytes, bands));
 
         var image = new VipsImage
         {
@@ -323,6 +333,117 @@ public static class VipsJpegLoader
         return image;
     }
 
+    /// <summary>
+    /// JPEG component color space. JpegLibrary hands us raw component
+    /// samples — we need to know what they encode before we can call
+    /// the result "RGB".
+    /// </summary>
+    private enum JpegColorSpace
+    {
+        Grayscale,    // 1 component, no conversion
+        YCbCr,        // 3 components (default JFIF) — convert to RGB
+        Rgb,          // 3 components, Adobe transform=0 — leave as-is
+        YCCK,         // 4 components, Adobe transform=2 — convert to CMYK then leave
+        Cmyk,         // 4 components, no Adobe marker or transform=0 — leave as-is
+    }
+
+    /// <summary>
+    /// Inspect APP14 / SOF markers to decide what JPEG component samples
+    /// represent. Most JPEGs are JFIF YCbCr; Adobe-tagged streams may
+    /// declare RGB / YCCK / CMYK. Falls back to component-count heuristic
+    /// when no marker pins it down: 1 = grayscale, 3 = YCbCr, 4 = CMYK.
+    /// </summary>
+    private static JpegColorSpace DetectJpegColorSpace(byte[] jpeg, int components)
+    {
+        if (components == 1) return JpegColorSpace.Grayscale;
+
+        if (jpeg.Length < 4 || jpeg[0] != 0xFF || jpeg[1] != 0xD8)
+            return components == 4 ? JpegColorSpace.Cmyk : JpegColorSpace.YCbCr;
+
+        int p = 2;
+        while (p + 3 < jpeg.Length)
+        {
+            if (jpeg[p] != 0xFF) break;
+            byte marker = jpeg[p + 1];
+            if (marker == 0xD8 || marker == 0xD9 || marker == 0x01 ||
+                (marker >= 0xD0 && marker <= 0xD7)) { p += 2; continue; }
+            if (marker == 0xDA) break;  // SOS — past header
+            int len = (jpeg[p + 2] << 8) | jpeg[p + 3];
+            if (len < 2 || p + 2 + len > jpeg.Length) break;
+
+            if (marker == 0xEE && len >= 14)
+            {
+                // APP14 "Adobe" marker: bytes 4..8 = "Adobe", byte 13 = transform.
+                if (p + 2 + 14 <= jpeg.Length &&
+                    jpeg[p + 4] == (byte)'A' && jpeg[p + 5] == (byte)'d' &&
+                    jpeg[p + 6] == (byte)'o' && jpeg[p + 7] == (byte)'b' &&
+                    jpeg[p + 8] == (byte)'e')
+                {
+                    byte transform = jpeg[p + 13];
+                    if (components == 3)
+                        return transform == 0 ? JpegColorSpace.Rgb : JpegColorSpace.YCbCr;
+                    if (components == 4)
+                        return transform == 2 ? JpegColorSpace.YCCK : JpegColorSpace.Cmyk;
+                }
+            }
+            p += 2 + len;
+        }
+        // No definitive marker — JFIF defaults: 3 → YCbCr, 4 → CMYK.
+        return components == 4 ? JpegColorSpace.Cmyk : JpegColorSpace.YCbCr;
+    }
+
+    /// <summary>
+    /// Convert pixel buffer from the JPEG's native component encoding to
+    /// RGB / CMYK / grayscale as appropriate. Operates in place on the
+    /// buffer SimpleOutputWriter just filled.
+    /// </summary>
+    private static void ConvertColorSpace(byte[] buf, int width, int height, int bands, JpegColorSpace cs)
+    {
+        if (cs == JpegColorSpace.Grayscale || cs == JpegColorSpace.Rgb || cs == JpegColorSpace.Cmyk)
+            return;
+
+        if (cs == JpegColorSpace.YCbCr && bands == 3)
+        {
+            int n = width * height;
+            for (int i = 0; i < n; i++)
+            {
+                int o = i * 3;
+                int Y  = buf[o];
+                int Cb = buf[o + 1] - 128;
+                int Cr = buf[o + 2] - 128;
+                // BT.601 / JFIF YCbCr-to-RGB. Scaled integer math: ×1024
+                // multipliers, +512 round, >>10 shift.
+                int r = Y + ((1436 * Cr + 512) >> 10);
+                int g = Y - ((352 * Cb + 731 * Cr + 512) >> 10);
+                int b = Y + ((1815 * Cb + 512) >> 10);
+                buf[o]     = (byte)Math.Clamp(r, 0, 255);
+                buf[o + 1] = (byte)Math.Clamp(g, 0, 255);
+                buf[o + 2] = (byte)Math.Clamp(b, 0, 255);
+            }
+            return;
+        }
+
+        if (cs == JpegColorSpace.YCCK && bands == 4)
+        {
+            // YCCK = YCbCr for first three components + K passes through.
+            int n = width * height;
+            for (int i = 0; i < n; i++)
+            {
+                int o = i * 4;
+                int Y  = buf[o];
+                int Cb = buf[o + 1] - 128;
+                int Cr = buf[o + 2] - 128;
+                int r = Y + ((1436 * Cr + 512) >> 10);
+                int g = Y - ((352 * Cb + 731 * Cr + 512) >> 10);
+                int b = Y + ((1815 * Cb + 512) >> 10);
+                buf[o]     = (byte)Math.Clamp(r, 0, 255);
+                buf[o + 1] = (byte)Math.Clamp(g, 0, 255);
+                buf[o + 2] = (byte)Math.Clamp(b, 0, 255);
+                // K stays at offset 3 unchanged.
+            }
+        }
+    }
+
     private class SimpleOutputWriter : JpegBlockOutputWriter
     {
         private readonly byte[] _buffer;
@@ -353,7 +474,9 @@ public static class VipsJpegLoader
 
                     int offset = (pixelY * _width + pixelX) * _components + componentIndex;
                     short val = System.Runtime.CompilerServices.Unsafe.Add(ref blockStart, row * 8 + col);
-                    _buffer[offset] = (byte)Math.Clamp(val + 128, 0, 255);
+                    // JpegLibrary's IDCT output is already shifted to
+                    // unsigned [0, 255]; SimpleOutputWriter just clamps.
+                    _buffer[offset] = (byte)Math.Clamp((int)val, 0, 255);
                 }
             }
         }

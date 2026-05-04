@@ -69,7 +69,10 @@ public static class VipsJpegSaver
                         val = _pixels[offset]; // Grayscale
                     }
 
-                    System.Runtime.CompilerServices.Unsafe.Add(ref blockRef, row * 8 + col) = (short)(val - 128);
+                    // JpegLibrary's encoder expects unshifted unsigned
+                    // samples; the level-shift is applied internally
+                    // before DCT (symmetric with the decoder side).
+                    System.Runtime.CompilerServices.Unsafe.Add(ref blockRef, row * 8 + col) = (short)val;
                 }
             }
         }
