@@ -44,8 +44,10 @@ public static class VipsWebpLoader
                 if (read < 10) break;
 
                 bool hasAlpha = (data[0] & 0x10) != 0;
-                int width = 1 + (data[3] | (data[4] << 8) | (data[5] << 16));
-                int height = 1 + (data[6] | (data[7] << 8) | (data[8] << 16));
+                // Spec: byte 0 = flags, bytes 1..3 = reserved, bytes 4..6 =
+                // canvas_width-1 (24-bit LE), bytes 7..9 = canvas_height-1.
+                int width = 1 + (data[4] | (data[5] << 8) | (data[6] << 16));
+                int height = 1 + (data[7] | (data[8] << 8) | (data[9] << 16));
 
                 return new VipsImage
                 {
@@ -136,6 +138,17 @@ public static class VipsWebpLoader
         }
 
         var imageBytes = ms.ToArray();
+
+        // Pure-managed fast path for plain VP8L (lossless) WebPs. Returns
+        // null for VP8/VP8X (lossy or animated) — those flow through the
+        // Magick path below.
+        var pure = PureWebpLossless.TryDecode(imageBytes);
+        if (pure != null)
+        {
+            AttachWebpMetadata(imageBytes, pure);
+            return pure;
+        }
+
         var memSource = new PipeVipsSource(System.IO.Pipelines.PipeReader.Create(new MemoryStream(imageBytes)));
         var image = await LoadHeaderAsync(memSource, cancellationToken);
         if (image == null) return null;
@@ -169,18 +182,7 @@ public static class VipsWebpLoader
         }
         catch { /* fall through; nPages stays 1 */ }
 
-        // Eager probe for EXIF/XMP/ICC profiles. Pixels stay lazy.
-        try
-        {
-            using var probe = new MagickImage(imageBytes);
-            var exifProfile = probe.GetProfile("exif");
-            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
-            var xmpProfile = probe.GetProfile("xmp");
-            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
-            var iccProfile = probe.GetColorProfile();
-            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
-        }
-        catch { /* metadata extraction is best-effort */ }
+        AttachWebpMetadata(imageBytes, image);
 
         // Update image dims for animated layout: tall buffer with frames stacked.
         int totalHeight = pageHeight * nPages;
@@ -310,5 +312,25 @@ public static class VipsWebpLoader
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Best-effort EXIF / XMP / ICC extraction via Magick. Swallows
+    /// failures so metadata extraction never fails an otherwise
+    /// successful load.
+    /// </summary>
+    private static void AttachWebpMetadata(byte[] imageBytes, VipsImage image)
+    {
+        try
+        {
+            using var probe = new MagickImage(imageBytes);
+            var exifProfile = probe.GetProfile("exif");
+            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
+            var xmpProfile = probe.GetProfile("xmp");
+            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
+            var iccProfile = probe.GetColorProfile();
+            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
+        }
+        catch { /* best-effort */ }
     }
 }
