@@ -265,8 +265,8 @@ doesn't yet.
 | Capability | ImageSharp | CosmoImage |
 | :--- | :--- | :--- |
 | Raw EXIF/XMP/ICC byte-blob round-trip | ✅ | ✅ |
-| Typed EXIF tag access (`ExifProfile.GetValue<T>(ExifTag)`) | ✅ — full tag dictionary | ❌ — raw bytes only |
-| EXIF profile editing | ✅ | ❌ |
+| Typed EXIF tag access (`ExifProfile.GetValue<T>(ExifTag)`) | ✅ — full tag dictionary | 🟡 `VipsExifProfile` (round 83) — TIFF-format parser + serializer with typed `GetValue<T>` / `SetValue<T>`; supports IFD0 + Exif sub-IFD, both byte orders, common tags (Orientation, Make, Model, DateTime, ExposureTime, FNumber, ISO, FocalLength, dimensions, lens info, etc.). GPS sub-IFD parsing deferred. Bridge methods `VipsImage.GetExifProfile()` / `SetExifProfile()` for the round-trip |
+| EXIF profile editing | ✅ | ✅ via `VipsExifProfile.SetValue<T>` + `Remove(tag)` + `SetExifProfile` round-trip (round 83) |
 | IPTC profile (read + write) | ✅ | ❌ |
 | ICC profile structure parsing | ✅ — `IccProfile` with header + tag table | ❌ — raw bytes only |
 | ICC profile applied at sink (proper CMM) | 🟡 — uses RGB-matrix approximation | 🟡 — uses Magick.NET as one-shot |

@@ -117,4 +117,22 @@ public static class VipsFields
     public static void SetExif(this VipsImage image, byte[] blob) => image.SetBlob("exif", blob);
     public static void SetXmp(this VipsImage image, byte[] blob) => image.SetBlob("xmp", blob);
     public static void SetIccProfile(this VipsImage image, byte[] blob) => image.SetBlob("icc", blob);
+
+    /// <summary>
+    /// Parse the image's EXIF blob into a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsExifProfile"/>.
+    /// Returns <c>null</c> when no EXIF metadata is present or the blob
+    /// is malformed.
+    /// </summary>
+    public static CosmoImage.Operations.Metadata.VipsExifProfile? GetExifProfile(this VipsImage image)
+        => CosmoImage.Operations.Metadata.VipsExifProfile.TryParse(image.GetBlob("exif"));
+
+    /// <summary>
+    /// Serialize a typed
+    /// <see cref="CosmoImage.Operations.Metadata.VipsExifProfile"/>
+    /// back into the image's EXIF blob. Overwrites any existing data.
+    /// </summary>
+    public static void SetExifProfile(this VipsImage image,
+        CosmoImage.Operations.Metadata.VipsExifProfile profile)
+        => image.SetBlob("exif", profile.ToBytes());
 }
