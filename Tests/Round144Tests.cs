@@ -140,11 +140,11 @@ public class Round144Tests
 
         using var ms = new MemoryStream();
         ms.Write(Header(imageType: 2, cmLen: 0, cmEntryBits: 0, w, h, depth: 16));
+        Span<byte> wordBuf = stackalloc byte[2];
         foreach (var word in words)
         {
-            Span<byte> b = stackalloc byte[2];
-            BinaryPrimitives.WriteUInt16LittleEndian(b, word);
-            ms.Write(b);
+            BinaryPrimitives.WriteUInt16LittleEndian(wordBuf, word);
+            ms.Write(wordBuf);
         }
         var bytes = ms.ToArray();
 
