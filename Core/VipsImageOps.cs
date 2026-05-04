@@ -642,6 +642,15 @@ public static partial class VipsImageOps
     /// </summary>
     public static VipsPath TextToPath(VipsTextOptions opts) => VipsTextOps.TextToPath(opts);
 
+    /// <summary>
+    /// Lay shaped text along a target path (single sub-path).
+    /// Mirrors SVG's <c>&lt;textPath&gt;</c>. <paramref name="offset"/>
+    /// shifts the text perpendicular to the path; positive moves it
+    /// "below" in screen y-down.
+    /// </summary>
+    public static VipsPath TextOnPath(VipsTextOptions opts, VipsPath targetPath, double offset = 0)
+        => VipsTextOps.TextOnPath(opts, targetPath, offset);
+
     // From Operations/Drawing/VipsDrawRect.cs
     public static VipsImage DrawRect(VipsImage input, int left, int top, int width, int height, byte[] ink, bool fill = false)
     {
