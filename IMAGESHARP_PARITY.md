@@ -173,7 +173,7 @@ of theirs we don't have, a few of ours they don't.
 
 | ImageSharp op | CosmoImage |
 | :--- | :--- |
-| `Quantize(IQuantizer)` — Octree / Wu / Werner / Webby / Palette | 🟡 `Quantize(image, IVipsQuantizer)` pluggable interface (round 96) + two built-in implementations: `MagickQuantizer` wraps Magick.NET's Wu / median-cut + Floyd-Steinberg (round 96), `VipsOctreeQuantizer` is pure-managed Gervautz-Purgathofer octree quantization (round 99 — RGB / RGBA UChar; deep→shallow all-leaves-only reduction; alpha preserved unmodified). Werner / Webby still missing |
+| `Quantize(IQuantizer)` — Octree / Wu / Werner / Webby / Palette | ✅ `Quantize(image, IVipsQuantizer)` pluggable interface (round 96) + three built-in implementations: `MagickQuantizer` (Wu / median-cut + Floyd-Steinberg via Magick.NET, round 96), `VipsOctreeQuantizer` (pure-managed Gervautz-Purgathofer, round 99), `VipsPaletteQuantizer` (nearest-neighbour mapping to a fixed palette, round 100; built-in `WebSafe` for the 216-colour 6×6×6 RGB cube). Werner / Webby palettes are user-supplied via `VipsPaletteQuantizer(custom)` |
 | `Dither(IDither, threshold)` — Floyd-Steinberg / Stevenson-Arce / Burkes / Bayer / Ordered | ✅ `Dither(method, levels)` — FS / Atkinson / Burkes / Stevenson-Arce / Sierra error-diffusion + Bayer4×4 / Bayer8×8 ordered |
 | `BinaryThreshold(threshold)` | ✅ `Threshold(value)` from round 51 |
 | `BinaryDither(...)` | ✅ `BinaryDither(method)` — alias for `Dither(method, levels=2)` |
