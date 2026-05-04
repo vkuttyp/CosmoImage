@@ -76,7 +76,7 @@ threaded through `VipsEnumsExtensions.SizeOf`) and the three
 | Format | ImageSharp | CosmoImage |
 | :--- | :--- | :--- |
 | **JPEG** | Pure managed; full + EXIF/ICC/XMP, baseline + progressive, arithmetic | ✅ pure-C# decoder via JpegLibrary; full metadata round-trip |
-| **PNG** | Pure managed; full + APNG (animated), interlace | 🟡 pure-managed `PurePngDecoder` (round 102) — 8-bit non-interlaced color types 0/2/3/4/6 with `tRNS` expansion + filter unfilter (None/Sub/Up/Avg/Paeth). Pure-managed `PureApngDecoder` (round 103) — animated PNG read for the common `fcTL`-before-IDAT layout, RGB/RGBA frames, `dispose_op` (NONE/BACKGROUND/PREVIOUS), `blend_op` (SOURCE/OVER alpha-composite); outputs stacked-frames RGBA matching the existing animated-format convention (n-pages / page-height / animation-delays). Adam7-interlaced + 16-bit fall back to StbImageSharp |
+| **PNG** | Pure managed; full + APNG (animated), interlace | ✅ pure-managed `PurePngDecoder` (rounds 102, 104) — 8-bit AND 16-bit color types 0/2/3/4/6 with `tRNS` expansion (8-bit and 16-bit variants); filter unfilter (None/Sub/Up/Avg/Paeth); Adam7 interlace (round 104 — 7-pass scatter into the canvas, per-pass independent filter context); endianness-aware uint16 conversion (PNG BE → host LE for the existing UShort convention). Pure-managed `PureApngDecoder` (round 103) — animated PNG read with `dispose_op` / `blend_op` frame composition. StbImageSharp dependency now used only for 1/2/4-bit depths (rare; can be added later) |
 | **BMP** | Pure managed; full | 🟡 pure-C# fast path (24/32 bpp BI_RGB); paletted/RLE via Magick |
 | **TGA** | Pure managed | 🟡 pure-C# fast path (types 2/3/10/11) |
 | **WebP** | Pure managed; full lossy + lossless + animated | 🟡 via Magick.NET (animated load works) |

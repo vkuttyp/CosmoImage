@@ -56,10 +56,14 @@ internal static class PurePngDecoder
                     bitDepth = pngBytes[p + 8];
                     colorType = pngBytes[p + 9];
                     interlace = pngBytes[p + 12];
-                    if (bitDepth != 8) return null;       // 1/2/4/16 not supported here
-                    if (interlace != 0) return null;       // Adam7 not supported here
+                    // Bit depth 1/2/4 and palette-only constraints — fall back
+                    // to Stb for those. We handle 8 and 16.
+                    if (bitDepth != 8 && bitDepth != 16) return null;
+                    if (interlace != 0 && interlace != 1) return null;
                     if (colorType != 0 && colorType != 2 && colorType != 3
                         && colorType != 4 && colorType != 6) return null;
+                    // Palette is always 8-bit per spec — reject 16-bit palette.
+                    if (colorType == 3 && bitDepth != 8) return null;
                     break;
                 case 0x504C5445:  // PLTE
                     plte = new byte[length];
@@ -92,23 +96,63 @@ internal static class PurePngDecoder
         }
         catch { return null; }
 
-        // bytes per pixel in the SOURCE color type (before any expansion).
-        int srcBpp = colorType switch
+        // Bytes per pixel in the SOURCE color type, accounting for bit depth.
+        int channelsPerPixel = colorType switch
         {
-            0 => 1,    // greyscale
-            2 => 3,    // RGB
-            3 => 1,    // palette index
-            4 => 2,    // greyscale + alpha
-            6 => 4,    // RGBA
-            _ => 0,
+            0 => 1, 2 => 3, 3 => 1, 4 => 2, 6 => 4, _ => 0,
         };
-        int srcStride = width * srcBpp;
-        int expectedRawLen = (srcStride + 1) * height;
-        if (raw.Length < expectedRawLen) return null;
+        int byteStep = bitDepth / 8;  // 1 or 2
+        int srcBpp = channelsPerPixel * byteStep;
 
-        // Unfilter scanlines in place into a flat buffer (no filter bytes).
-        var unfiltered = new byte[srcStride * height];
-        if (!UnfilterRows(raw, unfiltered, width, height, srcBpp, srcStride)) return null;
+        var unfiltered = new byte[width * height * srcBpp];
+        if (interlace == 0)
+        {
+            int srcStride = width * srcBpp;
+            int expectedRawLen = (srcStride + 1) * height;
+            if (raw.Length < expectedRawLen) return null;
+            if (!UnfilterRows(raw, 0, unfiltered, 0, width, height, srcBpp, srcStride)) return null;
+        }
+        else
+        {
+            // Adam7: 7 sub-passes with reduced resolution; each pass has
+            // its own filter context. Decode each into a flat sub-image,
+            // then scatter pixels into the final image at the appropriate
+            // (x_start + c*x_step, y_start + r*y_step) coordinates.
+            int rawOff = 0;
+            for (int pass = 0; pass < 7; pass++)
+            {
+                int xStart = Adam7XStart[pass];
+                int yStart = Adam7YStart[pass];
+                int xStep = Adam7XStep[pass];
+                int yStep = Adam7YStep[pass];
+                int passW = Math.Max(0, (width - xStart + xStep - 1) / xStep);
+                int passH = Math.Max(0, (height - yStart + yStep - 1) / yStep);
+                if (passW == 0 || passH == 0) continue;
+                int passStride = passW * srcBpp;
+                int passSize = passStride * passH;
+                if (rawOff + (passStride + 1) * passH > raw.Length) return null;
+                var passBuf = new byte[passSize];
+                if (!UnfilterRows(raw, rawOff, passBuf, 0, passW, passH, srcBpp, passStride)) return null;
+                rawOff += (passStride + 1) * passH;
+                // Scatter pass pixels into the final image.
+                for (int r = 0; r < passH; r++)
+                {
+                    int dstY = yStart + r * yStep;
+                    int srcRow = r * passStride;
+                    for (int c = 0; c < passW; c++)
+                    {
+                        int dstX = xStart + c * xStep;
+                        int dstOff = (dstY * width + dstX) * srcBpp;
+                        Buffer.BlockCopy(passBuf, srcRow + c * srcBpp, unfiltered, dstOff, srcBpp);
+                    }
+                }
+            }
+        }
+
+        // Byte-swap for 16-bit: PNG stores big-endian uint16; convert to
+        // host-endian (assume little-endian — same as the existing UShort
+        // convention in VipsImage).
+        if (bitDepth == 16) ByteSwap16(unfiltered);
 
         // Expand to output channels — apply tRNS / PLTE.
         bool hasAlphaInColorType = (colorType & 4) != 0;
@@ -116,35 +160,53 @@ internal static class PurePngDecoder
 
         switch (colorType)
         {
-            case 0:  // greyscale (1) → maybe + alpha from tRNS
+            case 0:  // greyscale → maybe + alpha from tRNS
                 if (transparencyExpansion)
                 {
                     channels = 2;
-                    return ExpandGreyscaleTrns(unfiltered, width, height, trns!);
+                    return bitDepth == 16
+                        ? ExpandGreyscaleTrns16(unfiltered, width, height, trns!)
+                        : ExpandGreyscaleTrns(unfiltered, width, height, trns!);
                 }
                 channels = 1;
                 return unfiltered;
-            case 2:  // RGB (3) → maybe + alpha from tRNS
+            case 2:  // RGB → maybe + alpha from tRNS
                 if (transparencyExpansion)
                 {
                     channels = 4;
-                    return ExpandRgbTrns(unfiltered, width, height, trns!);
+                    return bitDepth == 16
+                        ? ExpandRgbTrns16(unfiltered, width, height, trns!)
+                        : ExpandRgbTrns(unfiltered, width, height, trns!);
                 }
                 channels = 3;
                 return unfiltered;
-            case 3:  // palette index (1) → RGB (3) or RGBA (4) via PLTE / tRNS
+            case 3:  // palette → RGB or RGBA via PLTE / tRNS (always 8-bit)
                 if (plte == null) return null;
                 if (trns != null) { channels = 4; return ExpandPaletteRgba(unfiltered, plte, trns); }
                 channels = 3;
                 return ExpandPaletteRgb(unfiltered, plte);
-            case 4:  // greyscale + alpha (2)
+            case 4:  // greyscale + alpha
                 channels = 2;
                 return unfiltered;
-            case 6:  // RGBA (4)
+            case 6:  // RGBA
                 channels = 4;
                 return unfiltered;
         }
         return null;
+    }
+
+    // Adam7 pass-table per PNG spec §8.2.
+    private static readonly int[] Adam7XStart = { 0, 4, 0, 2, 0, 1, 0 };
+    private static readonly int[] Adam7YStart = { 0, 0, 4, 0, 2, 0, 1 };
+    private static readonly int[] Adam7XStep  = { 8, 8, 4, 4, 2, 2, 1 };
+    private static readonly int[] Adam7YStep  = { 8, 8, 8, 4, 4, 2, 2 };
+
+    private static void ByteSwap16(byte[] buf)
+    {
+        for (int i = 0; i + 1 < buf.Length; i += 2)
+        {
+            (buf[i], buf[i + 1]) = (buf[i + 1], buf[i]);
+        }
     }
 
     /// <summary>
@@ -157,15 +219,16 @@ internal static class PurePngDecoder
     ///   3 Avg:   byte = filtered + (left + above) / 2
     ///   4 Paeth: byte = filtered + paeth(left, above, aboveLeft)
     /// </summary>
-    private static bool UnfilterRows(byte[] raw, byte[] dst, int width, int height, int bpp, int stride)
+    private static bool UnfilterRows(byte[] raw, int rawStartOff, byte[] dst, int dstStartOff,
+        int width, int height, int bpp, int stride)
     {
-        int rawPos = 0;
+        int rawPos = rawStartOff;
         for (int y = 0; y < height; y++)
         {
             if (rawPos >= raw.Length) return false;
             byte filter = raw[rawPos++];
-            int rowOff = y * stride;
-            int aboveOff = (y - 1) * stride;
+            int rowOff = dstStartOff + y * stride;
+            int aboveOff = dstStartOff + (y - 1) * stride;
             if (rawPos + stride > raw.Length) return false;
 
             switch (filter)
@@ -248,6 +311,58 @@ internal static class PurePngDecoder
             byte r = src[i * 3 + 0], g = src[i * 3 + 1], b = src[i * 3 + 2];
             dst[i * 4 + 0] = r; dst[i * 4 + 1] = g; dst[i * 4 + 2] = b;
             dst[i * 4 + 3] = (r == tR && g == tG && b == tB) ? (byte)0 : (byte)255;
+        }
+        return dst;
+    }
+
+    /// <summary>
+    /// 16-bit greyscale + tRNS → 16-bit greyscale + alpha (4 bytes per
+    /// pixel, host-endian). tRNS for type-0 16-bit holds a single
+    /// big-endian uint16 transparent value.
+    /// </summary>
+    private static byte[] ExpandGreyscaleTrns16(byte[] src, int w, int h, byte[] trns)
+    {
+        ushort transGrey = trns.Length >= 2
+            ? (ushort)((trns[0] << 8) | trns[1])
+            : (ushort)0;
+        var dst = new byte[w * h * 4];
+        for (int i = 0; i < w * h; i++)
+        {
+            byte lo = src[i * 2 + 0], hi = src[i * 2 + 1];
+            ushort v = (ushort)(lo | (hi << 8));  // already byte-swapped to host-LE
+            dst[i * 4 + 0] = lo;
+            dst[i * 4 + 1] = hi;
+            ushort alpha = v == transGrey ? (ushort)0 : (ushort)0xFFFF;
+            dst[i * 4 + 2] = (byte)(alpha & 0xFF);
+            dst[i * 4 + 3] = (byte)(alpha >> 8);
+        }
+        return dst;
+    }
+
+    /// <summary>16-bit RGB + tRNS → 16-bit RGBA. tRNS holds three big-endian uint16s (R, G, B).</summary>
+    private static byte[] ExpandRgbTrns16(byte[] src, int w, int h, byte[] trns)
+    {
+        ushort tR = 0, tG = 0, tB = 0;
+        if (trns.Length >= 6)
+        {
+            tR = (ushort)((trns[0] << 8) | trns[1]);
+            tG = (ushort)((trns[2] << 8) | trns[3]);
+            tB = (ushort)((trns[4] << 8) | trns[5]);
+        }
+        var dst = new byte[w * h * 8];
+        for (int i = 0; i < w * h; i++)
+        {
+            int s = i * 6, d = i * 8;
+            // src is already host-LE after ByteSwap16.
+            ushort r = (ushort)(src[s + 0] | (src[s + 1] << 8));
+            ushort g = (ushort)(src[s + 2] | (src[s + 3] << 8));
+            ushort b = (ushort)(src[s + 4] | (src[s + 5] << 8));
+            dst[d + 0] = src[s + 0]; dst[d + 1] = src[s + 1];
+            dst[d + 2] = src[s + 2]; dst[d + 3] = src[s + 3];
+            dst[d + 4] = src[s + 4]; dst[d + 5] = src[s + 5];
+            ushort alpha = (r == tR && g == tG && b == tB) ? (ushort)0 : (ushort)0xFFFF;
+            dst[d + 6] = (byte)(alpha & 0xFF);
+            dst[d + 7] = (byte)(alpha >> 8);
         }
         return dst;
     }
