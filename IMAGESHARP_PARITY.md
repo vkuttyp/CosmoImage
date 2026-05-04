@@ -81,7 +81,7 @@ threaded through `VipsEnumsExtensions.SizeOf`) and the three
 | **TGA** | Pure managed | 🟡 pure-C# fast path (types 2/3/10/11) |
 | **WebP** | Pure managed; full lossy + lossless + animated | 🟡 via Magick.NET (animated load works) |
 | **TIFF** | Pure managed; LZW / Deflate / PackBits / JPEG-in-TIFF, multi-page | 🟡 via Magick; multi-page + Ptif pyramid + OME-XML metadata |
-| **GIF** | Pure managed; animated, LZW | 🟡 via Magick |
+| **GIF** | Pure managed; animated, LZW | 🟡 pure-managed `PureGifDecoder` (round 106) — full GIF87a / GIF89a decode with LZW decompression (variable bit-width 3..12 bits, dynamic dictionary, KwKwK case), Graphics Control Extension (delay / transparency / disposal NONE/BACKGROUND/PREVIOUS), interlaced frames (4-pass de-interlace), global + local colour tables, frame composition onto the logical screen canvas. Outputs stacked-frames RGBA matching the existing animated convention. Magick.NET stays as fallback for malformed streams |
 | **PBM/PGM/PPM** | Pure managed (P1-P6) | ✅ pure-C# (P1-P6); PAM via Magick |
 | **QOI** | Pure managed; full QOI v1.0 | ✅ pure-C# (full QOI v1.0) |
 | **HEIF / AVIF** | ❌ (paid 3rd-party `Microsoft.Maui.Graphics.HeifSharp` or similar; not in core ImageSharp) | ✅ via Magick.NET — we have *advantage* here including animated AVIF/HEIC sequence load |

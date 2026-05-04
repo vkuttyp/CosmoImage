@@ -39,6 +39,31 @@ public static class VipsGifLoader
 
         var imageBytes = ms.ToArray();
 
+        // Try the pure-managed decoder first. Falls back to Magick.NET
+        // on failure (malformed streams, unusual extensions, etc.).
+        var pure = PureGifDecoder.TryDecode(imageBytes);
+        if (pure != null)
+        {
+            int totalH = pure.CanvasHeight * pure.FrameCount;
+            const int bandsPure = 4;
+            var pureImage = new VipsImage
+            {
+                Width = pure.CanvasWidth,
+                Height = totalH,
+                Bands = bandsPure,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = VipsInterpretation.RGB,
+                Coding = VipsCoding.None,
+                XRes = 1.0, YRes = 1.0,
+                PixelsLazy = new Lazy<byte[]>(() => pure.Pixels),
+            };
+            pureImage.Metadata["n-pages"] = pure.FrameCount.ToString();
+            pureImage.Metadata["page-height"] = pure.CanvasHeight.ToString();
+            pureImage.Metadata["animation-delays"] = string.Join(",", pure.DelaysCentiseconds);
+            if (pure.Comment != null) pureImage.Metadata["comment"] = pure.Comment;
+            return pureImage;
+        }
+
         // Probe the collection once to get dimensions, page count, and
         // per-frame animation delays. The lazy re-opens for full pixel decode.
         // Frames are stacked top-to-bottom into a tall VipsImage; n-pages,
