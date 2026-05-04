@@ -45,7 +45,7 @@ internal static class PureExrDecoder
         bool longNames = (version & 0x400) != 0;
         bool nonImage = (version & 0x800) != 0;
         bool multiPart = (version & 0x1000) != 0;
-        if (tiled || nonImage || multiPart) return null;  // future rounds
+        if (nonImage || multiPart) return null;  // future rounds
 
         int p = 8;
         var header = new ExrHeader();
@@ -75,6 +75,14 @@ internal static class PureExrDecoder
         int width = header.DataWindow.Width;
         int height = header.DataWindow.Height;
         if (width <= 0 || height <= 0) return null;
+
+        if (tiled)
+        {
+            if (header.Tiles == null) return null;
+            // Only ONE_LEVEL mode for now (mode bits 0-3 == 0).
+            if ((header.Tiles.Value.Mode & 0x0F) != 0) return null;
+            return DecodeTiled(bytes, p, header, channelOrder, width, height, outBands);
+        }
 
         // After attributes (terminated by a single null byte), the
         // scanline offset table follows: one uint64 per BLOCK.
@@ -157,36 +165,47 @@ internal static class PureExrDecoder
     }
 
     /// <summary>
-    /// Demux a single scanline from the file's per-channel layout
-    /// (all of channel 0's pixels, then all of channel 1's, etc.) into
-    /// the output buffer's chunky-RGBA layout. Skips any file channels
-    /// we're not selecting.
+    /// Demux one row of a region (scanline or tile-row) from the file's
+    /// per-channel layout into the output buffer's chunky layout.
+    /// <paramref name="dstRowBase"/> is the starting index in the output
+    /// pixel buffer; <paramref name="srcRowWidth"/> is how many pixels
+    /// the source row carries (= image width for scanlines, = tile
+    /// width for tile rows).
     /// </summary>
-    private static void DemuxScanline(byte[] bytes, int srcOff,
+    private static void DemuxRegionRow(byte[] bytes, int srcOff,
         List<ExrChannel> fileChannels, int[] channelOrder,
-        int width, float[] dstPixels, int outY, int outBands)
+        int srcRowWidth, float[] dstPixels, long dstRowBase, int outBands)
     {
-        // Build per-channel source offsets within this scanline block.
         int[] channelOffsets = new int[fileChannels.Count];
         int cursor = srcOff;
         for (int i = 0; i < fileChannels.Count; i++)
         {
             channelOffsets[i] = cursor;
-            cursor += BytesPerChannelSample(fileChannels[i].PixelType) * width;
+            cursor += BytesPerChannelSample(fileChannels[i].PixelType) * srcRowWidth;
         }
 
-        long dstRowBase = (long)outY * width * outBands;
         for (int outCh = 0; outCh < outBands; outCh++)
         {
             int srcChIdx = channelOrder[outCh];
             int co = channelOffsets[srcChIdx];
-            // HALF only for now.
-            for (int x = 0; x < width; x++)
+            for (int x = 0; x < srcRowWidth; x++)
             {
                 ushort half = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(co + x * 2, 2));
                 dstPixels[dstRowBase + (long)x * outBands + outCh] = HalfToFloat(half);
             }
         }
+    }
+
+    /// <summary>
+    /// Scanline-block convenience: demux a row that spans the full image
+    /// width into row <paramref name="outY"/> of the output buffer.
+    /// </summary>
+    private static void DemuxScanline(byte[] bytes, int srcOff,
+        List<ExrChannel> fileChannels, int[] channelOrder,
+        int width, float[] dstPixels, int outY, int outBands)
+    {
+        long dstRowBase = (long)outY * width * outBands;
+        DemuxRegionRow(bytes, srcOff, fileChannels, channelOrder, width, dstPixels, dstRowBase, outBands);
     }
 
     /// <summary>
@@ -233,6 +252,118 @@ internal static class PureExrDecoder
     public const int PixelTypeUint = 0;
     public const int PixelTypeHalf = 1;
     public const int PixelTypeFloat = 2;
+
+    /// <summary>
+    /// Decode tiled EXR (single-level, ONE_LEVEL mode). Each tile is one
+    /// block in the existing per-block dispatch, but with rows spanning
+    /// only the tile width and a 2D placement in the output image.
+    /// </summary>
+    private static VipsImage? DecodeTiled(byte[] bytes, int offsetTableStart,
+        ExrHeader header, int[] channelOrder, int width, int height, int outBands)
+    {
+        int tileW = header.Tiles!.Value.XSize;
+        int tileH = header.Tiles!.Value.YSize;
+        if (tileW <= 0 || tileH <= 0) return null;
+
+        int tilesX = (width + tileW - 1) / tileW;
+        int tilesY = (height + tileH - 1) / tileH;
+        long numTiles = (long)tilesX * tilesY;
+        long need = (long)offsetTableStart + 8L * numTiles;
+        if (need > bytes.Length) return null;
+
+        // Tile data is stored exactly like a scanline block but with rows
+        // sized to the tile width. fileTileRowBytes mirrors fileRowBytes
+        // for the smaller width.
+        long fileTileRowBytes = 0;
+        foreach (var c in header.Channels)
+            fileTileRowBytes += BytesPerChannelSample(c.PixelType) * tileW;
+        long maxTileBytes = fileTileRowBytes * tileH;
+        byte[]? tileScratch = header.Compression != 0 ? new byte[maxTileBytes] : null;
+
+        var pixels = new float[(long)width * height * outBands];
+
+        for (long t = 0; t < numTiles; t++)
+        {
+            long off = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offsetTableStart + (int)t * 8, 8));
+            if (off < 0 || off + 20 > bytes.Length) return null;
+            int tileX = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off, 4));
+            int tileY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 4, 4));
+            int levelX = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 8, 4));
+            int levelY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 12, 4));
+            if (levelX != 0 || levelY != 0) return null;  // ONE_LEVEL only
+            int dataSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 16, 4));
+            int tileDataOff = (int)off + 20;
+            if (tileDataOff + dataSize > bytes.Length) return null;
+            if (tileX < 0 || tileX >= tilesX || tileY < 0 || tileY >= tilesY) return null;
+
+            int rowsInTile = Math.Min(tileH, height - tileY * tileH);
+            int colsInTile = Math.Min(tileW, width - tileX * tileW);
+            // Tile data on disk is always stored at full tile dimensions
+            // even when the tile straddles the data window. We read at
+            // tileW × rowsInTile (last column tiles still get full tileW
+            // worth of bytes per row, but unused columns are ignored).
+            // Actually per spec, tiles at the right/bottom edges DO carry
+            // smaller data — the tile occupies (colsInTile × rowsInTile)
+            // pixels.
+            long tileBytes = (long)colsInTile * BytesPerPixelAllChannels(header.Channels) * rowsInTile;
+            // Each row's source-bytes count uses colsInTile (not tileW):
+            long tileRowBytes = (long)colsInTile * BytesPerPixelAllChannels(header.Channels);
+
+            byte[] tileSource;
+            int tileSourceOff;
+            if (header.Compression == 0)
+            {
+                if (dataSize < tileBytes) return null;
+                tileSource = bytes;
+                tileSourceOff = tileDataOff;
+            }
+            else
+            {
+                if (!DecompressBlock(header.Compression, bytes, tileDataOff, dataSize,
+                    tileScratch!, (int)tileBytes))
+                    return null;
+                tileSource = tileScratch!;
+                tileSourceOff = 0;
+            }
+
+            // Demux each tile row into the right slice of the output buffer.
+            int imgX0 = tileX * tileW;
+            int imgY0 = tileY * tileH;
+            for (int row = 0; row < rowsInTile; row++)
+            {
+                int outY = imgY0 + row;
+                int rowSrcOff = tileSourceOff + row * (int)tileRowBytes;
+                long dstRowBase = ((long)outY * width + imgX0) * outBands;
+                DemuxRegionRow(tileSource, rowSrcOff, header.Channels, channelOrder,
+                    colsInTile, pixels, dstRowBase, outBands);
+            }
+        }
+
+        return new VipsImage
+        {
+            Width = width,
+            Height = height,
+            Bands = outBands,
+            BandFormat = VipsBandFormat.Float,
+            Interpretation = outBands == 1 ? VipsInterpretation.BW : VipsInterpretation.RGB,
+            Coding = VipsCoding.None,
+            XRes = 1.0,
+            YRes = 1.0,
+            PixelsLazy = new Lazy<byte[]>(() =>
+            {
+                var dst = new byte[pixels.Length * 4];
+                Buffer.BlockCopy(pixels, 0, dst, 0, dst.Length);
+                return dst;
+            }),
+        };
+    }
+
+    private static int BytesPerPixelAllChannels(List<ExrChannel> channels)
+    {
+        int total = 0;
+        foreach (var c in channels) total += BytesPerChannelSample(c.PixelType);
+        return total;
+    }
 
     /// <summary>
     /// Decompress one EXR scanline block into <paramref name="dst"/>
@@ -353,9 +484,16 @@ internal static class PureExrDecoder
         public Box2i DisplayWindow { get; set; }
         public int LineOrder { get; set; } = -1;
         public float PixelAspectRatio { get; set; } = 1.0f;
+        public TileDesc? Tiles { get; set; }
         public bool IsValid() => Channels.Count > 0 && Compression >= 0
                                   && DataWindow.Width > 0 && DataWindow.Height > 0
                                   && LineOrder >= 0;
+    }
+
+    private struct TileDesc
+    {
+        public int XSize, YSize;
+        public byte Mode;        // bits 0-3: level mode, bits 4-7: rounding mode
     }
 
     private sealed class ExrChannel
@@ -425,6 +563,15 @@ internal static class PureExrDecoder
                     if (size >= 4)
                         hdr.PixelAspectRatio = BitConverter.Int32BitsToSingle(
                             BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(valueStart, 4)));
+                    break;
+                case "tiles":
+                    if (size < 9) return false;
+                    hdr.Tiles = new TileDesc
+                    {
+                        XSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(valueStart, 4)),
+                        YSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(valueStart + 4, 4)),
+                        Mode = bytes[valueStart + 8],
+                    };
                     break;
                 // Other attributes (screenWindowCenter, screenWindowWidth, etc.)
                 // are accepted-and-skipped.
