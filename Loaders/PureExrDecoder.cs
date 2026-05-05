@@ -45,12 +45,39 @@ internal static class PureExrDecoder
         bool longNames = (version & 0x400) != 0;
         bool nonImage = (version & 0x800) != 0;
         bool multiPart = (version & 0x1000) != 0;
-        if (nonImage || multiPart) return null;  // future rounds
+        if (nonImage) return null;
 
         int p = 8;
-        var header = new ExrHeader();
-        if (!ParseAttributes(bytes, ref p, longNames, header)) return null;
-        if (!header.IsValid()) return null;
+        // Parse the header section: one header for single-part, multiple
+        // (separated by null bytes, terminated by an extra null) for
+        // multi-part. We keep all headers so we can sum chunkCounts past
+        // part 0 later — needed only when we expose more than the first
+        // part, but cheap to record now.
+        var allHeaders = new List<ExrHeader>();
+        while (true)
+        {
+            var hdr = new ExrHeader();
+            if (!ParseAttributes(bytes, ref p, longNames, hdr)) return null;
+            if (!hdr.IsValid()) return null;
+            allHeaders.Add(hdr);
+            if (!multiPart) break;
+            if (p >= bytes.Length) return null;
+            // Multi-part files terminate the header section with an extra
+            // null byte after the last header's own terminator.
+            if (bytes[p] == 0) { p++; break; }
+        }
+
+        // First-part-only semantics — match the MIPMAP level-0 punt. Rare
+        // multi-part files where part 0 is a deep image fall back to
+        // null (caller can use Magick).
+        var header = allHeaders[0];
+        if (multiPart)
+        {
+            if (header.Type != "scanlineimage" && header.Type != "tiledimage") return null;
+            // The version word's tiled bit is single-part-only; for multi-part
+            // we trust the part's "type" attribute.
+            tiled = header.Type == "tiledimage";
+        }
 
         // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PIZ,
         // PXR24, B44, B44A. PIZ / B44 / B44A use 32 scanlines per block
@@ -101,12 +128,15 @@ internal static class PureExrDecoder
             if (levelMode != 0 && levelMode != 1 && levelMode != 2) return null;
             if (roundingMode != 0 && roundingMode != 1) return null;
             return DecodeTiled(bytes, p, header, channelOrder, width, height, outBands,
-                levelMode, roundingMode, outBandFormat);
+                levelMode, roundingMode, outBandFormat, multiPart);
         }
 
-        // After attributes (terminated by a single null byte), the
-        // scanline offset table follows: one uint64 per BLOCK.
-        int blockCount = (height + scanlinesPerBlock - 1) / scanlinesPerBlock;
+        // Scanline offset table: one uint64 per block. For multi-part the
+        // chunkCount attribute is authoritative; for single-part we
+        // derive it from dimensions + compression.
+        int blockCount = multiPart && header.ChunkCount > 0
+            ? header.ChunkCount
+            : (height + scanlinesPerBlock - 1) / scanlinesPerBlock;
         int offsetTableStart = p;
         long need = (long)offsetTableStart + 8L * blockCount;
         if (need > bytes.Length) return null;
@@ -127,13 +157,23 @@ internal static class PureExrDecoder
             ? new byte[scanlinesPerBlock * fileRowBytes]
             : null;
 
+        // Multi-part chunks carry a 4-byte LE part-number prefix before
+        // the regular chunk header; we accept only chunks belonging to
+        // part 0 and skip the prefix.
+        int chunkHeaderOff = multiPart ? 4 : 0;
+
         for (int b = 0; b < blockCount; b++)
         {
             long off = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offsetTableStart + b * 8, 8));
-            if (off < 0 || off + 8 > bytes.Length) return null;
-            int yCoord = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off, 4));
-            int dataSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 4, 4));
-            int blockDataOff = (int)off + 8;
+            if (off < 0 || off + 8 + chunkHeaderOff > bytes.Length) return null;
+            if (multiPart)
+            {
+                int partNumber = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off, 4));
+                if (partNumber != 0) return null;
+            }
+            int yCoord = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + chunkHeaderOff, 4));
+            int dataSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + chunkHeaderOff + 4, 4));
+            int blockDataOff = (int)off + chunkHeaderOff + 8;
             if (blockDataOff + dataSize > bytes.Length) return null;
             if (yCoord < header.DataWindow.YMin || yCoord > header.DataWindow.YMax) return null;
             int outY0 = yCoord - header.DataWindow.YMin;
@@ -292,7 +332,7 @@ internal static class PureExrDecoder
     /// </summary>
     private static VipsImage? DecodeTiled(byte[] bytes, int offsetTableStart,
         ExrHeader header, int[] channelOrder, int width, int height, int outBands,
-        int levelMode, int roundingMode, VipsBandFormat outBandFormat)
+        int levelMode, int roundingMode, VipsBandFormat outBandFormat, bool multiPart)
     {
         int tileW = header.Tiles!.Value.XSize;
         int tileH = header.Tiles!.Value.YSize;
@@ -302,15 +342,18 @@ internal static class PureExrDecoder
         int tilesY = (height + tileH - 1) / tileH;
         long numLevel0Tiles = (long)tilesX * tilesY;
 
-        // Total entries in the offset table = sum of tile counts across
-        // all levels. Level 0 always comes first in both MIPMAP and
-        // RIPMAP orderings, so we only walk the first numLevel0Tiles
-        // entries — but we still need the total to bounds-check that the
-        // table fits in the file.
-        long totalTileEntries = ComputeOffsetTableEntries(
-            levelMode, roundingMode, width, height, tileW, tileH);
+        // For multi-part the chunk count is authoritative (file may have
+        // many parts and the compressed offset table is concatenated
+        // across them). For single-part, the existing per-level
+        // computation tells us how big the offset table is.
+        long totalTileEntries = multiPart && header.ChunkCount > 0
+            ? header.ChunkCount
+            : ComputeOffsetTableEntries(levelMode, roundingMode, width, height, tileW, tileH);
         long need = (long)offsetTableStart + 8L * totalTileEntries;
         if (need > bytes.Length) return null;
+
+        // Multi-part chunks have a 4-byte LE part-number prefix.
+        int chunkHeaderOff = multiPart ? 4 : 0;
 
         // Tile data is stored exactly like a scanline block but with rows
         // sized to the tile width. fileTileRowBytes mirrors fileRowBytes
@@ -327,17 +370,23 @@ internal static class PureExrDecoder
         for (long t = 0; t < numLevel0Tiles; t++)
         {
             long off = BinaryPrimitives.ReadInt64LittleEndian(bytes.AsSpan(offsetTableStart + (int)t * 8, 8));
-            if (off < 0 || off + 20 > bytes.Length) return null;
-            int tileX = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off, 4));
-            int tileY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 4, 4));
-            int levelX = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 8, 4));
-            int levelY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 12, 4));
+            if (off < 0 || off + 20 + chunkHeaderOff > bytes.Length) return null;
+            if (multiPart)
+            {
+                int partNumber = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off, 4));
+                if (partNumber != 0) return null;
+            }
+            int chunkOff = (int)off + chunkHeaderOff;
+            int tileX = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(chunkOff, 4));
+            int tileY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(chunkOff + 4, 4));
+            int levelX = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(chunkOff + 8, 4));
+            int levelY = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(chunkOff + 12, 4));
             // The first numLevel0Tiles entries are always level (0,0) in
             // both MIPMAP (level k offsets follow level k-1) and RIPMAP
             // (lx outer? ly outer? — either way (0,0) is first).
             if (levelX != 0 || levelY != 0) return null;
-            int dataSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan((int)off + 16, 4));
-            int tileDataOff = (int)off + 20;
+            int dataSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(chunkOff + 16, 4));
+            int tileDataOff = chunkOff + 20;
             if (tileDataOff + dataSize > bytes.Length) return null;
             if (tileX < 0 || tileX >= tilesX || tileY < 0 || tileY >= tilesY) return null;
 
@@ -664,6 +713,12 @@ internal static class PureExrDecoder
         public int LineOrder { get; set; } = -1;
         public float PixelAspectRatio { get; set; } = 1.0f;
         public TileDesc? Tiles { get; set; }
+        // Multi-part-only attributes. "type" identifies the part's
+        // organisation (scanlineimage / tiledimage / deepscanline /
+        // deeptile); "chunkCount" tells how many chunks the part has
+        // (so we can size offset tables without re-deriving them).
+        public string Type { get; set; } = "";
+        public int ChunkCount { get; set; } = -1;
         public bool IsValid() => Channels.Count > 0 && Compression >= 0
                                   && DataWindow.Width > 0 && DataWindow.Height > 0
                                   && LineOrder >= 0;
@@ -752,8 +807,16 @@ internal static class PureExrDecoder
                         Mode = bytes[valueStart + 8],
                     };
                     break;
-                // Other attributes (screenWindowCenter, screenWindowWidth, etc.)
-                // are accepted-and-skipped.
+                case "type":
+                    // String values are length-prefixed by the attribute size.
+                    hdr.Type = System.Text.Encoding.ASCII.GetString(bytes, valueStart, size);
+                    break;
+                case "chunkCount":
+                    if (size >= 4)
+                        hdr.ChunkCount = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(valueStart, 4));
+                    break;
+                // Other attributes (screenWindowCenter, screenWindowWidth,
+                // name, etc.) are accepted-and-skipped.
             }
         }
         return false;  // hit EOF without seeing the terminating null
