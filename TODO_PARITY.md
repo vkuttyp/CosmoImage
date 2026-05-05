@@ -312,8 +312,10 @@ project — corresponding to libvips' early scientific-imaging heritage.
   ordering of pipeline stages.
 - [ ] **Profiling / gating** (`gate.c`). Built-in op-tree profiler
   for finding slow stages.
-- [ ] **LRU operation cache** (`cache.c` upgrade). Currently
-  count-based; libvips evicts based on resource use.
+- [x] ~~**LRU operation cache**~~ (round 177) — `VipsCache` now uses
+  proper LRU (LinkedList + Dictionary) with cost-based eviction.
+  Cost estimated as `W·H·SizeOfPel`; cap defaults to 256 MiB,
+  tunable via `SetMaxCost`. Setting cap to 0 disables caching.
 
 ### Native-format pure-C# ports
 Each is days-to-weeks per format, replacing the corresponding
@@ -419,8 +421,8 @@ Holes inside formats we already handle, that would close edge cases.
   and loader `PixelsLazy` currently allocate via `new byte[]`;
   pooling them needs explicit disposal semantics on `VipsImage`,
   which is a separate design call.
-- [ ] **Cache LRU** — current `VipsCache` is count-based with simple
-  eviction; libvips uses LRU + resource cost.
+- [x] ~~**Cache LRU**~~ — see "LRU operation cache" entry under iofuncs/
+  (round 177).
 
 ---
 
