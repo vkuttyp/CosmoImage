@@ -158,8 +158,10 @@ Each lands in a single PR.
 ### `freqfilt/`
 - [x] ~~`freqmult`~~ (round 32) — FwFft → real-mask multiply → InvFft;
   preserves Float output.
-- [ ] `phasecor` (phase correlation — image registration / motion
-  estimation).
+- [x] ~~`phasecor`~~ (round 173) — whitened cross-power spectrum
+  <c>FFT(a)·conj(FFT(b))/|…|</c>, IFFT'd; peak coordinate is the
+  translation aligning the inputs (modulo image size). Brightness/
+  contrast invariant via the whitening step.
 
 ### `resample/`
 - [x] ~~`mapim`~~ (round 42) — Float 2-band coordinate index image,

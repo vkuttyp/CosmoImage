@@ -818,6 +818,17 @@ public static partial class VipsImageOps
     public static VipsImage InvFft(VipsImage input) => Run(new VipsInvFft { In = input });
     public static VipsImage Spectrum(VipsImage input) => Run(new VipsSpectrum { In = input });
 
+    // From Operations/Analysis/VipsPhasecor.cs
+    /// <summary>
+    /// Phase correlation: returns a Float image whose peak is at
+    /// <c>(Δx, Δy)</c> — the translation that best aligns
+    /// <paramref name="in1"/> with <paramref name="in2"/>. Inputs must be
+    /// equal-sized single-band UChar. Useful for image registration and
+    /// motion estimation; brightness/contrast invariant due to whitening.
+    /// </summary>
+    public static VipsImage Phasecor(VipsImage in1, VipsImage in2)
+        => Run(new VipsPhasecor { In1 = in1, In2 = in2 });
+
     // From Operations/Analysis/VipsStats.cs
     public static VipsStatsResult Stats(VipsImage input) => VipsStats.Compute(input);
     public static double Avg(VipsImage input) => VipsStats.Compute(input).Avg[input.Bands];

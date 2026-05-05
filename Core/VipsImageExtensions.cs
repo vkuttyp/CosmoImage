@@ -231,6 +231,10 @@ public static class VipsImageExtensions
     /// <summary>Inverse 2D FFT — DPComplex spectrum back to UChar spatial image.</summary>
     public static VipsImage InvFft(this VipsImage image) => VipsImageOps.InvFft(image);
 
+    /// <summary>Phase correlation with another image; peak indicates translation offset.</summary>
+    public static VipsImage Phasecor(this VipsImage image, VipsImage other) =>
+        VipsImageOps.Phasecor(image, other);
+
     /// <summary>Centered log-magnitude spectrum of a DPComplex image.</summary>
     public static VipsImage Spectrum(this VipsImage image) => VipsImageOps.Spectrum(image);
 
