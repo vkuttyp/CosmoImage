@@ -539,8 +539,7 @@ internal static class PureExrDecoder
 
         if (compression == 5)
         {
-            int rowBytes = expected / Math.Max(1, rows);
-            return DecompressPxr24Geom(src, srcOff, srcLen, dst, rows, rowBytes, channels, width);
+            return DecompressPxr24Geom(src, srcOff, srcLen, dst, rows, channels, width);
         }
         if (compression == 4)
         {
@@ -598,44 +597,107 @@ internal static class PureExrDecoder
     }
 
     /// <summary>
-    /// PXR24 (compression=5) decompress. The encoded form is zlib-
-    /// compressed per-channel-per-row [high_bytes; low_bytes] streams
-    /// with a per-pixel 16-bit delta predictor that resets at channel
-    /// boundaries within each row. Caller supplies row count and width
-    /// so we can walk the inflated buffer with the right stride.
-    ///
-    /// HALF channels only here; FLOAT (3-byte truncated) and UINT
-    /// (4-byte) come in a future round.
+    /// PXR24 (compression=5) decompress. The encoded form is zlib over
+    /// per-channel-per-row byte planes (high-to-low byte order within
+    /// each pixel) with a per-pixel delta predictor. Plane count
+    /// depends on pixel type: HALF = 2, FLOAT = 3 (top 24 bits of the
+    /// float; bottom mantissa byte is dropped — that's where PXR24
+    /// gets its lossy "24-bit float"), UINT = 4. Output layout is
+    /// always 4 bytes per UINT/FLOAT sample and 2 bytes per HALF
+    /// sample, host little-endian.
     /// </summary>
     private static bool DecompressPxr24Geom(byte[] src, int srcOff, int srcLen,
-        byte[] dst, int rows, int rowBytes, List<ExrChannel> channels, int width)
+        byte[] dst, int rows, List<ExrChannel> channels, int width)
     {
-        int total = rows * rowBytes;
-        var inflated = new byte[total];
-        if (!ZlibDecompress(src, srcOff, srcLen, inflated, total)) return false;
+        // Inflated size: per row, sum over channels of bytesPerPlane*width
+        // where bytesPerPlane is 2/3/4 for HALF/FLOAT/UINT.
+        int rowInflated = 0;
+        foreach (var ch in channels)
+        {
+            int bp = ch.PixelType switch
+            {
+                PixelTypeHalf => 2,
+                PixelTypeFloat => 3,
+                PixelTypeUint => 4,
+                _ => 0,
+            };
+            if (bp == 0) return false;
+            rowInflated += bp * width;
+        }
+        int totalInflated = rows * rowInflated;
+        var inflated = new byte[totalInflated];
+        if (!ZlibDecompress(src, srcOff, srcLen, inflated, totalInflated)) return false;
 
-        // Inflated layout: for each row, for each channel, [high_bytes (W), low_bytes (W)].
-        // dst layout: for each row, for each channel, [pixel0_lo, pixel0_hi, pixel1_lo, pixel1_hi, ...]
-        //   (HALF stored little-endian: low byte first.)
         int sp = 0;
         int dp = 0;
         for (int r = 0; r < rows; r++)
         {
             foreach (var ch in channels)
             {
-                if (ch.PixelType != PixelTypeHalf) return false;  // FLOAT/UINT future
-                ushort prev = 0;
-                for (int x = 0; x < width; x++)
+                switch (ch.PixelType)
                 {
-                    byte hi = inflated[sp + x];
-                    byte lo = inflated[sp + width + x];
-                    ushort delta = (ushort)((hi << 8) | lo);
-                    prev = (ushort)(prev + delta);
-                    dst[dp + x * 2]     = (byte)prev;          // low byte (host LE)
-                    dst[dp + x * 2 + 1] = (byte)(prev >> 8);   // high byte
+                    case PixelTypeHalf:
+                    {
+                        ushort prev = 0;
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte hi = inflated[sp + x];
+                            byte lo = inflated[sp + width + x];
+                            ushort delta = (ushort)((hi << 8) | lo);
+                            prev = (ushort)(prev + delta);
+                            dst[dp + x * 2]     = (byte)prev;
+                            dst[dp + x * 2 + 1] = (byte)(prev >> 8);
+                        }
+                        sp += 2 * width;
+                        dp += 2 * width;
+                        break;
+                    }
+                    case PixelTypeFloat:
+                    {
+                        // 3 byte-planes carry the top 24 bits of each
+                        // float (bytes 3, 2, 1 in big-endian order — the
+                        // bottom mantissa byte is dropped). Predictor
+                        // accumulates over the assembled 24-bit value
+                        // with the dropped byte forced to 0.
+                        uint prev = 0;
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte b0 = inflated[sp + x];                  // bits 24..31
+                            byte b1 = inflated[sp + width + x];          // bits 16..23
+                            byte b2 = inflated[sp + 2 * width + x];      // bits 8..15
+                            uint delta = ((uint)b0 << 24) | ((uint)b1 << 16) | ((uint)b2 << 8);
+                            prev = prev + delta;
+                            // Output 4 bytes little-endian (low byte = 0).
+                            dst[dp + x * 4]     = 0;
+                            dst[dp + x * 4 + 1] = (byte)(prev >> 8);
+                            dst[dp + x * 4 + 2] = (byte)(prev >> 16);
+                            dst[dp + x * 4 + 3] = (byte)(prev >> 24);
+                        }
+                        sp += 3 * width;
+                        dp += 4 * width;
+                        break;
+                    }
+                    case PixelTypeUint:
+                    {
+                        uint prev = 0;
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte b0 = inflated[sp + x];                  // bits 24..31
+                            byte b1 = inflated[sp + width + x];          // bits 16..23
+                            byte b2 = inflated[sp + 2 * width + x];      // bits 8..15
+                            byte b3 = inflated[sp + 3 * width + x];      // bits 0..7
+                            uint delta = ((uint)b0 << 24) | ((uint)b1 << 16) | ((uint)b2 << 8) | b3;
+                            prev = prev + delta;
+                            dst[dp + x * 4]     = (byte)prev;
+                            dst[dp + x * 4 + 1] = (byte)(prev >> 8);
+                            dst[dp + x * 4 + 2] = (byte)(prev >> 16);
+                            dst[dp + x * 4 + 3] = (byte)(prev >> 24);
+                        }
+                        sp += 4 * width;
+                        dp += 4 * width;
+                        break;
+                    }
                 }
-                sp += 2 * width;
-                dp += 2 * width;
             }
         }
         return true;
