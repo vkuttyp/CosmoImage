@@ -10,11 +10,11 @@ namespace CosmoImage.Loaders;
 /// (YCbCr 4:4:4 / 4:2:2 / 4:2:0 subsampling). Restart markers
 /// (RST0..RST7) and standard zigzag + IDCT supported.
 ///
-/// <para>Unsupported variants — progressive (SOF2), hierarchical (SOF5),
-/// arithmetic-coded (SOF9..SOF15), 12-bit precision, lossless JPEG —
-/// return <c>null</c> so the caller falls back to the JpegLibrary
-/// path. The fast path is the goal: the long tail of exotic
-/// JPEG variants stays on the well-tested third-party decoder.</para>
+/// <para>Unsupported variants — hierarchical (SOF5), arithmetic-coded
+/// (SOF9..SOF15), 12-bit precision, lossless JPEG — return <c>null</c>
+/// so the caller falls back to a Magick-backed decode. The pure path
+/// covers the dominant on-the-web subset (baseline + progressive,
+/// 8-bit, 1/3-component); the long tail stays on Magick.</para>
 ///
 /// <para>Output is row-major interleaved RGB (3-band) for YCbCr inputs
 /// and 1-band greyscale for single-component inputs. Pixel buffer is
@@ -23,9 +23,57 @@ namespace CosmoImage.Loaders;
 internal static class PureJpegDecoder
 {
     /// <summary>
+    /// Header-only probe: walks markers up to (and including) SOF0/SOF2
+    /// to extract <paramref name="width"/> / <paramref name="height"/> /
+    /// <paramref name="channels"/>. Returns true when the JPEG has a
+    /// supported SOF marker, false otherwise. Doesn't allocate a pixel
+    /// buffer or run entropy decode — useful for header-only callers
+    /// (e.g., <c>LoadHeaderAsync</c>) and for sizing the lazy decode
+    /// buffer without committing to a full TryDecode.
+    /// </summary>
+    public static bool TryReadHeader(byte[] jpeg, out int width, out int height, out int channels)
+    {
+        width = height = channels = 0;
+        if (jpeg == null || jpeg.Length < 4) return false;
+        if (jpeg[0] != 0xFF || jpeg[1] != 0xD8) return false;
+
+        int p = 2;
+        while (p + 1 < jpeg.Length)
+        {
+            if (jpeg[p] != 0xFF) return false;
+            byte marker = jpeg[p + 1];
+            p += 2;
+            if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7) || marker == 0xD9) continue;
+            if (p + 2 > jpeg.Length) return false;
+            int segLen = (jpeg[p] << 8) | jpeg[p + 1];
+            if (segLen < 2 || p + segLen > jpeg.Length) return false;
+            int segDataStart = p + 2;
+
+            // SOF0 (baseline) or SOF2 (progressive) — both use the same
+            // header layout (precision, dims, components).
+            if (marker == 0xC0 || marker == 0xC2)
+            {
+                if (segDataStart + 6 > jpeg.Length) return false;
+                int precision = jpeg[segDataStart];
+                if (precision != 8) return false;
+                height = (jpeg[segDataStart + 1] << 8) | jpeg[segDataStart + 2];
+                width = (jpeg[segDataStart + 3] << 8) | jpeg[segDataStart + 4];
+                int n = jpeg[segDataStart + 5];
+                if (n != 1 && n != 3) return false;
+                channels = n;
+                return true;
+            }
+            // Bail on other SOF markers we don't handle.
+            if ((marker >= 0xC1 && marker <= 0xCF) && marker != 0xC4 && marker != 0xC8) return false;
+            p += segLen;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Attempt to decode <paramref name="jpeg"/>. Returns null when the
     /// stream uses a JPEG variant we don't handle — caller should fall
-    /// back to JpegLibrary in that case.
+    /// back to a different decoder in that case.
     /// </summary>
     public static byte[]? TryDecode(byte[] jpeg, out int width, out int height, out int channels)
     {
@@ -71,7 +119,7 @@ internal static class PureJpegDecoder
                 case 0xC5: case 0xC6: case 0xC7:
                 case 0xC9: case 0xCA: case 0xCB:
                 case 0xCD: case 0xCE: case 0xCF:
-                    return null; // bail to JpegLibrary for these
+                    return null; // bail to Magick fallback for these
                 case 0xC4: // DHT — Huffman tables
                     if (!ParseDht(jpeg, segDataStart, segEnd, ctx)) return null;
                     break;

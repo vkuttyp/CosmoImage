@@ -1,83 +1,12 @@
 using System;
-using System.Buffers;
 using System.IO.Pipelines;
 using System.Threading;
 using System.Threading.Tasks;
-using JpegLibrary;
 
 namespace CosmoImage.Savers;
 
 public static class VipsJpegSaver
 {
-    // The JPEG encoder is a pull model: Encode() calls ReadBlock(component, x, y)
-    // for arbitrary 8x8 MCU blocks, visiting each block once per component (so
-    // each block is re-fetched up to 3 times for color). Calling Prepare per
-    // block is wasteful. Instead we materialize the entire image into a flat
-    // raw buffer up-front via VipsSink (parallel pixel preparation) and have
-    // ReadBlock read from that buffer.
-    private class VipsInputReader : JpegBlockInputReader
-    {
-        private readonly int _width;
-        private readonly int _height;
-        private readonly int _bands;
-        private readonly int _pelSize;
-        private readonly byte[] _pixels;
-
-        public VipsInputReader(int width, int height, int bands, int pelSize, byte[] pixels)
-        {
-            _width = width;
-            _height = height;
-            _bands = bands;
-            _pelSize = pelSize;
-            _pixels = pixels;
-        }
-
-        public override int Width => _width;
-        public override int Height => _height;
-
-        public override void ReadBlock(ref short blockRef, int componentIndex, int x, int y)
-        {
-            int stride = _width * _pelSize;
-
-            for (int row = 0; row < 8; row++)
-            {
-                int fetchY = Math.Min(y + row, _height - 1);
-                int rowBase = fetchY * stride;
-
-                for (int col = 0; col < 8; col++)
-                {
-                    int fetchX = Math.Min(x + col, _width - 1);
-                    int offset = rowBase + fetchX * _pelSize;
-
-                    double val;
-                    if (_bands >= 3)
-                    {
-                        byte r = _pixels[offset + 0];
-                        byte g = _pixels[offset + 1];
-                        byte b = _pixels[offset + 2];
-
-                        val = componentIndex switch
-                        {
-                            0 => 0.299 * r + 0.587 * g + 0.114 * b, // Y
-                            1 => 128 - 0.168736 * r - 0.331264 * g + 0.5 * b, // Cb
-                            2 => 128 + 0.5 * r - 0.418688 * g - 0.081312 * b, // Cr
-                            _ => 0
-                        };
-                    }
-                    else
-                    {
-                        val = _pixels[offset]; // Grayscale
-                    }
-
-                    // JpegLibrary's encoder expects unshifted unsigned
-                    // samples; the level-shift is applied internally
-                    // before DCT (symmetric with the decoder side).
-                    System.Runtime.CompilerServices.Unsafe.Add(ref blockRef, row * 8 + col) = (short)val;
-                }
-            }
-        }
-    }
-
     public static async Task SaveAsync(VipsImage image, PipeWriter writer, int quality = 75, CancellationToken cancellationToken = default)
     {
         int width = image.Width;
@@ -102,38 +31,40 @@ public static class VipsJpegSaver
             pixels = sink.Pixels;
         }
 
-        // Pure-C# encoder. Phase 2 of the JpegLibrary drop. Handles
-        // 1-band greyscale and 3-band RGB (encoded as YCbCr 4:2:0) —
-        // the dominant on-the-web variants. RGBA (4-band) still routes
-        // to JpegLibrary for now since the pure encoder doesn't strip
-        // alpha; subsequent rounds will handle that.
+        // Pure-C# encoder handles 1-band greyscale + 3-band RGB. JPEG has
+        // no alpha channel, so 4-band RGBA gets the alpha stripped to RGB
+        // before encoding — alpha would be discarded by any JPEG codec.
+        // Other band counts (2 = greyscale+alpha, etc.) drop to single-
+        // channel by taking the first band (lossy but matches JPEG's
+        // fundamental "no alpha" constraint).
         byte[] jpegBytes;
         if (bands == 1 || bands == 3)
         {
             jpegBytes = PureJpegEncoder.Encode(pixels, width, height, bands, quality);
         }
+        else if (bands == 4)
+        {
+            // Strip alpha: drop the 4th band per pixel.
+            var rgb = new byte[width * height * 3];
+            for (int i = 0, j = 0; i < pixels.Length; i += 4, j += 3)
+            {
+                rgb[j + 0] = pixels[i + 0];
+                rgb[j + 1] = pixels[i + 1];
+                rgb[j + 2] = pixels[i + 2];
+            }
+            jpegBytes = PureJpegEncoder.Encode(rgb, width, height, 3, quality);
+        }
+        else if (bands == 2)
+        {
+            // Greyscale + alpha → drop the alpha plane.
+            var grey = new byte[width * height];
+            for (int i = 0, j = 0; i < pixels.Length; i += 2, j++)
+                grey[j] = pixels[i];
+            jpegBytes = PureJpegEncoder.Encode(grey, width, height, 1, quality);
+        }
         else
         {
-            // Fallback: 4-band or other unusual cases stay on JpegLibrary
-            // until the pure encoder grows alpha-strip / CMYK support.
-            var encoded = new ArrayBufferWriter<byte>();
-            var encoder = new JpegEncoder();
-            encoder.SetInputReader(new VipsInputReader(width, height, bands, pelSize, pixels));
-            encoder.SetOutput(encoded);
-
-            var lumTable = JpegStandardQuantizationTable.ScaleByQuality(JpegStandardQuantizationTable.GetLuminanceTable(JpegElementPrecision.Precision8Bit, 0), quality);
-            var chrTable = JpegStandardQuantizationTable.ScaleByQuality(JpegStandardQuantizationTable.GetChrominanceTable(JpegElementPrecision.Precision8Bit, 1), quality);
-            encoder.SetQuantizationTable(lumTable);
-            encoder.SetQuantizationTable(chrTable);
-            encoder.SetHuffmanTable(true, 0, JpegStandardHuffmanEncodingTable.GetLuminanceDCTable());
-            encoder.SetHuffmanTable(false, 0, JpegStandardHuffmanEncodingTable.GetLuminanceACTable());
-            encoder.SetHuffmanTable(true, 1, JpegStandardHuffmanEncodingTable.GetChrominanceDCTable());
-            encoder.SetHuffmanTable(false, 1, JpegStandardHuffmanEncodingTable.GetChrominanceACTable());
-            encoder.AddComponent(1, 0, 0, 0, 1, 1);
-            encoder.AddComponent(2, 1, 1, 1, 1, 1);
-            encoder.AddComponent(3, 1, 1, 1, 1, 1);
-            encoder.Encode();
-            jpegBytes = encoded.WrittenMemory.ToArray();
+            throw new NotSupportedException($"JPEG save needs 1/2/3/4 bands; got {bands}");
         }
 
         // Splice metadata: SOI → EXIF (APP1) → XMP (APP1) → rest of encoded JPEG.

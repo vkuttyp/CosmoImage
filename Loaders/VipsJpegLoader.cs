@@ -3,7 +3,6 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using JpegLibrary;
 
 namespace CosmoImage.Loaders;
 
@@ -145,13 +144,16 @@ public static class VipsJpegLoader
         }
 
         var jpegBytes = ms.ToArray();
-        var decoder = new JpegDecoder();
-        decoder.SetInput(jpegBytes);
-        decoder.Identify();
-
-        int width = decoder.Width;
-        int height = decoder.Height;
-        int bands = decoder.NumberOfComponents;
+        if (!PureJpegDecoder.TryReadHeader(jpegBytes, out int width, out int height, out int bands))
+        {
+            // Fallback: route the whole file through Magick to extract
+            // dimensions for variants the pure header probe doesn't
+            // recognise (12-bit, JPEG XR-tagged, etc.). Rare in the wild.
+            return await VipsMagickWrapLoader.LoadAsync(
+                new PipeVipsSource(System.IO.Pipelines.PipeReader.Create(new MemoryStream(jpegBytes))),
+                cancellationToken,
+                ImageMagick.MagickFormat.Jpeg);
+        }
 
         // Memory-image dtype: pixels live directly on the VipsImage. Decoding
         // is lazy — the first downstream Prepare forces materialization, but
@@ -163,11 +165,11 @@ public static class VipsJpegLoader
 
         var pixelsLazy = new Lazy<byte[]>(() =>
         {
-            // Pure-C# fast path. Handles baseline sequential JPEGs
-            // (the dominant on-the-web subset) without the JpegLibrary
-            // dependency. Returns null and falls through to JpegLibrary
-            // for progressive / arithmetic / 12-bit / hierarchical
-            // variants which the fast path doesn't cover.
+            // Pure-C# fast path. Handles baseline + progressive JPEGs
+            // (the dominant on-the-web subset). Returns null on
+            // arithmetic / lossless / 12-bit / unusual subsampling, in
+            // which case we fall through to a Magick-based decode for
+            // the long tail.
             var pure = PureJpegDecoder.TryDecode(jpegBytes, out int pw, out int ph, out int pc);
             if (pure != null && pw == width && ph == height && pc == bands)
             {
@@ -175,18 +177,8 @@ public static class VipsJpegLoader
                 return pure;
             }
 
-            int stride = width * bands;
-            var buf = new byte[stride * height];
-            var innerDecoder = new JpegDecoder();
-            innerDecoder.SetInput(jpegBytes);
-            innerDecoder.SetOutputWriter(new SimpleOutputWriter(width, height, bands, buf));
-            innerDecoder.Decode();
-            // SimpleOutputWriter writes raw component samples interleaved
-            // at offsets 0/1/2 of each pixel — for a default JFIF JPEG
-            // those are Y, Cb, Cr, which need conversion to RGB before
-            // we hand the buffer back labeled as RGB.
-            ConvertColorSpace(buf, width, height, bands, colorSpace);
-            return buf;
+            // Magick fallback for variants the pure decoder doesn't cover.
+            return DecodeViaMagick(jpegBytes, width, height, bands, colorSpace);
         });
 
         var image = new VipsImage
@@ -248,18 +240,28 @@ public static class VipsJpegLoader
         }
         var jpegBytes = ms.ToArray();
 
-        var decoder = new JpegDecoder();
-        decoder.SetInput(jpegBytes);
-        decoder.Identify();
-        int width = decoder.Width;
-        int height = decoder.Height;
-        int bands = decoder.NumberOfComponents;
+        if (!PureJpegDecoder.TryReadHeader(jpegBytes, out int width, out int height, out int bands))
+        {
+            return await VipsMagickWrapLoader.LoadAsync(
+                new PipeVipsSource(System.IO.Pipelines.PipeReader.Create(new MemoryStream(jpegBytes))),
+                cancellationToken,
+                ImageMagick.MagickFormat.Jpeg);
+        }
 
-        // Decode now into a fresh buffer so we can drop jpegBytes after.
-        var pixels = new byte[width * bands * height];
-        decoder.SetOutputWriter(new SimpleOutputWriter(width, height, bands, pixels));
-        decoder.Decode();
-        ConvertColorSpace(pixels, width, height, bands, DetectJpegColorSpace(jpegBytes, bands));
+        // Decode eagerly so we can drop jpegBytes after this call.
+        // Pure-C# fast path; Magick fallback for unsupported variants.
+        var colorSpace = DetectJpegColorSpace(jpegBytes, bands);
+        byte[] pixels;
+        var pure = PureJpegDecoder.TryDecode(jpegBytes, out int pw, out int ph, out int pc);
+        if (pure != null && pw == width && ph == height && pc == bands)
+        {
+            pixels = pure;
+            ConvertColorSpace(pixels, width, height, bands, colorSpace);
+        }
+        else
+        {
+            pixels = DecodeViaMagick(jpegBytes, width, height, bands, colorSpace);
+        }
 
         var image = new VipsImage
         {
@@ -455,30 +457,24 @@ public static class VipsJpegLoader
         components = 0;
         try
         {
-            var decoder = new JpegDecoder();
-            decoder.SetInput(jpegBytes);
-            decoder.Identify();
-            int w = decoder.Width;
-            int h = decoder.Height;
-            components = decoder.NumberOfComponents;
+            if (!PureJpegDecoder.TryReadHeader(jpegBytes, out int w, out int h, out int n)) return false;
             if (w != expectedWidth || h != expectedHeight) return false;
+            components = n;
 
-            // Decode into a tightly-packed scratch buffer first; copy rows
-            // into dst at the requested stride afterwards.
-            var scratch = new byte[w * h * components];
-            decoder.SetOutputWriter(new SimpleOutputWriter(w, h, components, scratch));
-            decoder.Decode();
-            // forceRgbPassthrough is set by callers (e.g. JPEG-in-TIFF
-            // photometric=2) where the JPEG components are already R/G/B
-            // even though the JPEG itself carries no Adobe APP14 marker
-            // declaring it.
-            if (!forceRgbPassthrough)
+            var cs = DetectJpegColorSpace(jpegBytes, n);
+            byte[] scratch;
+            var pure = PureJpegDecoder.TryDecode(jpegBytes, out int pw, out int ph, out int pc);
+            if (pure != null && pw == w && ph == h && pc == n)
             {
-                var cs = DetectJpegColorSpace(jpegBytes, components);
-                ConvertColorSpace(scratch, w, h, components, cs);
+                scratch = pure;
+                if (!forceRgbPassthrough) ConvertColorSpace(scratch, w, h, n, cs);
+            }
+            else
+            {
+                scratch = DecodeViaMagick(jpegBytes, w, h, n, forceRgbPassthrough ? JpegColorSpace.Rgb : cs);
             }
 
-            int srcRow = w * components;
+            int srcRow = w * n;
             for (int y = 0; y < h; y++)
                 Buffer.BlockCopy(scratch, y * srcRow, dst, dstOff + y * dstRowStride, srcRow);
             return true;
@@ -489,42 +485,55 @@ public static class VipsJpegLoader
         }
     }
 
-    private class SimpleOutputWriter : JpegBlockOutputWriter
+    /// <summary>
+    /// Magick-backed fallback for JPEG variants the pure decoder
+    /// doesn't cover (12-bit precision, hierarchical, arithmetic-coded,
+    /// unusual subsampling combinations). Materialises the entire
+    /// image to a flat row-major byte buffer in the same shape the
+    /// pure path produces; the caller's <see cref="ConvertColorSpace"/>
+    /// finishes the YCbCr → RGB conversion.
+    /// </summary>
+    internal static byte[] DecodeViaMagick(byte[] jpegBytes, int width, int height, int bands, JpegColorSpace cs)
     {
-        private readonly byte[] _buffer;
-        private readonly int _width;
-        private readonly int _height;
-        private readonly int _components;
-
-        public SimpleOutputWriter(int width, int height, int components, byte[] buffer)
+        var settings = new ImageMagick.MagickReadSettings
         {
-            _width = width;
-            _height = height;
-            _components = components;
-            _buffer = buffer;
-        }
-
-        public override void WriteBlock(ref short blockRef, int componentIndex, int x, int y)
+            Format = ImageMagick.MagickFormat.Jpeg,
+        };
+        using var img = new ImageMagick.MagickImage(jpegBytes, settings);
+        // ToByteArray with a pixel-mapping string lays the bytes out
+        // in the requested per-pixel channel order. Magick has already
+        // demosaiced the JPEG components and unmangled YCbCr → RGB
+        // internally, so we read RGB / RGBA / I (intensity) directly.
+        string mapping = bands switch
         {
-            ref short blockStart = ref blockRef;
-            for (int row = 0; row < 8; row++)
-            {
-                int pixelY = y + row;
-                if (pixelY >= _height) break;
-
-                for (int col = 0; col < 8; col++)
-                {
-                    int pixelX = x + col;
-                    if (pixelX >= _width) break;
-
-                    int offset = (pixelY * _width + pixelX) * _components + componentIndex;
-                    short val = System.Runtime.CompilerServices.Unsafe.Add(ref blockStart, row * 8 + col);
-                    // JpegLibrary's IDCT output is already shifted to
-                    // unsigned [0, 255]; SimpleOutputWriter just clamps.
-                    _buffer[offset] = (byte)Math.Clamp((int)val, 0, 255);
-                }
-            }
-        }
+            1 => "I",
+            3 => "RGB",
+            4 => "RGBA",
+            _ => "RGB",
+        };
+        var pixels = img.GetPixelsUnsafe().ToByteArray(mapping)
+                     ?? throw new InvalidOperationException("Magick JPEG decode produced no bytes");
+        // Magick handed us already-converted RGB bytes; the caller's
+        // ConvertColorSpace assumes raw component samples (YCbCr for
+        // a YCbCr-tagged JPEG, untouched RGB for an RGB-tagged JPEG,
+        // etc.). Pre-encode RGB → YCbCr so ConvertColorSpace's later
+        // YCbCr → RGB pass produces the right output.
+        if (cs == JpegColorSpace.YCbCr && bands == 3) RgbToYCbCrInPlace(pixels);
+        return pixels;
     }
 
+    /// <summary>Inverse of <see cref="ConvertColorSpace"/>'s YCbCr→RGB path.</summary>
+    private static void RgbToYCbCrInPlace(byte[] buf)
+    {
+        for (int i = 0; i < buf.Length; i += 3)
+        {
+            int r = buf[i + 0], g = buf[i + 1], b = buf[i + 2];
+            int Y = (66 * r + 129 * g + 25 * b + 128) >> 8;
+            int Cb = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+            int Cr = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+            buf[i + 0] = (byte)Math.Clamp(Y, 0, 255);
+            buf[i + 1] = (byte)Math.Clamp(Cb, 0, 255);
+            buf[i + 2] = (byte)Math.Clamp(Cr, 0, 255);
+        }
+    }
 }
