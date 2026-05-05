@@ -23,8 +23,18 @@ public static class VipsTiffSaver
     /// pyramidal TIFF (Magick's <c>Ptif</c>) — multi-resolution layout used by
     /// deep-zoom viewers (OpenSeadragon, IIIF). Only meaningful for
     /// single-page input; for multi-page input it falls back to standard TIFF.
+    ///
+    /// <para><paramref name="tileSize"/> = positive value writes a Tiled-TIFF
+    /// (organized as fixed-size square tiles instead of horizontal strips).
+    /// Useful for cropped reads from huge images. Pass 0 for the default
+    /// stripped layout. Each tile is <c>tileSize × tileSize</c> pixels.</para>
+    ///
+    /// <para>UShort input (16-bit per sample) emits a 16-bit-per-sample
+    /// TIFF; UChar emits 8-bit. Other formats cast to UChar first.</para>
     /// </summary>
-    public static async Task SaveAsync(VipsImage image, PipeWriter writer, bool pyramid = false, CancellationToken cancellationToken = default)
+    public static async Task SaveAsync(VipsImage image, PipeWriter writer,
+        bool pyramid = false, int tileSize = 0,
+        CancellationToken cancellationToken = default)
     {
         int width = image.Width;
         int height = image.Height;
@@ -32,6 +42,7 @@ public static class VipsTiffSaver
 
         if (bands != 1 && bands != 3 && bands != 4)
             throw new NotSupportedException($"TIFF save needs 1, 3, or 4 bands; got {bands}");
+        if (tileSize < 0) throw new ArgumentOutOfRangeException(nameof(tileSize));
 
         // Detect multi-page layout. Default to single-page.
         int nPages = 1;
@@ -46,15 +57,24 @@ public static class VipsTiffSaver
             pageHeight = ph;
         }
 
+        // Bit-depth dispatch. UShort → 16-bit-per-sample TIFF; UChar →
+        // 8-bit. Anything else casts to UChar — there's no lossless
+        // generic path for Float / Int formats.
+        bool sixteenBit = image.BandFormat == VipsBandFormat.UShort;
+        int bytesPerSample = sixteenBit ? 2 : 1;
+        VipsImage src = image.BandFormat == VipsBandFormat.UChar || sixteenBit
+            ? image
+            : VipsImageOps.CastUChar(image);
+
         // Materialize source pixels.
         byte[] pixels;
-        if (image.Pixels is { } existing)
+        if (src.Pixels is { } existing)
         {
             pixels = existing;
         }
         else
         {
-            var sink = new MemorySink(image);
+            var sink = new MemorySink(src);
             await sink.RunAsync(cancellationToken);
             pixels = sink.Pixels;
         }
@@ -67,7 +87,7 @@ public static class VipsTiffSaver
             _ => throw new InvalidOperationException()
         };
 
-        int frameStride = width * bands;
+        int frameStride = width * bands * bytesPerSample;
         int frameSize = frameStride * pageHeight;
 
         using var collection = new MagickImageCollection();
@@ -81,13 +101,23 @@ public static class VipsTiffSaver
                 Width = (uint)width,
                 Height = (uint)pageHeight,
                 Format = rawFormat,
-                Depth = 8,
+                Depth = (uint)(bytesPerSample * 8),
             };
             var frame = new MagickImage();
             frame.Read(frameBytes, settings);
             frame.Format = MagickFormat.Tiff;
             // Match the previous saver's compression default. Zip == Deflate.
             frame.Settings.Compression = CompressionMethod.Zip;
+            // 16-bit inputs need the depth carried through to the
+            // encoder — Magick otherwise quantizes back to 8 bits per
+            // sample at write time.
+            if (sixteenBit) frame.Depth = 16;
+            // Tiled-TIFF: pass tile geometry to libtiff via define.
+            // Without the define libtiff defaults to a stripped layout.
+            if (tileSize > 0)
+            {
+                frame.Settings.SetDefine(MagickFormat.Tiff, "tile-geometry", $"{tileSize}x{tileSize}");
+            }
             collection.Add(frame);
         }
 

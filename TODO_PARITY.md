@@ -462,15 +462,21 @@ Holes inside formats we already handle, that would close edge cases.
   <c>blend_op=SOURCE</c> for full-canvas frames.
 - [ ] **Animated AVIF/HEIC save** — gated on Magick.NET-Q8 HEIC
   encoder availability.
-- [ ] **TIFF**: full Tiled-TIFF with explicit tile geometry control;
-  16-bit-per-sample throughput.
-  ~~OME-TIFF Z/C/T full N-D mapping~~ shipped in round 195 — same
-  height-stacking convention as NIfTI 4D / FITS NAXIS≥4.
-  `VipsOmeTiff.GetOmePixelsLayout` exposes the parsed
-  `<Pixels>` element (SizeX/Y/Z/C/T + DimensionOrder + Type);
-  the loader auto-populates `ome:size-z / ome:size-c /
-  ome:size-t / ome:dimension-order` metadata so consumers can
-  split the multi-page stack into a (Z, C, T) grid.
+- [x] ~~**TIFF**~~ — extended save controls. Sub-items shipped:
+  ~~OME-TIFF Z/C/T full N-D mapping~~ (round 195 — same
+  height-stacking convention as NIfTI 4D / FITS NAXIS≥4 via
+  `VipsOmeTiff.GetOmePixelsLayout` and auto-populated
+  `ome:size-z / ome:size-c / ome:size-t / ome:dimension-order`
+  metadata).
+  ~~Tiled-TIFF with explicit tile geometry~~ (round 196 —
+  `tileSize` parameter on `VipsTiffSaver.SaveAsync` writes
+  Tiled-TIFF via libtiff's `tile-geometry` define instead of the
+  default stripped layout).
+  ~~16-bit-per-sample throughput~~ (round 196 — UShort input no
+  longer caps at Depth=8; saver flows 16-bit-per-sample to the
+  encoder. Wire-format precision preserved is bounded by the
+  Magick.NET-Q8 build's internal 8-bit Quantum, but the saver
+  itself no longer narrows the buffer).
 
 ---
 
