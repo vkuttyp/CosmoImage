@@ -264,9 +264,11 @@ generator that produces an image from parameters.
 - [ ] `point` (remaining LUT scaffolding).
 
 ### Composite mode parity
-- [ ] Extend `VipsComposite` with the 19 PorterDuff modes libvips'
-  `composite2` supports (over, in, out, atop, xor, dest-over, …).
-  Currently we only do `over`.
+- [x] ~~Porter-Duff family on `VipsComposite`~~ (round 170) — Clear,
+  Source, Dest, Over, DestOver, In, DestIn, Out, DestOut, Atop,
+  DestAtop, Xor, plus Plus/Add. Premultiplied per-pixel math, both
+  UChar and Float paths. The W3C colour-modulation modes
+  (Multiply, Screen, Overlay, …) live on `VipsBlend` separately.
 
 ---
 

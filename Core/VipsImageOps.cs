@@ -698,6 +698,17 @@ public static partial class VipsImageOps
     /// calls take a fast path that skips the affine.
     /// </summary>
     public static VipsImage Composite(VipsImage baseImage, VipsImage overlay, double x, double y)
+        => Composite(baseImage, overlay, x, y, VipsCompositeMode.Over);
+
+    /// <summary>
+    /// Composite <paramref name="overlay"/> onto <paramref name="baseImage"/>
+    /// at (<paramref name="x"/>, <paramref name="y"/>) using a Porter-Duff
+    /// <paramref name="mode"/>. <see cref="VipsCompositeMode.Over"/> is the
+    /// canonical "alpha-blend src on top of dst" default; the other modes
+    /// trade source / destination roles or invert the alpha geometry.
+    /// </summary>
+    public static VipsImage Composite(VipsImage baseImage, VipsImage overlay, double x, double y,
+        VipsCompositeMode mode)
     {
         int ix = (int)Math.Floor(x);
         int iy = (int)Math.Floor(y);
@@ -711,7 +722,7 @@ public static partial class VipsImageOps
         if (fx != 0.0 || fy != 0.0)
             overlay = Affine(overlay, 1, 0, 0, 1, idx: -fx, idy: -fy, interpolate: VipsKernel.Linear);
 
-        return Run(new VipsComposite { Base = baseImage, Overlay = overlay, X = ix, Y = iy });
+        return Run(new VipsComposite { Base = baseImage, Overlay = overlay, X = ix, Y = iy, Mode = mode });
     }
 
     // ===== Effects =====

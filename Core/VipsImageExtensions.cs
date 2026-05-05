@@ -198,6 +198,10 @@ public static class VipsImageExtensions
     public static VipsImage Composite(this VipsImage @base, VipsImage overlay, double x, double y)
         => VipsImageOps.Composite(@base, overlay, x, y);
 
+    public static VipsImage Composite(this VipsImage @base, VipsImage overlay, double x, double y,
+        VipsCompositeMode mode)
+        => VipsImageOps.Composite(@base, overlay, x, y, mode);
+
     public static VipsImage DrawLine(this VipsImage image, int x1, int y1, int x2, int y2, byte[] ink)
         => VipsImageOps.DrawLine(image, x1, y1, x2, y2, ink);
 

@@ -81,7 +81,7 @@ flattening, premultiplication. **Major gap area.**
 | `flip` | ✅ | |
 | `rot` (orthogonal) / `rot45` | 🟡 | `Rotate(VipsAngle)` ✅; rot45 missing |
 | `autorot` (EXIF-based) | ✅ | `AutoOrient` |
-| `composite`, `composite2` | 🟡 | `Composite` (over-blend only); libvips has 19 PorterDuff modes |
+| `composite`, `composite2` | 🟢 | `Composite` with full Porter-Duff family (round 170): Clear / Source / Dest / Over / DestOver / In / DestIn / Out / DestOut / Atop / DestAtop / Xor / Add. Colour-modulation modes (Multiply / Screen / …) on `VipsBlend`. |
 | `recomb` | ✅ | |
 | `gamma` | ✅ | |
 | `flatten` (alpha-flatten against background) | ✅ | `Flatten(r, g, b)` — composes RGBA/GA over an opaque background, drops alpha. UChar + Float branches |
