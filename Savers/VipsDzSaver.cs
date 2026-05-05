@@ -26,6 +26,13 @@ public enum VipsDzLayout
     Zoomify = 1,
     /// <summary>Google Maps — <c>{base}/{level}/{col}/{row}.{ext}</c>. No descriptor file.</summary>
     Google = 2,
+    /// <summary>
+    /// IIIF Image API 2.0 static tiles — <c>{base}/info.json</c> +
+    /// <c>{base}/{x},{y},{w},{h}/{tw},/0/default.{ext}</c> where
+    /// <c>x,y,w,h</c> are in full-resolution image coordinates and
+    /// <c>tw</c> is the tile pixel width at the requested scale.
+    /// </summary>
+    Iiif = 3,
 }
 
 /// <summary>
@@ -48,10 +55,12 @@ public enum VipsDzLayout
 /// edges (the standard Deep Zoom values; OpenSeadragon expects them).
 /// Quality applies to JPEG tiles only.</para>
 ///
-/// Port of libvips <c>vips_dzsave</c>; supports the three most-used
-/// pyramid layouts (DZ, Zoomify, Google). IIIF is still deferred — its
-/// region-addressed URL scheme is fundamentally different from the
-/// fixed-tile-grid layouts and would need a separate code path.
+/// Port of libvips <c>vips_dzsave</c>; supports the four
+/// commonly-deployed pyramid layouts: DZ, Zoomify, Google Maps, and
+/// IIIF Image API 2.0 static tiles. IIIF tiles use full-resolution
+/// region coordinates encoded in the path; we emit the canonical
+/// fixed-tile-grid subset that IIIF viewers (Mirador, OpenSeadragon's
+/// IIIF tile-source) consume.
 /// </summary>
 public static class VipsDzSaver
 {
@@ -174,6 +183,8 @@ public static class VipsDzSaver
                                 $"{k}-{c}-{r}{ext}"),
                         VipsDzLayout.Google =>
                             Path.Combine(rootDir, k.ToString(), c.ToString(), $"{r}{ext}"),
+                        VipsDzLayout.Iiif =>
+                            BuildIiifTilePath(rootDir, k, levels, c, r, tw, th, tileSize, W, H, ext),
                         _ => throw new ArgumentOutOfRangeException(nameof(layout)),
                     };
                     Directory.CreateDirectory(Path.GetDirectoryName(tilePath)!);
@@ -221,6 +232,63 @@ public static class VipsDzSaver
                 // Google Maps tiles have no descriptor — viewers wire up
                 // tile dims and zoom limits in their config.
                 break;
+
+            case VipsDzLayout.Iiif:
+                // info.json — minimal IIIF Image API 2.0 descriptor with
+                // full-resolution dims, tile width, and the scale-factor
+                // sequence that matches our pyramid (1, 2, 4, …).
+                var scaleFactors = new System.Text.StringBuilder("[");
+                for (int i = 0; i < levels; i++)
+                {
+                    if (i > 0) scaleFactors.Append(",");
+                    scaleFactors.Append(1 << (levels - 1 - i));
+                }
+                scaleFactors.Append("]");
+                string iiifJson =
+                    "{\n" +
+                    "  \"@context\": \"http://iiif.io/api/image/2/context.json\",\n" +
+                    $"  \"@id\": \"\",\n" +
+                    "  \"protocol\": \"http://iiif.io/api/image\",\n" +
+                    $"  \"width\": {W},\n" +
+                    $"  \"height\": {H},\n" +
+                    "  \"tiles\": [\n" +
+                    $"    {{ \"width\": {tileSize}, \"scaleFactors\": {scaleFactors} }}\n" +
+                    "  ],\n" +
+                    "  \"profile\": [\"http://iiif.io/api/image/2/level0.json\"]\n" +
+                    "}\n";
+                await File.WriteAllTextAsync(
+                    Path.Combine(rootDir, "info.json"), iiifJson, cancellationToken);
+                break;
         }
+    }
+
+    /// <summary>
+    /// Compute the IIIF tile path for a tile at <paramref name="level"/>
+    /// (col, row) in our pyramid. IIIF tile URLs use full-resolution
+    /// image coordinates — we map the level's tile back to the
+    /// corresponding full-res region by the scale factor 2^(levels-1-level).
+    ///
+    /// <para>Path shape: <c>{x},{y},{w},{h}/{tileWidth},/0/default.{ext}</c>.
+    /// The trailing comma in the size segment is the IIIF "max" hint —
+    /// height auto-derived from the region's aspect ratio.</para>
+    /// </summary>
+    private static string BuildIiifTilePath(string rootDir, int level, int totalLevels,
+        int col, int row, int tileWidthPx, int tileHeightPx,
+        int requestedTileSize, int fullW, int fullH, string ext)
+    {
+        int scaleFactor = 1 << (totalLevels - 1 - level);
+        int regionX = col * requestedTileSize * scaleFactor;
+        int regionY = row * requestedTileSize * scaleFactor;
+        // Region width / height in full-res pixels — clamp to the image
+        // boundary so edge tiles don't spill past the canvas.
+        int regionW = Math.Min(requestedTileSize * scaleFactor, fullW - regionX);
+        int regionH = Math.Min(requestedTileSize * scaleFactor, fullH - regionY);
+        // The size segment is the requested output width (the actual
+        // pixel width of the rendered tile, not the source region).
+        return Path.Combine(rootDir,
+            $"{regionX},{regionY},{regionW},{regionH}",
+            $"{tileWidthPx},",
+            "0",
+            $"default{ext}");
     }
 }
