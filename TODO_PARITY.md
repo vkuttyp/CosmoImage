@@ -332,8 +332,13 @@ the .NET ecosystem doesn't have.
   sink boundary. Needs LittleCMS via P/Invoke.
 - [ ] **JPEG XL** full pixel decode (libjxl).
 - [ ] **JPEG 2000** full pixel decode (libjp2k or OpenJPEG).
-- [ ] **OpenEXR** (OpenEXR / OpenEXRCore — half-precision floats,
-  multiple compression schemes, tile layouts).
+- [x] **OpenEXR** — substantially complete pure-managed
+  `PureExrDecoder` after rounds 127–164: scanline + tiled (ONE_LEVEL
+  / MIPMAP / RIPMAP); multi-part (first image part); compressors
+  NO_COMPRESSION / RLE / ZIPS / ZIP / PIZ / PXR24 / B44 / B44A /
+  DWAA-DWAB-partial; HALF / FLOAT / UINT pixel types; arbitrary
+  1–4 channel sets. DWA RGB-CSC + libimf-compatible DC encoding
+  outstanding; deep data still missing.
 - [ ] **OpenSlide** (whole-slide microscopy: SVS / NDPI / MRXS / VMS
   / VMU / SCN / MIRAX).
 - [ ] **dcraw** (camera RAW formats — Bayer demosaic, 1000+ camera
@@ -418,8 +423,8 @@ It does **not** cover:
 - The mosaicing / panorama subsystem.
 - Most generators (`create/`).
 - Many band-manipulation conversion ops.
-- Several niche format codecs (OpenEXR, JPEG XL/2K, OpenSlide, dcraw,
-  DICOM).
+- Several niche format codecs (JPEG XL/2K, OpenSlide, dcraw, DICOM —
+  OpenEXR landed in rounds 127–164).
 
 Closing the full gap is hundreds of ops and several native bindings'
 worth of work — multi-month at minimum. The matrix above is the map

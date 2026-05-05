@@ -209,26 +209,27 @@ In-place pixel drawing onto a memory-backed image.
 
 | Format | libvips coverage | Our coverage |
 | :--- | :--- | :--- |
-| **JPEG** | full + EXIF/XMP/ICC + progressive + arith | ✅ pure-C# decoder + multi-segment ICC |
-| **PNG** | libpng / libspng | ✅ via StbImageSharp; XMP via iTXt added |
-| **TIFF** | libtiff (huge variant matrix) | 🟡 via Magick; multi-page + Ptif pyramid + OME-XML metadata |
-| **WebP** | libwebp animated | 🟡 via Magick |
+| **JPEG** | full + EXIF/XMP/ICC + progressive + arith | ✅ pure-C# decoder + multi-segment ICC + JFIF YCbCr→RGB / Adobe APP14 RGB / YCCK / CMYK colourspace handling |
+| **PNG** | libpng / libspng | ✅ pure-C# `PurePngDecoder` (8/16-bit, color types 0/2/3/4/6, Adam7 interlace, tRNS); StbImageSharp fallback for malformed streams |
+| **TIFF** | libtiff (huge variant matrix) | ✅ pure-managed `PureTiffDecoder` — uncompressed + LZW + Deflate (zlib + raw fallback) + PackBits + JPEG-in-TIFF (compression=7); predictor=2/3; multi-page IFD chain; tiled layout; tiled+planar=2 combo; BigTIFF (8-byte offsets); FillOrder=2 accepted; SampleFormat 1/2/3 (UChar/UShort/UInt/Char/Short/Int/Float); CMYK photometric; YCbCr photometric (=6) for JPEG-in-TIFF |
+| **WebP** | libwebp animated | 🟡 pure VP8L lossless decoder (round 113) — full bitstream, all four transforms (predictor / cross-color / subtract-green / color-indexing), color cache, LZ77, meta-Huffman; VP8X-wrapped VP8L. VP8 lossy + animated still via Magick |
 | **HEIF / AVIF** | libheif single + sequence | 🟡 via Magick; animated load works, save single-frame only |
-| **GIF** | nsgif animated | 🟡 via Magick |
+| **GIF** | nsgif animated | 🟡 pure-C# `PureGifDecoder` for stills; animated still via Magick |
 | **PDF** | poppler / pdfium | 🟡 via Docnet |
 | **SVG** | librsvg | 🟡 via Magick |
-| **BMP** | libvips + magick fallback | 🟡 pure-C# fast path (24/32 bpp BI_RGB) + Magick fallback |
-| **TGA** | magick fallback | 🟡 pure-C# fast path (types 2/3/10/11) + Magick fallback |
+| **BMP** | libvips + magick fallback | ✅ pure-C# decoder — 1/4/8 bpp paletted (BI_RGB), 16 bpp RGB555 / BI_BITFIELDS, 24/32 bpp BGR(A), BI_RLE8, BI_RLE4 (Round 134); V4/V5 colour-space variants pass through (extra header fields ignored) |
+| **TGA** | magick fallback | ✅ pure-C# decoder — types 1/9 (uncompressed/RLE paletted with 15/16/24/32-bit colour map), types 2/10 (uncompressed/RLE truecolor at depth 15/16/24/32), types 3/11 (uncompressed/RLE grayscale) (Round 144) |
 | **QOI** | direct | ✅ pure-C# (QOI v1.0 spec) |
-| **PPM family** (PBM/PGM/PPM/PFM) | direct | 🟡 pure-C# P1-P6; PAM via Magick |
+| **PPM family** (PBM/PGM/PPM/PAM) | direct | ✅ pure-C# full Netpbm matrix — PBM (P1/P4), PGM (P2/P5), PPM (P3/P6), PAM (P7) at 8 and 16 bits per sample (Round 145) |
 | **CSV / Matrix / Matlab** | csv, matrix, mat (v5 + v7.3) | 🟡 CSV ✅; Matrix ✅; Matlab v5 read ✅; v7.3 (HDF5) ❌; Matlab write ❌ |
-| **Radiance HDR** | direct | ✅ pure-C# |
+| **Radiance HDR** | direct | ✅ pure-C# — new-style RLE + old-style RLE (Round 146); all four Y-first axis orderings (Round 153); X-first 90° rotations rejected |
 | **FITS** | cfitsio | ✅ pure-C# (2D/3D, BSCALE/BZERO, single HDU) |
 | **NIfTI** | niftiio | ✅ single-file `.nii` + paired `.hdr/.img`; 4D fMRI deferred |
+| **APNG** | via libspng | ✅ pure-C# decoder + saver — supports both fcTL-before-IDAT and IDAT-as-fallback layouts (Round 151) |
+| **OpenEXR** | OpenEXR library | 🟢 pure-C# `PureExrDecoder` — single-part scanline + tiled (ONE_LEVEL / MIPMAP / RIPMAP, level 0 exposed); multi-part (first-image-part); compressors NO_COMPRESSION / RLE / ZIPS / ZIP / PIZ / PXR24 / B44 / B44A / DWAA-DWAB-partial; HALF / FLOAT / UINT pixel types; arbitrary 1-4 channel sets (RGB[A] / Y / Z / U / V / arbitrary). DWA RGB-CSC + libimf-DC-encoding outstanding |
 | **Analyze 7.5** | direct | ❌ NIfTI-1 covers most use; pure Analyze rare |
 | **JPEG XL** | libjxl | ❌ header stub only |
 | **JPEG 2000** | libjp2k | ❌ header stub only |
-| **OpenEXR** | OpenEXR library | ❌ |
 | **OpenSlide** | openslide (whole-slide microscopy: SVS / NDPI / MRXS / VMS / VMU / SCN / MIRAX / TIFF) | ❌ |
 | **dcraw** | dcraw camera-raw | ❌ |
 | **uhdr** (Ultra HDR JPEG with gainmap) | libuhdr | ❌ |
@@ -358,11 +359,11 @@ By libvips subsystem, where ✅ = full or near-full, 🟡 = partial,
 | `mosaicing/` | 22 | ❌ — entire subsystem missing (panorama / stitching / global balance) |
 | `create/` | 30 | ❌ — only `text` covered; all generators (mask_*, perlin, worley, sdf, sines, identity LUT, …) missing |
 | `draw/` | 7 | 🟡 — line/rect; circle/flood/mask/smudge missing |
-| `foreign/` | ~70 | 🟡 — modern web formats covered (mostly via Magick); scientific (HDR/FITS/NIfTI/Matlab v5) covered pure-C#; gaps: OpenEXR, JPEG XL/2K full decode, OpenSlide, dcraw, uhdr, DICOM, Analyze, Matlab v7.3 |
+| `foreign/` | ~70 | 🟢 — most common formats (JPEG / PNG / TIFF / GIF-still / BMP / TGA / QOI / PNM / HDR / APNG / OpenEXR / FITS / NIfTI) decode pure-managed; WebP-lossless pure / lossy-via-Magick; HEIF / AVIF / SVG / PDF via native deps; gaps: WebP-VP8-lossy, JPEG XL/2K full decode, OpenSlide, dcraw, uhdr, DICOM, Analyze, Matlab v7.3 |
 
 ---
 
-*Last updated: 2026-05-02. 251 tests pass. Source files under `Core/`,
+*Last updated: 2026-05-05. 1413 tests pass. Source files under `Core/`,
 `Loaders/`, `Savers/`, `Operations/{Geometric,Color,Effects,Convolution,
 Drawing,Analysis,Misc}/`. Upstream libvips counts from
 `~/Downloads/libvips-master`.*

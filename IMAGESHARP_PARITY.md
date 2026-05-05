@@ -75,26 +75,26 @@ threaded through `VipsEnumsExtensions.SizeOf`) and the three
 
 | Format | ImageSharp | CosmoImage |
 | :--- | :--- | :--- |
-| **JPEG** | Pure managed; full + EXIF/ICC/XMP, baseline + progressive, arithmetic | ✅ pure-C# decoder via JpegLibrary; full metadata round-trip |
-| **PNG** | Pure managed; full + APNG (animated), interlace | ✅ pure-managed `PurePngDecoder` (rounds 102, 104) — 8-bit AND 16-bit color types 0/2/3/4/6 with `tRNS` expansion (8-bit and 16-bit variants); filter unfilter (None/Sub/Up/Avg/Paeth); Adam7 interlace (round 104 — 7-pass scatter into the canvas, per-pass independent filter context); endianness-aware uint16 conversion (PNG BE → host LE for the existing UShort convention). Pure-managed `PureApngDecoder` (round 103) — animated PNG read with `dispose_op` / `blend_op` frame composition. StbImageSharp dependency now used only for 1/2/4-bit depths (rare; can be added later) |
-| **BMP** | Pure managed; full | 🟡 pure-C# fast path now covers (round 107): 1 / 4 / 8 bpp paletted with BGR0-encoded palette, 16 bpp RGB555 (5-bit channels expanded to 8 by replicating MSBs into low bits), 24 bpp BGR, 32 bpp BGRA, and BI_RLE8 (run-length encoded 8 bpp with end-of-line / end-of-bitmap / delta / absolute escape codes). Magick fallback remains for BI_RLE4, BI_BITFIELDS, V4 / V5 colour-space variants |
-| **TGA** | Pure managed | 🟡 pure-C# fast path (types 2/3/10/11) |
-| **WebP** | Pure managed; full lossy + lossless + animated | 🟡 pure-managed VP8L lossless decoder (round 113) — full bitstream, all four transforms (predictor / cross-color / subtract-green / color-indexing), color cache, LZ77, meta-Huffman. VP8X-wrapped VP8L (round 120) also pure for files that carry ICC/EXIF/XMP metadata. VP8 lossy + animated still via Magick. |
-| **TIFF** | Pure managed; LZW / Deflate / PackBits / JPEG-in-TIFF, multi-page | ✅ pure-managed `PureTiffDecoder` (rounds 109-119) — uncompressed + LZW + Deflate (zip code 8/32946) + PackBits, predictor=2 (horizontal differencing) + predictor=3 (FP byte-shuffle), multi-page IFD chain, tiled layout, BigTIFF (8-byte offsets, magic 0x002B), 32-bit IEEE float samples, CMYK photometric, plus existing OME-TIFF metadata + Ptif pyramid output. JPEG-in-TIFF (Compression=7) + planar=2 still fall through to Magick. |
-| **GIF** | Pure managed; animated, LZW | 🟡 pure-managed `PureGifDecoder` (round 106) — full GIF87a / GIF89a decode with LZW decompression (variable bit-width 3..12 bits, dynamic dictionary, KwKwK case), Graphics Control Extension (delay / transparency / disposal NONE/BACKGROUND/PREVIOUS), interlaced frames (4-pass de-interlace), global + local colour tables, frame composition onto the logical screen canvas. Outputs stacked-frames RGBA matching the existing animated convention. Magick.NET stays as fallback for malformed streams |
-| **PBM/PGM/PPM** | Pure managed (P1-P6) | ✅ pure-C# (P1-P6); PAM via Magick |
+| **JPEG** | Pure managed; full + EXIF/ICC/XMP, baseline + progressive, arithmetic | ✅ pure-C# decoder via JpegLibrary; full metadata round-trip; JFIF YCbCr / Adobe APP14 RGB / YCCK / CMYK colour-space conversion (round 138 — fixed a long-standing double-level-shift bug where the decoder was emitting raw YCbCr labelled as RGB) |
+| **PNG** | Pure managed; full + APNG (animated), interlace | ✅ pure-managed `PurePngDecoder` — 8 / 16-bit color types 0/2/3/4/6 with `tRNS` expansion; Adam7 interlace; endianness-aware uint16 conversion. Pure-managed `PureApngDecoder` — animated PNG read with full `dispose_op` / `blend_op` composition AND IDAT-as-fallback layout (round 151). StbImageSharp dependency only for 1/2/4-bit depths |
+| **BMP** | Pure managed; full | ✅ pure-C# decoder — 1/4/8 bpp paletted (BI_RGB), 16 bpp RGB555, 24 bpp BGR, 32 bpp BGRA, BI_RLE8, BI_RLE4 (round 134), BI_BITFIELDS (round 134); V4/V5 colour-space variants pass through |
+| **TGA** | Pure managed | ✅ pure-C# decoder — full real-world variant matrix: types 1/9 (uncompressed/RLE paletted with 15/16/24/32-bit colour map), types 2/10 (uncompressed/RLE truecolor at depth 15/16/24/32), types 3/11 (uncompressed/RLE grayscale) (round 144) |
+| **WebP** | Pure managed; full lossy + lossless + animated | 🟡 pure-managed VP8L lossless decoder — full bitstream, all four transforms (predictor / cross-color / subtract-green / color-indexing), color cache, LZ77, meta-Huffman. VP8X-wrapped VP8L also pure for files that carry ICC/EXIF/XMP metadata. VP8 lossy + animated still via Magick |
+| **TIFF** | Pure managed; LZW / Deflate / PackBits / JPEG-in-TIFF, multi-page | ✅ pure-managed `PureTiffDecoder` — uncompressed + LZW + Deflate (zlib + raw deflate fallback, round 154) + PackBits + JPEG-in-TIFF (compression=7, round 139); predictor=2 (horizontal differencing) + predictor=3 (FP byte-shuffle); multi-page IFD chain; tiled layout; tiled+planar=2 combo (round 147); FillOrder=2 accepted; SampleFormat 1 (UChar/UShort/UInt), 2 (Char/Short/Int — round 152), 3 (Float); CMYK photometric; YCbCr photometric=6 for JPEG-in-TIFF; BigTIFF (8-byte offsets); plus OME-TIFF metadata + Ptif pyramid output |
+| **GIF** | Pure managed; animated, LZW | 🟡 pure-managed `PureGifDecoder` — full GIF87a / GIF89a still decode with LZW (variable bit-width, dynamic dictionary, KwKwK case), Graphics Control Extension (delay / transparency / disposal NONE/BACKGROUND/PREVIOUS), interlaced frames, global + local colour tables. Animated frames go through Magick |
+| **PBM/PGM/PPM/PAM** | Pure managed | ✅ pure-C# full Netpbm matrix (round 145) — PBM (P1/P4), PGM (P2/P5), PPM (P3/P6), PAM (P7) at 8 and 16 bits per sample. Drops the previous Magick fallback for PAM and 16-bit |
 | **QOI** | Pure managed; full QOI v1.0 | ✅ pure-C# (full QOI v1.0) |
 | **HEIF / AVIF** | ❌ (paid 3rd-party `Microsoft.Maui.Graphics.HeifSharp` or similar; not in core ImageSharp) | ✅ via Magick.NET — we have *advantage* here including animated AVIF/HEIC sequence load |
 | **PDF render** | ❌ | ✅ via Docnet — multi-page rendering |
 | **SVG raster** | ❌ (would need separate `SixLabors.ImageSharp.Drawing`) | ✅ via Magick |
-| **Radiance HDR** | ❌ | ✅ pure-C# |
+| **Radiance HDR** | ❌ | ✅ pure-C# — new-style RLE + old-style RLE (round 146); all four Y-first axis orderings (round 153); X-first 90° rotations rejected |
 | **FITS** | ❌ | ✅ pure-C# |
 | **NIfTI-1** | ❌ | ✅ pure-C# (single-file + paired) |
 | **Matlab `.mat`** | ❌ | ✅ pure-C# (v5 numeric arrays) |
 | **CSV / Matrix** | ❌ | ✅ pure-C# |
 | **JPEG XL** | ❌ | ❌ |
 | **JPEG 2000** | ❌ | ❌ |
-| **OpenEXR** | ❌ | 🟡 pure-managed `PureExrDecoder` (rounds 127-131) — header + attribute parser, scanline NO_COMPRESSION + RLE + ZIPS + ZIP + PXR24, single-level tiled layout, HALF pixel type, R/G/B/A + Y channel sets. PIZ primitives (wavelet + Huffman + bitmap LUT) validated in isolation in round 132 but the integration vs libimf-encoded bitstreams has residual issues, so PIZ is unwired at the dispatcher. B44 / B44A / DWAA / DWAB / FLOAT / UINT pixel types / multi-part files / mipmap levels / deep data still missing. |
+| **OpenEXR** | ❌ | 🟢 pure-managed `PureExrDecoder` — single-part scanline + tiled (ONE_LEVEL/MIPMAP/RIPMAP, level 0 exposed); multi-part (first-image-part); compressors NO_COMPRESSION / RLE / ZIPS / ZIP / PIZ / PXR24 / B44 / B44A / DWAA-DWAB-partial; HALF / FLOAT / UINT pixel types; arbitrary 1-4 channel sets (RGB[A] / Y / Z / U / V / arbitrary). DCT primitives + integration self-validated; full DWA-RGB-CSC + libimf-DC-encoding outstanding |
 | **OpenSlide / DICOM / dcraw** | ❌ | ❌ |
 | **Output: pyramidal TIFF (Ptif)** | ❌ | ✅ |
 | **Output: dzsave (Deep Zoom DZI)** | ❌ | ✅ |
@@ -375,8 +375,8 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 | :--- | :--- |
 | Core architecture (lazy vs eager — different by design) | n/a — different model |
 | Pixel formats (struct types) | ✅ 25 of ~25 (round 60 added the `Half` family — `BandFormat.Half = 10` enum value plus `HalfSingle` / `HalfVector2` / `HalfVector4` IPixel structs) |
-| Codecs (modern web formats) | 🟢 PNG / APNG / JPEG / GIF / TIFF / BMP-most-cases / QOI / WebP-lossless all pure-managed; WebP-lossy + animated still via Magick |
-| Codecs (scientific / niche) | 🟢 we exceed ImageSharp here (HDR / FITS / NIfTI / MAT / CSV; PDF render via Docnet); OpenEXR partial (rounds 127-131) |
+| Codecs (modern web formats) | 🟢 PNG / APNG (incl. IDAT-as-fallback) / JPEG (with proper YCbCr→RGB) / GIF-still / TIFF (incl. JPEG-in-TIFF, signed ints, raw deflate, FillOrder=2, tiled+planar=2) / BMP (incl. RLE4, BI_BITFIELDS) / TGA (full variant matrix incl. paletted + 15/16-bit) / QOI / PNM (incl. PAM + 16-bit) / WebP-lossless all pure-managed; WebP-lossy + GIF-animated still via Magick |
+| Codecs (scientific / niche) | 🟢 we exceed ImageSharp here (HDR with old-RLE + axis orderings / FITS / NIfTI / MAT / CSV; PDF render via Docnet); OpenEXR substantially complete (rounds 127–164: PIZ, PXR24, B44/B44A, DWA-UNKNOWN+RLE+DCT-self-validated, multi-part, MIPMAP/RIPMAP, HALF/FLOAT/UINT, generic 1-4 channels) |
 | Processing extensions (color/effects/geometric/etc.) | 🟡 ~40 of ~50 ops, a few via Magick |
 | Drawing & vector graphics | ✅ rounds 61–70 shipped path builder (move / line / cubic / quadratic / arc / close) + shape factories + all 6 brushes (solid / linear / radial / path / image / pattern) + FillPath + StrokePath + AA + complete VipsPen (caps / joins / miter limit / dashes) + affine path transforms + rectangular clipping + path-vs-path booleans (intersect / union / subtract via Greiner-Hormann) |
 | Color spaces | ✅ all ImageSharp colour types (Hsl / Hsv / Lab / Lch / Luv / Lchuv / Xyz / Xyy / Cmyk / HunterLab / LMS / YCbCr) + chromatic adaptation + full ICC CMM (Matrix/TRC + LUT-based + Lab↔XYZ PCS + rendering intents, rounds 79-82, 114, 121-126) |
@@ -388,19 +388,22 @@ Coarse-grained CosmoImage coverage of ImageSharp's surface:
 
 The headline conclusion: CosmoImage covers the **mainline web-image
 pipeline** (load, transform, save with proper colour-managed Float
-intermediates) at parity-or-better with ImageSharp. The pixel-format
-zoo, vector-drawing surface, typed-metadata access, and ICC color
-management are now done. Remaining gaps are all **codec-completion
-work** — WebP VP8 lossy + animated, the rest of OpenEXR (PIZ
-integration, B44, DWA, multi-part, deep data), and the niche codecs
-(JPEG XL, JPEG 2000, DICOM, OpenSlide, dcraw). Each of those is its
-own multi-week project. The architectural gap (eager `Image<TPixel>`
-vs lazy demand-driven) stays permanent by design; the typed-generic-op
-surface is closable but follows a broader direction tracked in
-`TODO_PARITY.md`.
+intermediates) at parity-or-better with ImageSharp, and exceeds it
+on scientific / VFX formats. The pixel-format zoo, vector-drawing
+surface, typed-metadata access, and ICC color management are done.
+After rounds 133–164, OpenEXR is now substantially complete pure
+(PIZ, B44/B44A, PXR24, DWA partial-but-self-validated, multi-part,
+MIPMAP/RIPMAP, HALF/FLOAT/UINT, generic channels) — bringing it from
+"partial" to "near-full" coverage. Remaining gaps are mostly
+**codec-completion work** — WebP VP8 lossy + animated, the last bits
+of OpenEXR DWA (RGB-CSC + libimf-DC-encoding), and niche formats
+(JPEG XL, JPEG 2000, DICOM, OpenSlide, dcraw). The architectural gap
+(eager `Image<TPixel>` vs lazy demand-driven) stays permanent by
+design; the typed-generic-op surface is closable but follows a
+broader direction tracked in `TODO_PARITY.md`.
 
 ---
 
-*Last updated: 2026-05-04. Compares CosmoImage's current state at
-1315 passing tests (HEAD `badd203`, through round 132) against the
-ImageSharp 3.x API surface.*
+*Last updated: 2026-05-05. Compares CosmoImage's current state at
+1413 passing tests (through round 164) against the ImageSharp 3.x
+API surface.*
