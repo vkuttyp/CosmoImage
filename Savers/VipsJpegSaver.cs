@@ -102,42 +102,44 @@ public static class VipsJpegSaver
             pixels = sink.Pixels;
         }
 
-        // Encode into an ArrayBufferWriter so we can splice EXIF/XMP markers
-        // in after SOI before the bytes go out to the caller's PipeWriter.
-        var encoded = new ArrayBufferWriter<byte>();
-        var encoder = new JpegEncoder();
-        encoder.SetInputReader(new VipsInputReader(width, height, bands, pelSize, pixels));
-        encoder.SetOutput(encoded);
-
-        var lumTable = JpegStandardQuantizationTable.ScaleByQuality(JpegStandardQuantizationTable.GetLuminanceTable(JpegElementPrecision.Precision8Bit, 0), quality);
-        var chrTable = JpegStandardQuantizationTable.ScaleByQuality(JpegStandardQuantizationTable.GetChrominanceTable(JpegElementPrecision.Precision8Bit, 1), quality);
-
-        encoder.SetQuantizationTable(lumTable);
-        encoder.SetQuantizationTable(chrTable);
-
-        encoder.SetHuffmanTable(true, 0, JpegStandardHuffmanEncodingTable.GetLuminanceDCTable());
-        encoder.SetHuffmanTable(false, 0, JpegStandardHuffmanEncodingTable.GetLuminanceACTable());
-        encoder.SetHuffmanTable(true, 1, JpegStandardHuffmanEncodingTable.GetChrominanceDCTable());
-        encoder.SetHuffmanTable(false, 1, JpegStandardHuffmanEncodingTable.GetChrominanceACTable());
-
-        if (image.Bands == 1)
+        // Pure-C# encoder. Phase 2 of the JpegLibrary drop. Handles
+        // 1-band greyscale and 3-band RGB (encoded as YCbCr 4:2:0) —
+        // the dominant on-the-web variants. RGBA (4-band) still routes
+        // to JpegLibrary for now since the pure encoder doesn't strip
+        // alpha; subsequent rounds will handle that.
+        byte[] jpegBytes;
+        if (bands == 1 || bands == 3)
         {
-            encoder.AddComponent(1, 0, 0, 0, 1, 1); // Y
+            jpegBytes = PureJpegEncoder.Encode(pixels, width, height, bands, quality);
         }
         else
         {
-            encoder.AddComponent(1, 0, 0, 0, 1, 1); // Y
-            encoder.AddComponent(2, 1, 1, 1, 1, 1); // Cb
-            encoder.AddComponent(3, 1, 1, 1, 1, 1); // Cr
+            // Fallback: 4-band or other unusual cases stay on JpegLibrary
+            // until the pure encoder grows alpha-strip / CMYK support.
+            var encoded = new ArrayBufferWriter<byte>();
+            var encoder = new JpegEncoder();
+            encoder.SetInputReader(new VipsInputReader(width, height, bands, pelSize, pixels));
+            encoder.SetOutput(encoded);
+
+            var lumTable = JpegStandardQuantizationTable.ScaleByQuality(JpegStandardQuantizationTable.GetLuminanceTable(JpegElementPrecision.Precision8Bit, 0), quality);
+            var chrTable = JpegStandardQuantizationTable.ScaleByQuality(JpegStandardQuantizationTable.GetChrominanceTable(JpegElementPrecision.Precision8Bit, 1), quality);
+            encoder.SetQuantizationTable(lumTable);
+            encoder.SetQuantizationTable(chrTable);
+            encoder.SetHuffmanTable(true, 0, JpegStandardHuffmanEncodingTable.GetLuminanceDCTable());
+            encoder.SetHuffmanTable(false, 0, JpegStandardHuffmanEncodingTable.GetLuminanceACTable());
+            encoder.SetHuffmanTable(true, 1, JpegStandardHuffmanEncodingTable.GetChrominanceDCTable());
+            encoder.SetHuffmanTable(false, 1, JpegStandardHuffmanEncodingTable.GetChrominanceACTable());
+            encoder.AddComponent(1, 0, 0, 0, 1, 1);
+            encoder.AddComponent(2, 1, 1, 1, 1, 1);
+            encoder.AddComponent(3, 1, 1, 1, 1, 1);
+            encoder.Encode();
+            jpegBytes = encoded.WrittenMemory.ToArray();
         }
 
-        encoder.Encode();
-
         // Splice metadata: SOI → EXIF (APP1) → XMP (APP1) → rest of encoded JPEG.
-        // The encoded stream from JpegLibrary starts with SOI and may include
-        // its own APP0/JFIF; injecting our APP1 markers right after SOI keeps
-        // them in valid position regardless of what the encoder wrote.
-        var jpegMemory = encoded.WrittenMemory;
+        // The encoded stream starts with SOI and may include APP0/JFIF; injecting
+        // our APP1 markers right after SOI keeps them in valid position.
+        var jpegMemory = jpegBytes.AsMemory();
         if (jpegMemory.Length < 2)
             throw new InvalidOperationException("JPEG encoder produced no output");
 
