@@ -133,7 +133,7 @@ internal static class ExrDwa
         if (acCount > 0 || dcCount > 0)
         {
             if (channelByteWidths.Count != 1 || channelByteWidths[0] != 2) return false;
-            if (acCompression != 1) return false;  // Huffman is a follow-up
+            if (acCompression != 0 && acCompression != 1) return false;
             int paddedW = (width + 7) & ~7;
             int paddedH = (rows + 7) & ~7;
             int totalBlocks = (paddedW / 8) * (paddedH / 8);
@@ -143,9 +143,19 @@ internal static class ExrDwa
             var dc = ExrDct.DecodeDcStream(src, dcStart, (int)dcCompSize, totalBlocks);
             if (dc == null) return false;
 
-            // AC stream: zlib-inflate to acCount LE ushorts.
+            // AC stream: deflate (acCompression=1) or static Huffman
+            // (acCompression=0, same canonical Huffman as PIZ — reused
+            // from ExrPiz). Both produce acCount little-endian ushort
+            // tokens, which the un-RLE step then expands.
             var acTokens = new ushort[acCount];
-            if (!InflateAcDeflate(src, acStart, (int)acCompSize, acTokens)) return false;
+            if (acCompression == 1)
+            {
+                if (!InflateAcDeflate(src, acStart, (int)acCompSize, acTokens)) return false;
+            }
+            else
+            {
+                if (!HuffmanDecodeAc(src, acStart, (int)acCompSize, acTokens)) return false;
+            }
 
             // Expand RLE'd tokens into per-block coefficient arrays.
             var blocks = new ushort[totalBlocks * 64];
@@ -273,6 +283,35 @@ internal static class ExrDwa
         for (int i = 0; i < dst.Length; i++)
             dst[i] = (ushort)(bytes[i * 2] | (bytes[i * 2 + 1] << 8));
         return true;
+    }
+
+    /// <summary>
+    /// Decode the AC sub-stream (acCompression=0, static Huffman from
+    /// ImfHuf.cpp — same canonical Huffman as PIZ). Wire format:
+    /// u32 hufLength + 20-byte huf header (im, iM, _, nBits, _) +
+    /// packed code-length table + bit-packed encoded tokens.
+    /// </summary>
+    private static bool HuffmanDecodeAc(byte[] src, int srcOff, int srcLen, ushort[] dst)
+    {
+        int p = srcOff;
+        int end = srcOff + srcLen;
+        if (p + 4 > end) return false;
+        int hufLength = BinaryPrimitives.ReadInt32LittleEndian(src.AsSpan(p, 4)); p += 4;
+        if (hufLength < 20 || p + hufLength > end) return false;
+        if (p + 20 > end) return false;
+        int im    = BinaryPrimitives.ReadInt32LittleEndian(src.AsSpan(p, 4)); p += 4;
+        int iM    = BinaryPrimitives.ReadInt32LittleEndian(src.AsSpan(p, 4)); p += 4;
+        p += 4;
+        int nBits = BinaryPrimitives.ReadInt32LittleEndian(src.AsSpan(p, 4)); p += 4;
+        p += 4;
+        if (im < 0 || iM < im || iM >= ExrPiz.HufEncSize) return false;
+
+        var freq = new int[ExrPiz.HufEncSize];
+        var tableBr = new ExrPiz.BitReader(src, p, end - p);
+        if (!ExrPiz.UnpackEncTable(tableBr, im, iM, freq)) return false;
+        int tableBytes = (int)((tableBr.BitsConsumed + 7) / 8);
+        var br = new ExrPiz.BitReader(src, p + tableBytes, end - (p + tableBytes));
+        return ExrPiz.HuffmanDecode(freq, im, iM, br, nBits, dst.Length, dst, out _) == dst.Length;
     }
 
     /// <summary>
