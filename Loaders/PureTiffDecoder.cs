@@ -201,8 +201,10 @@ internal static class PureTiffDecoder
         // we don't implement it.
         if (compression == 7 && (predictor != 1 || planarConfig != 1)) return null;
         if (planarConfig != 1 && planarConfig != 2) return null;
-        if (planarConfig == 2 && tiled) return null;  // tiled+planar combo deferred
-        if (fillOrder != 1) return null;
+        // FillOrder=2 only matters for sub-byte data (bps < 8). Our bps
+        // is restricted to {8, 16, 32} below, so FillOrder is effectively
+        // a no-op — accept either value.
+        if (fillOrder != 1 && fillOrder != 2) return null;
         // Predictor 1 = none, 2 = horizontal differencing (int),
         // 3 = floating-point predictor (byte-shuffled diff, FP only).
         if (predictor != 1 && predictor != 2 && predictor != 3) return null;
@@ -270,7 +272,53 @@ internal static class PureTiffDecoder
         {
             if (tileWidth <= 0 || tileLength <= 0) return null;
             if (tileOffsets.Length != tileByteCounts.Length || tileOffsets.Length == 0) return null;
-            if (!DecodeTiles(bytes, raw, (int)width, (int)height, (int)tileWidth, (int)tileLength,
+            if (planarConfig == 2)
+            {
+                // Per-channel tiles: SPP × tilesPerImage offsets, in
+                // plane-major order (all tiles of plane 0, then plane 1).
+                // Decode each plane via the existing tiled path with
+                // spp=1, then byte-interleave into the chunky output —
+                // mirrors the strip+planar=2 path.
+                int tilesAcross = ((int)width + (int)tileWidth - 1) / (int)tileWidth;
+                int tilesDown = ((int)height + (int)tileLength - 1) / (int)tileLength;
+                int tilesPerPlane = tilesAcross * tilesDown;
+                if (tileOffsets.Length != (long)tilesPerPlane * spp) return null;
+
+                int planeSize = (int)((long)width * height * bytesPerSample);
+                long planeRowStride = (long)width * bytesPerSample;
+                var planes = new byte[spp][];
+                for (int c = 0; c < spp; c++)
+                {
+                    planes[c] = new byte[planeSize];
+                    var planeOffsets = new long[tilesPerPlane];
+                    var planeCounts = new long[tilesPerPlane];
+                    for (int t = 0; t < tilesPerPlane; t++)
+                    {
+                        planeOffsets[t] = tileOffsets[c * tilesPerPlane + t];
+                        planeCounts[t] = tileByteCounts[c * tilesPerPlane + t];
+                    }
+                    if (!DecodeTiles(bytes, planes[c], (int)width, (int)height,
+                        (int)tileWidth, (int)tileLength,
+                        spp: 1, bytesPerSample, bps, (int)compression, (int)predictor, le,
+                        planeOffsets, planeCounts, jpegTables, jpegNeedsYcbcr))
+                        return null;
+                }
+
+                for (int y = 0; y < height; y++)
+                {
+                    int rowBase = y * (int)inRowStride;
+                    int planeRowBase = y * (int)planeRowStride;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int chunkPx = rowBase + x * spp * bytesPerSample;
+                        int planePx = planeRowBase + x * bytesPerSample;
+                        for (int c = 0; c < spp; c++)
+                            for (int b = 0; b < bytesPerSample; b++)
+                                raw[chunkPx + c * bytesPerSample + b] = planes[c][planePx + b];
+                    }
+                }
+            }
+            else if (!DecodeTiles(bytes, raw, (int)width, (int)height, (int)tileWidth, (int)tileLength,
                 spp, bytesPerSample, bps, (int)compression, (int)predictor, le,
                 tileOffsets, tileByteCounts, jpegTables, jpegNeedsYcbcr))
                 return null;
