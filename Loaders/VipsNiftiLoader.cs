@@ -190,22 +190,35 @@ public static class VipsNiftiLoader
         bool outFloat;
         switch (datatype)
         {
-            case 2:  // uint8
+            case 2:    // uint8
                 outFloat = needsTransform; // promotes to Float when scaling applied
                 break;
-            case 16: // float32
-            case 64: // float64
+            case 4:    // int16
+            case 8:    // int32
+            case 16:   // float32
+            case 64:   // float64
+            case 256:  // int8
+            case 512:  // uint16
+            case 768:  // uint32
+                // Integer datatypes promote to Float on output: NIfTI int16/int32
+                // routinely cover ranges far outside [0, 255] (raw scanner counts,
+                // signed offsets) so byte truncation would destroy the signal.
                 outFloat = true;
                 break;
             default:
-                // signed-int / int16 / int32 etc. unsupported in first cut
+                // Other NIfTI types (complex, RGB packed, int64, etc.) deferred.
                 return null;
         }
         int expectedBytesPerSampleByDt = datatype switch
         {
             2 => 1,
+            4 => 2,
+            8 => 4,
             16 => 4,
             64 => 8,
+            256 => 1,
+            512 => 2,
+            768 => 4,
             _ => 0,
         };
         if (bytesPerSample != expectedBytesPerSampleByDt) return null;
@@ -232,8 +245,13 @@ public static class VipsNiftiLoader
                     double sample = datatype switch
                     {
                         2 => pixelData[srcOff],
+                        4 => ReadInt16At(pixelData, (int)srcOff, littleEndian),
+                        8 => ReadInt32At(pixelData, (int)srcOff, littleEndian),
                         16 => ReadFloatAt(pixelData, (int)srcOff, littleEndian),
                         64 => ReadDoubleAt(pixelData, (int)srcOff, littleEndian),
+                        256 => (sbyte)pixelData[srcOff],
+                        512 => ReadUInt16At(pixelData, (int)srcOff, littleEndian),
+                        768 => ReadUInt32At(pixelData, (int)srcOff, littleEndian),
                         _ => 0,
                     };
                     if (needsTransform) sample = sample * sclSlope + sclInter;
@@ -286,4 +304,24 @@ public static class VipsNiftiLoader
         => le
             ? BinaryPrimitives.ReadDoubleLittleEndian(bytes.AsSpan(offset, 8))
             : BinaryPrimitives.ReadDoubleBigEndian(bytes.AsSpan(offset, 8));
+
+    private static double ReadInt16At(byte[] bytes, int offset, bool le)
+        => le
+            ? BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(offset, 2))
+            : BinaryPrimitives.ReadInt16BigEndian(bytes.AsSpan(offset, 2));
+
+    private static double ReadInt32At(byte[] bytes, int offset, bool le)
+        => le
+            ? BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset, 4))
+            : BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(offset, 4));
+
+    private static double ReadUInt16At(byte[] bytes, int offset, bool le)
+        => le
+            ? BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset, 2))
+            : BinaryPrimitives.ReadUInt16BigEndian(bytes.AsSpan(offset, 2));
+
+    private static double ReadUInt32At(byte[] bytes, int offset, bool le)
+        => le
+            ? BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4))
+            : BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(offset, 4));
 }

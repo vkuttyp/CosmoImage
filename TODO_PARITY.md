@@ -404,9 +404,9 @@ Holes inside formats we already handle, that would close edge cases.
 
 - [ ] **NIfTI**: 4D+ time-series (fMRI volumes — needs N-D semantics
   `VipsImage` doesn't model), paired-form save (multi-stream saver
-  API needed), signed-int datatypes (int16/int32 are common in raw
-  scanner output), full qform/sform quaternion-based spatial
-  transforms.
+  API needed), full qform/sform quaternion-based spatial transforms.
+  ~~Signed-int datatypes~~ shipped in round 190 (int8 / int16 /
+  int32 / uint16 / uint32 all widen to Float losslessly).
 - [ ] **FITS**: NAXIS≥4 data cubes, additional HDUs (binary tables,
   ASCII tables), WCS coordinate-system reconstruction beyond the
   raw card preservation we do today.
