@@ -409,9 +409,13 @@ Holes inside formats we already handle, that would close edge cases.
   the height axis with `n-pages` / `page-height` /
   `nifti:dim3` / `nifti:dim4` metadata; legacy nz≤4 still uses
   the Z-as-bands path for back-compat).
-- [ ] **FITS**: NAXIS≥4 data cubes, additional HDUs (binary tables,
-  ASCII tables), WCS coordinate-system reconstruction beyond the
-  raw card preservation we do today.
+- [ ] **FITS**: additional HDUs (binary tables, ASCII tables), WCS
+  coordinate-system reconstruction beyond the raw card preservation
+  we do today.
+  ~~NAXIS≥4 data cubes~~ shipped in round 194 — same height-stacked
+  pattern as NIfTI 4D (`n-pages` / `page-height` /
+  `fits:naxis3` / `fits:naxis4` metadata; legacy bands-as-channels
+  layout preserved for NAXIS3 ∈ {1, 3, 4}).
 - [x] ~~**Matlab v5 writer**~~ (round 178) — `VipsMatSaver` mirrors the
   v5 reader: 128-byte ASCII descriptor, `miMATRIX` top element with
   ArrayFlags / Dimensions / Name / RealPart sub-elements. UChar →

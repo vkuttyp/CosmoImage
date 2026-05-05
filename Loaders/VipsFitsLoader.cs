@@ -88,16 +88,30 @@ public static class VipsFitsLoader
         if (!cards.TryGetValue("SIMPLE", out var simpleVal) || simpleVal.Trim() != "T") return null;
         if (!TryGetInt(cards, "BITPIX", out int bitpix)) return null;
         if (!TryGetInt(cards, "NAXIS", out int naxis)) return null;
-        if (naxis < 2 || naxis > 3) return null;
+        if (naxis < 2 || naxis > 4) return null;
 
         if (!TryGetInt(cards, "NAXIS1", out int width) || width <= 0) return null;
         if (!TryGetInt(cards, "NAXIS2", out int height) || height <= 0) return null;
-        int planes = 1;
-        if (naxis == 3)
+        int n3 = 1, n4 = 1;
+        if (naxis >= 3)
         {
-            if (!TryGetInt(cards, "NAXIS3", out planes) || planes <= 0) return null;
-            if (planes != 1 && planes != 3 && planes != 4) return null;
+            if (!TryGetInt(cards, "NAXIS3", out n3) || n3 <= 0) return null;
         }
+        if (naxis >= 4)
+        {
+            if (!TryGetInt(cards, "NAXIS4", out n4) || n4 <= 0) return null;
+        }
+
+        // Layout decision (mirrors the NIfTI 4D loader, round 193):
+        //   NAXIS = 2, or NAXIS = 3 with NAXIS3 ∈ {1, 3, 4}
+        //     → legacy bands-as-channels layout. RGB / RGBA cubes
+        //       stay in the natural multi-band shape.
+        //   NAXIS = 4, or large NAXIS3 (data cubes)
+        //     → 1-band height-stacked layout. n-pages = NAXIS3·NAXIS4,
+        //       page-height = NAXIS2. Mirrors multi-page TIFF / GIF.
+        bool stackedLayout = naxis >= 4 || (naxis == 3 && n3 != 1 && n3 != 3 && n3 != 4);
+        int totalFrames = stackedLayout ? n3 * n4 : 1;
+        int planes = stackedLayout ? 1 : n3;
 
         // BSCALE / BZERO — physical = pixel * BSCALE + BZERO.
         TryGetDouble(cards, "BSCALE", out double bscale, 1.0);
@@ -106,8 +120,8 @@ public static class VipsFitsLoader
 
         // ---- Pixel data ----
         int bytesPerSample = Math.Abs(bitpix) / 8;
-        int totalSamples = width * height * planes;
-        int dataLen = totalSamples * bytesPerSample;
+        long totalSamples = (long)width * height * n3 * n4;
+        long dataLen = totalSamples * bytesPerSample;
         if (offset + dataLen > bytes.Length) return null;
 
         // Output band-format mirrors libvips' FITS handling: integer types
@@ -115,27 +129,63 @@ public static class VipsFitsLoader
         // BITPIX=8 with no scaling stays UChar (the cheap path).
         bool outFloat = bitpix != 8 || needsScale;
         int outSizePel = planes * (outFloat ? 4 : 1);
-        var pixels = new byte[width * height * outSizePel];
+        int outHeight = stackedLayout ? height * totalFrames : height;
+        var pixels = new byte[width * outHeight * outSizePel];
 
-        // Decode planar → interleaved. FITS stores plane 0 first (all WxH
-        // samples), then plane 1, etc. VipsImage wants R0,G0,B0,R1,G1,B1,...
-        for (int p = 0; p < planes; p++)
+        if (stackedLayout)
         {
-            int planeOffset = offset + p * width * height * bytesPerSample;
-            for (int y = 0; y < height; y++)
+            // Stacked: each (NAXIS3, NAXIS4) frame stacked into the
+            // output height. Frames in (NAXIS4, NAXIS3) outer-inner
+            // order, matching NIfTI's (T, Z) and TIFF multi-page Z/T.
+            for (int t = 0; t < n4; t++)
             {
-                int rowOffset = planeOffset + y * width * bytesPerSample;
-                for (int x = 0; x < width; x++)
+                for (int z = 0; z < n3; z++)
                 {
-                    int srcOff = rowOffset + x * bytesPerSample;
-                    double sample = ReadSample(bytes, srcOff, bitpix);
-                    if (needsScale) sample = sample * bscale + bzero;
+                    int frameIndex = t * n3 + z;
+                    long frameSrcBase = offset + (long)frameIndex * width * height * bytesPerSample;
+                    int frameDstYBase = frameIndex * height;
+                    for (int y = 0; y < height; y++)
+                    {
+                        long rowOffset = frameSrcBase + (long)y * width * bytesPerSample;
+                        for (int x = 0; x < width; x++)
+                        {
+                            int srcOff = (int)(rowOffset + x * bytesPerSample);
+                            double sample = ReadSample(bytes, srcOff, bitpix);
+                            if (needsScale) sample = sample * bscale + bzero;
 
-                    int destOff = (y * width + x) * outSizePel + p * (outFloat ? 4 : 1);
-                    if (outFloat)
-                        BinaryPrimitives.WriteSingleLittleEndian(pixels.AsSpan(destOff, 4), (float)sample);
-                    else
-                        pixels[destOff] = (byte)Math.Clamp(sample, 0, 255);
+                            int destOff = ((frameDstYBase + y) * width + x) * (outFloat ? 4 : 1);
+                            if (outFloat)
+                                BinaryPrimitives.WriteSingleLittleEndian(pixels.AsSpan(destOff, 4), (float)sample);
+                            else
+                                pixels[destOff] = (byte)Math.Clamp(sample, 0, 255);
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Legacy bands-as-channels layout. FITS stores plane 0 first
+            // (all WxH samples), then plane 1, etc. VipsImage wants
+            // R0,G0,B0,R1,G1,B1,... so we transpose during the decode.
+            for (int p = 0; p < planes; p++)
+            {
+                int planeOffset = offset + p * width * height * bytesPerSample;
+                for (int y = 0; y < height; y++)
+                {
+                    int rowOffset = planeOffset + y * width * bytesPerSample;
+                    for (int x = 0; x < width; x++)
+                    {
+                        int srcOff = rowOffset + x * bytesPerSample;
+                        double sample = ReadSample(bytes, srcOff, bitpix);
+                        if (needsScale) sample = sample * bscale + bzero;
+
+                        int destOff = (y * width + x) * outSizePel + p * (outFloat ? 4 : 1);
+                        if (outFloat)
+                            BinaryPrimitives.WriteSingleLittleEndian(pixels.AsSpan(destOff, 4), (float)sample);
+                        else
+                            pixels[destOff] = (byte)Math.Clamp(sample, 0, 255);
+                    }
                 }
             }
         }
@@ -143,7 +193,7 @@ public static class VipsFitsLoader
         var image = new VipsImage
         {
             Width = width,
-            Height = height,
+            Height = outHeight,
             Bands = planes,
             BandFormat = outFloat ? VipsBandFormat.Float : VipsBandFormat.UChar,
             Interpretation = planes == 1 ? VipsInterpretation.BW : VipsInterpretation.RGB,
@@ -153,13 +203,23 @@ public static class VipsFitsLoader
             PixelsLazy = new Lazy<byte[]>(() => pixels),
         };
 
+        // Stacked-layout images carry per-axis counts so consumers can
+        // split the height stack back into a (NAXIS3, NAXIS4) grid.
+        if (stackedLayout)
+        {
+            image.Metadata["fits:naxis3"] = n3.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["fits:naxis4"] = n4.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["n-pages"] = totalFrames.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["page-height"] = height.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         // Surface every card under the fits: namespace so WCS / DATE-OBS /
         // OBSERVER / etc. survive a load → save round-trip even though we
         // don't interpret them.
         foreach (var kv in cards)
         {
-            if (kv.Key is "SIMPLE" or "BITPIX" or "NAXIS" or "NAXIS1" or "NAXIS2" or "NAXIS3"
-                or "BSCALE" or "BZERO" or "END")
+            if (kv.Key is "SIMPLE" or "BITPIX" or "NAXIS" or "NAXIS1" or "NAXIS2"
+                or "NAXIS3" or "NAXIS4" or "BSCALE" or "BZERO" or "END")
                 continue;
             image.Metadata["fits:" + kv.Key] = kv.Value;
         }
