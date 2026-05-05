@@ -3,7 +3,6 @@ using System.IO;
 using System.IO.Pipelines;
 using System.Threading;
 using System.Threading.Tasks;
-using ImageMagick;
 using CosmoImage.Core;
 
 namespace CosmoImage.Savers;
@@ -19,14 +18,17 @@ public enum VipsPnmVariant
 }
 
 /// <summary>
-/// Netpbm writer. Pure-C# emitter for PBM (P4 binary), PGM (P5 binary),
-/// PPM (P6 binary) — the standard variants. PAM (P7) still goes through
-/// Magick.NET because of its more elaborate header layout.
+/// Netpbm writer. Pure-C# emitter for the entire family: PBM (P4 binary),
+/// PGM (P5 binary), PPM (P6 binary), PAM (P7).
 ///
 /// <para>Auto mode picks PGM/PPM by band count; alpha-bearing inputs (2 or
-/// 4 bands) route to PAM through Magick since the binary PGM/PPM variants
-/// have no alpha channel. PBM (P4) auto-binarizes a 1-band input at the
-/// midpoint when the caller explicitly requests it.</para>
+/// 4 bands) route to PAM since the binary PGM/PPM variants have no alpha
+/// channel. PBM (P4) auto-binarizes a 1-band input at the midpoint when
+/// the caller explicitly requests it.</para>
+///
+/// <para>UShort inputs to PGM / PPM emit native 16-bit binary
+/// (maxval=65535, big-endian samples per spec). PAM supports both 8-bit
+/// (UChar) and 16-bit (UShort) directly; depth = bands.</para>
 /// </summary>
 public static class VipsPnmSaver
 {
@@ -47,17 +49,12 @@ public static class VipsPnmSaver
             };
         }
 
-        if (resolved == VipsPnmVariant.Pam)
-        {
-            await VipsMagickWrapSaver.SaveAsync(image, writer, MagickFormat.Pam, cancellationToken);
-            return;
-        }
-
-        // Materialize. UShort inputs emit native 16-bit binary (P5 / P6 with
+        // Materialize. UShort inputs emit native 16-bit binary (P5/P6/P7 with
         // maxval=65535); UChar passes through; everything else casts to UChar
         // first since we don't have lossless rescaling for Float/Int formats.
         bool sixteenBit = image.BandFormat == VipsBandFormat.UShort &&
-                          (resolved == VipsPnmVariant.Pgm || resolved == VipsPnmVariant.Ppm);
+                          (resolved == VipsPnmVariant.Pgm || resolved == VipsPnmVariant.Ppm
+                           || resolved == VipsPnmVariant.Pam);
         var src = (image.BandFormat == VipsBandFormat.UChar || sixteenBit)
             ? image
             : VipsImageOps.CastUChar(image);
@@ -91,6 +88,9 @@ public static class VipsPnmSaver
             case VipsPnmVariant.Ppm:
                 if (sixteenBit) await WritePpm16Async(stream, pixels, width, height, bands, cancellationToken);
                 else await WritePpmAsync(stream, pixels, width, height, bands, cancellationToken);
+                break;
+            case VipsPnmVariant.Pam:
+                await WritePamAsync(stream, pixels, width, height, bands, sixteenBit, cancellationToken);
                 break;
             default:
                 throw new InvalidOperationException($"Unhandled PNM variant {resolved}");
@@ -231,6 +231,52 @@ public static class VipsPnmSaver
                 }
                 row[x * 2 + 0] = (byte)sampleHi; // big-endian per spec
                 row[x * 2 + 1] = (byte)sampleLo;
+            }
+            await stream.WriteAsync(row, ct);
+        }
+    }
+
+    /// <summary>
+    /// PAM (P7) — line-oriented header followed by binary samples. Header
+    /// is WIDTH/HEIGHT/DEPTH/MAXVAL[/TUPLTYPE] lines terminated by
+    /// <c>ENDHDR</c>. Depth = bands (any band count); samples are
+    /// big-endian for 16-bit. TUPLTYPE is a hint; we set it from the band
+    /// count to match common readers.
+    /// </summary>
+    private static async Task WritePamAsync(Stream stream, byte[] pixels, int width, int height,
+        int bands, bool sixteenBit, CancellationToken ct)
+    {
+        string tupletype = bands switch
+        {
+            1 => "GRAYSCALE",
+            2 => "GRAYSCALE_ALPHA",
+            3 => "RGB",
+            4 => "RGB_ALPHA",
+            _ => "RGB", // best-effort hint; depth field remains authoritative
+        };
+        int maxval = sixteenBit ? 65535 : 255;
+        var header = System.Text.Encoding.ASCII.GetBytes(
+            $"P7\nWIDTH {width}\nHEIGHT {height}\nDEPTH {bands}\nMAXVAL {maxval}\nTUPLTYPE {tupletype}\nENDHDR\n");
+        await stream.WriteAsync(header, ct);
+
+        if (!sixteenBit)
+        {
+            // 8-bit: pixels are already in row-major interleaved layout.
+            await stream.WriteAsync(pixels.AsMemory(0, width * height * bands), ct);
+            return;
+        }
+
+        // 16-bit: byte-swap to big-endian per spec.
+        var row = new byte[width * bands * 2];
+        for (int y = 0; y < height; y++)
+        {
+            int srcRow = y * width * bands * 2;
+            for (int s = 0; s < width * bands; s++)
+            {
+                byte lo = pixels[srcRow + s * 2 + 0];
+                byte hi = pixels[srcRow + s * 2 + 1];
+                row[s * 2 + 0] = hi;
+                row[s * 2 + 1] = lo;
             }
             await stream.WriteAsync(row, ct);
         }

@@ -397,9 +397,12 @@ Holes inside formats we already handle, that would close edge cases.
   emit native 16-bit P5/P6 binary with maxval=65535 and big-endian
   samples per spec. Loader already handled 16-bit on read; saver
   no longer narrows to UChar.
-- [ ] **PAM (P7)** — currently delegates to Magick; pure-C# parser
-  doable but the WIDTH/HEIGHT/DEPTH/MAXVAL/TUPLTYPE header is more
-  elaborate than P1-P6.
+- [x] ~~**PAM (P7)**~~ — pure-C# both directions. Loader handles P7
+  via the in-file `ParsePam` helper (round 145). Saver added in
+  round 180: line-oriented WIDTH/HEIGHT/DEPTH/MAXVAL/TUPLTYPE/ENDHDR
+  header, 8-bit or 16-bit binary samples, big-endian for 16-bit per
+  spec. Auto mode now keeps RGBA inputs entirely on the pure-C#
+  path (was the last loader-side Magick fallback in PNM).
 - [x] ~~**BMP**: paletted (1/4/8 bpp), 16bpp RGB555, RLE-compressed,
   BITFIELDS-masked, V4/V5 colour-space variants~~ — pure-C# fast
   path already handles all of these (BI_RGB at 1/4/8/16/24/32 bpp,
