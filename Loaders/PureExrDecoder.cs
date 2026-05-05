@@ -82,13 +82,15 @@ internal static class PureExrDecoder
         }
 
         // Supported compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PIZ,
-        // PXR24, B44, B44A. PIZ / B44 / B44A use 32 scanlines per block
-        // (per ImfPizCompressor.h / ImfB44Compressor.h).
+        // PXR24, B44, B44A, DWAA, DWAB. PIZ / B44 / B44A / DWAA all
+        // use 32 scanlines per block; DWAB extends to 256 lines (only
+        // structural difference between DWAA and DWAB).
         int scanlinesPerBlock = header.Compression switch
         {
             0 or 1 or 2 => 1,
             3 or 5 => 16,
-            4 or 6 or 7 => 32,
+            4 or 6 or 7 or 8 => 32,
+            9 => 256,
             _ => -1,
         };
         if (scanlinesPerBlock < 0) return null;
@@ -582,6 +584,17 @@ internal static class PureExrDecoder
                     BytesPerChannelSample(channels[i].PixelType),
                     channels[i].PLinear != 0);
             return ExrB44.Decompress(src, srcOff, srcLen, dst, rows, b44Channels, width);
+        }
+        if (compression == 8 || compression == 9)
+        {
+            // DWAA / DWAB: handles only the UNKNOWN-channel path so
+            // far (non-RGB / non-Y / non-A names like Z, mask, ID,
+            // etc.). Returns false for files containing LOSSY_DCT or
+            // RLE channels, falling back to Magick.
+            var dwaWidths = new int[channels.Count];
+            for (int i = 0; i < channels.Count; i++)
+                dwaWidths[i] = BytesPerChannelSample(channels[i].PixelType);
+            return ExrDwa.Decompress(src, srcOff, srcLen, dst, rows, dwaWidths, width);
         }
 
         var scratch = new byte[expected];
