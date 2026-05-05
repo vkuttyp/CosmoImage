@@ -104,4 +104,89 @@ public class Round157Tests
             Assert.True(Math.Abs(block[i]) < 1e-3f,
                 $"AC[{i}] should be ~0 for uniform input, got {block[i]}");
     }
+
+    [Fact]
+    public void ExpandAc_AllLiterals_FillsBlocksDirectly()
+    {
+        // Three blocks × 63 AC = 189 literal tokens. Each token's
+        // value is its position so we can verify placement.
+        var tokens = new ushort[189];
+        for (int i = 0; i < tokens.Length; i++) tokens[i] = (ushort)(0x1000 + i);
+
+        var blocks = new ushort[3 * 64];
+        for (int b = 0; b < 3; b++) blocks[b * 64] = (ushort)(0xC000 + b);  // DC sentinels
+
+        Assert.True(ExrDct.ExpandAcTokens(tokens, 3, blocks));
+        // DC positions untouched.
+        Assert.Equal(0xC000, blocks[0]);
+        Assert.Equal(0xC001, blocks[64]);
+        Assert.Equal(0xC002, blocks[128]);
+        // ACs in block 0 fill positions 1..63 with tokens 0..62.
+        for (int i = 0; i < 63; i++) Assert.Equal((ushort)(0x1000 + i), blocks[1 + i]);
+        // Block 1 ACs from tokens 63..125.
+        for (int i = 0; i < 63; i++) Assert.Equal((ushort)(0x1000 + 63 + i), blocks[64 + 1 + i]);
+    }
+
+    [Fact]
+    public void ExpandAc_OneLargeZeroRun_FillsAllBlocksWithZeros()
+    {
+        // 2 blocks × 63 AC = 126 zero coefficients. One token: 0xFF7E
+        // means "insert 126 zeros". A full run can't actually fit in
+        // one token (low byte caps at 0xFF = 255 zeros, but we only
+        // need 126 here so a single token suffices).
+        var tokens = new ushort[] { 0xFF7E };
+        var blocks = new ushort[2 * 64];
+        Assert.True(ExrDct.ExpandAcTokens(tokens, 2, blocks));
+        for (int b = 0; b < 2; b++)
+            for (int i = 1; i < 64; i++)
+                Assert.Equal(0, blocks[b * 64 + i]);
+    }
+
+    [Fact]
+    public void ExpandAc_MixedRunsAndLiterals_PlacesCorrectly()
+    {
+        // Block layout: 5 zeros, then literal 0x4200, then 57 zeros.
+        // Total: 5 + 1 + 57 = 63 AC slots. Tokens: 0xFF05, 0x4200, 0xFF39.
+        var tokens = new ushort[] { 0xFF05, 0x4200, 0xFF39 };
+        var blocks = new ushort[64];
+
+        Assert.True(ExrDct.ExpandAcTokens(tokens, 1, blocks));
+        // Positions 1..5 zero, 6 = 0x4200, 7..63 zero.
+        for (int i = 1; i <= 5; i++) Assert.Equal(0, blocks[i]);
+        Assert.Equal(0x4200, blocks[6]);
+        for (int i = 7; i < 64; i++) Assert.Equal(0, blocks[i]);
+    }
+
+    [Fact]
+    public void ExpandAc_RunSpansBlockBoundary_DoesNotOverrun()
+    {
+        // 2 blocks × 63 AC = 126 AC slots. A 70-zero run partially
+        // fills block 0's 63 positions (1..63) and continues into
+        // block 1 (positions 1..7). Then a literal at block 1 position 8,
+        // then 55 zeros to fill the rest.
+        var tokens = new ushort[]
+        {
+            0xFF46,  // 70 zeros
+            0xABCD,  // literal at block 1 position 8
+            0xFF37,  // 55 zeros
+        };
+        var blocks = new ushort[2 * 64];
+        Assert.True(ExrDct.ExpandAcTokens(tokens, 2, blocks));
+        // Block 0 AC positions all zero.
+        for (int i = 1; i < 64; i++) Assert.Equal(0, blocks[i]);
+        // Block 1 AC positions 1..7 zero (from spillover), position 8 literal, 9..63 zero.
+        for (int i = 1; i <= 7; i++) Assert.Equal(0, blocks[64 + i]);
+        Assert.Equal(0xABCD, blocks[64 + 8]);
+        for (int i = 9; i < 64; i++) Assert.Equal(0, blocks[64 + i]);
+    }
+
+    [Fact]
+    public void ExpandAc_TokenStreamUnderflow_ReturnsFalse()
+    {
+        // Tokens fill only block 0 partially. The expander should
+        // signal failure rather than leaving block 1 uninitialised.
+        var tokens = new ushort[] { 0xFF20 };  // 32 zeros — short of 63
+        var blocks = new ushort[64];
+        Assert.False(ExrDct.ExpandAcTokens(tokens, 1, blocks));
+    }
 }

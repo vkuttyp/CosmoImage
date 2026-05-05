@@ -90,6 +90,72 @@ internal static class ExrDct
     }
 
     /// <summary>
+    /// Expand a DWA AC token stream into <paramref name="blockCount"/>
+    /// 8×8 frequency blocks (63 AC coefficients per block, DC at
+    /// position 0 left untouched). Token convention from
+    /// <c>internal_dwa_decoder.h</c>: a uint16 with high byte 0xFF
+    /// stands for <c>(low_byte)</c> zeros to insert into the
+    /// zigzag stream; any other value is a literal HALF coefficient.
+    /// Block boundary is implicit — when 63 AC positions are filled
+    /// for the current block, the next token starts the next block.
+    /// </summary>
+    /// <param name="acTokens">Decoded AC token stream (Huffman or
+    /// zlib output, before un-RLE).</param>
+    /// <param name="blockCount">Number of 8×8 frequency blocks the
+    /// stream spans.</param>
+    /// <param name="blocks">Output array of size
+    /// <c>blockCount × 64</c>; AC positions 1..63 of each block are
+    /// filled. Position 0 is left as the caller wrote it (DC).
+    /// </param>
+    /// <returns>True if the token stream filled exactly
+    /// <c>blockCount × 63</c> AC slots; false on under- or
+    /// over-run.</returns>
+    internal static bool ExpandAcTokens(ushort[] acTokens, int blockCount, ushort[] blocks)
+    {
+        if (blocks.Length < (long)blockCount * 64) return false;
+
+        int tokIdx = 0;
+        int blockIdx = 0;
+        int posInBlock = 1;  // skip DC at [0]
+
+        while (blockIdx < blockCount && tokIdx < acTokens.Length)
+        {
+            ushort tok = acTokens[tokIdx++];
+            if ((tok & 0xFF00) == 0xFF00)
+            {
+                int zeros = tok & 0xFF;
+                while (zeros > 0)
+                {
+                    if (blockIdx >= blockCount) return false;  // overrun
+                    blocks[blockIdx * 64 + posInBlock] = 0;
+                    posInBlock++;
+                    zeros--;
+                    if (posInBlock == 64)
+                    {
+                        blockIdx++;
+                        posInBlock = 1;
+                    }
+                }
+            }
+            else
+            {
+                if (blockIdx >= blockCount) return false;
+                blocks[blockIdx * 64 + posInBlock] = tok;
+                posInBlock++;
+                if (posInBlock == 64)
+                {
+                    blockIdx++;
+                    posInBlock = 1;
+                }
+            }
+        }
+
+        // Filling exactly: blockIdx == blockCount AND posInBlock has
+        // wrapped to 1 (start of "next" block, which doesn't exist).
+        return blockIdx == blockCount && posInBlock == 1;
+    }
+
+    /// <summary>
     /// Standard JPEG zigzag scan order. <c>ZigzagToRowMajor[k]</c> is
     /// the row-major flat index <c>(row * 8 + col)</c> of the k-th
     /// position in the zigzag scan. Used by encoders to serialize
