@@ -294,4 +294,62 @@ public class Round157Tests
             Assert.Equal(halfFour, bits);
         }
     }
+
+    [Fact]
+    public void DecodeDcStream_RoundTripsKnownValues()
+    {
+        // Encode a known sequence of ushorts via zlib then decode through
+        // ExrDct.DecodeDcStream. Validates the wire format we expect:
+        // little-endian shorts, zlib-wrapped.
+        ushort[] expected = { 0x1234, 0x5678, 0xDEAD, 0xBEEF, 0x0001, 0xFFFF };
+        var raw = new byte[expected.Length * 2];
+        for (int i = 0; i < expected.Length; i++)
+        {
+            raw[i * 2]     = (byte)expected[i];
+            raw[i * 2 + 1] = (byte)(expected[i] >> 8);
+        }
+        var compressed = ZlibWrap(raw);
+
+        var got = ExrDct.DecodeDcStream(compressed, 0, compressed.Length, expected.Length);
+        Assert.NotNull(got);
+        Assert.Equal(expected, got);
+    }
+
+    [Fact]
+    public void DecodeDcStream_BadZlib_ReturnsNull()
+    {
+        // Random bytes won't decompress — should fail cleanly with null.
+        var garbage = new byte[] { 0x00, 0x01, 0x02, 0x03, 0x04 };
+        var got = ExrDct.DecodeDcStream(garbage, 0, garbage.Length, 8);
+        Assert.Null(got);
+    }
+
+    [Fact]
+    public void DecodeDcStream_TruncatedPayload_ReturnsNull()
+    {
+        // Compress 8 ushorts, then ask the decoder for 16 — short by half.
+        ushort[] encoded = new ushort[8];
+        for (int i = 0; i < 8; i++) encoded[i] = (ushort)(i * 0x101);
+        var raw = new byte[encoded.Length * 2];
+        for (int i = 0; i < encoded.Length; i++)
+        {
+            raw[i * 2]     = (byte)encoded[i];
+            raw[i * 2 + 1] = (byte)(encoded[i] >> 8);
+        }
+        var compressed = ZlibWrap(raw);
+
+        var got = ExrDct.DecodeDcStream(compressed, 0, compressed.Length, 16);
+        Assert.Null(got);
+    }
+
+    private static byte[] ZlibWrap(byte[] data)
+    {
+        using var ms = new System.IO.MemoryStream();
+        using (var z = new System.IO.Compression.ZLibStream(ms,
+            System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+        {
+            z.Write(data, 0, data.Length);
+        }
+        return ms.ToArray();
+    }
 }

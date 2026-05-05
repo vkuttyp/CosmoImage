@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.IO.Compression;
 
 namespace CosmoImage.Loaders;
 
@@ -153,6 +155,39 @@ internal static class ExrDct
         // Filling exactly: blockIdx == blockCount AND posInBlock has
         // wrapped to 1 (start of "next" block, which doesn't exist).
         return blockIdx == blockCount && posInBlock == 1;
+    }
+
+    /// <summary>
+    /// Inflate the DC sub-stream and surface it as
+    /// <paramref name="count"/> little-endian uint16 values — one
+    /// DC coefficient per 8×8 block in scanline-block order. Whether
+    /// the encoder applied a per-block delta predictor on top is a
+    /// matter for the caller (the integration round figures it out).
+    /// Returns null when the zlib decode fails or the byte count is
+    /// inconsistent with <paramref name="count"/>.
+    /// </summary>
+    internal static ushort[]? DecodeDcStream(byte[] src, int srcOff, int srcLen, int count)
+    {
+        if (count < 0) return null;
+        var bytes = new byte[count * 2];
+        try
+        {
+            using var ms = new MemoryStream(src, srcOff, srcLen);
+            using var z = new ZLibStream(ms, CompressionMode.Decompress);
+            int read = 0;
+            while (read < bytes.Length)
+            {
+                int n = z.Read(bytes, read, bytes.Length - read);
+                if (n == 0) return null;
+                read += n;
+            }
+        }
+        catch { return null; }
+
+        var result = new ushort[count];
+        for (int i = 0; i < count; i++)
+            result[i] = (ushort)(bytes[i * 2] | (bytes[i * 2 + 1] << 8));
+        return result;
     }
 
     /// <summary>
