@@ -56,14 +56,15 @@ internal static class PurePngDecoder
                     bitDepth = pngBytes[p + 8];
                     colorType = pngBytes[p + 9];
                     interlace = pngBytes[p + 12];
-                    // Bit depth 1/2/4 and palette-only constraints — fall back
-                    // to Stb for those. We handle 8 and 16.
-                    if (bitDepth != 8 && bitDepth != 16) return null;
+                    if (bitDepth != 1 && bitDepth != 2 && bitDepth != 4
+                        && bitDepth != 8 && bitDepth != 16) return null;
                     if (interlace != 0 && interlace != 1) return null;
                     if (colorType != 0 && colorType != 2 && colorType != 3
                         && colorType != 4 && colorType != 6) return null;
-                    // Palette is always 8-bit per spec — reject 16-bit palette.
-                    if (colorType == 3 && bitDepth != 8) return null;
+                    // Sub-8-bit is only legal for greyscale (CT 0) and palette (CT 3).
+                    if (bitDepth < 8 && colorType != 0 && colorType != 3) return null;
+                    // Palette never goes to 16-bit per spec.
+                    if (colorType == 3 && bitDepth == 16) return null;
                     break;
                 case 0x504C5445:  // PLTE
                     plte = new byte[length];
@@ -101,58 +102,74 @@ internal static class PurePngDecoder
         {
             0 => 1, 2 => 3, 3 => 1, 4 => 2, 6 => 4, _ => 0,
         };
-        int byteStep = bitDepth / 8;  // 1 or 2
-        int srcBpp = channelsPerPixel * byteStep;
 
-        var unfiltered = new byte[width * height * srcBpp];
-        if (interlace == 0)
+        byte[]? unfiltered;
+        if (bitDepth < 8)
         {
-            int srcStride = width * srcBpp;
-            int expectedRawLen = (srcStride + 1) * height;
-            if (raw.Length < expectedRawLen) return null;
-            if (!UnfilterRows(raw, 0, unfiltered, 0, width, height, srcBpp, srcStride)) return null;
+            // Sub-8-bit (1/2/4): only legal for greyscale (CT 0) and palette
+            // (CT 3). PNG packs samples msb-first into bytes, with each row
+            // padded up to a byte boundary. Filter bpp is 1 byte per spec.
+            // Decode here into one-byte-per-sample, scaling greyscale samples
+            // to fill 0..255 (palette indices stay raw — PLTE expansion later).
+            unfiltered = DecodeSubByte(raw, width, height, channelsPerPixel, bitDepth, interlace, scaleGreyscale: colorType == 0);
+            if (unfiltered == null) return null;
+            bitDepth = 8;
         }
         else
         {
-            // Adam7: 7 sub-passes with reduced resolution; each pass has
-            // its own filter context. Decode each into a flat sub-image,
-            // then scatter pixels into the final image at the appropriate
-            // (x_start + c*x_step, y_start + r*y_step) coordinates.
-            int rawOff = 0;
-            for (int pass = 0; pass < 7; pass++)
+            int byteStep = bitDepth / 8;  // 1 or 2
+            int srcBpp = channelsPerPixel * byteStep;
+
+            unfiltered = new byte[width * height * srcBpp];
+            if (interlace == 0)
             {
-                int xStart = Adam7XStart[pass];
-                int yStart = Adam7YStart[pass];
-                int xStep = Adam7XStep[pass];
-                int yStep = Adam7YStep[pass];
-                int passW = Math.Max(0, (width - xStart + xStep - 1) / xStep);
-                int passH = Math.Max(0, (height - yStart + yStep - 1) / yStep);
-                if (passW == 0 || passH == 0) continue;
-                int passStride = passW * srcBpp;
-                int passSize = passStride * passH;
-                if (rawOff + (passStride + 1) * passH > raw.Length) return null;
-                var passBuf = new byte[passSize];
-                if (!UnfilterRows(raw, rawOff, passBuf, 0, passW, passH, srcBpp, passStride)) return null;
-                rawOff += (passStride + 1) * passH;
-                // Scatter pass pixels into the final image.
-                for (int r = 0; r < passH; r++)
+                int srcStride = width * srcBpp;
+                int expectedRawLen = (srcStride + 1) * height;
+                if (raw.Length < expectedRawLen) return null;
+                if (!UnfilterRows(raw, 0, unfiltered, 0, width, height, srcBpp, srcStride)) return null;
+            }
+            else
+            {
+                // Adam7: 7 sub-passes with reduced resolution; each pass has
+                // its own filter context. Decode each into a flat sub-image,
+                // then scatter pixels into the final image at the appropriate
+                // (x_start + c*x_step, y_start + r*y_step) coordinates.
+                int rawOff = 0;
+                for (int pass = 0; pass < 7; pass++)
                 {
-                    int dstY = yStart + r * yStep;
-                    int srcRow = r * passStride;
-                    for (int c = 0; c < passW; c++)
+                    int xStart = Adam7XStart[pass];
+                    int yStart = Adam7YStart[pass];
+                    int xStep = Adam7XStep[pass];
+                    int yStep = Adam7YStep[pass];
+                    int passW = Math.Max(0, (width - xStart + xStep - 1) / xStep);
+                    int passH = Math.Max(0, (height - yStart + yStep - 1) / yStep);
+                    if (passW == 0 || passH == 0) continue;
+                    int passStride = passW * srcBpp;
+                    int passSize = passStride * passH;
+                    if (rawOff + (passStride + 1) * passH > raw.Length) return null;
+                    var passBuf = new byte[passSize];
+                    if (!UnfilterRows(raw, rawOff, passBuf, 0, passW, passH, srcBpp, passStride)) return null;
+                    rawOff += (passStride + 1) * passH;
+                    // Scatter pass pixels into the final image.
+                    for (int r = 0; r < passH; r++)
                     {
-                        int dstX = xStart + c * xStep;
-                        int dstOff = (dstY * width + dstX) * srcBpp;
-                        Buffer.BlockCopy(passBuf, srcRow + c * srcBpp, unfiltered, dstOff, srcBpp);
+                        int dstY = yStart + r * yStep;
+                        int srcRow = r * passStride;
+                        for (int c = 0; c < passW; c++)
+                        {
+                            int dstX = xStart + c * xStep;
+                            int dstOff = (dstY * width + dstX) * srcBpp;
+                            Buffer.BlockCopy(passBuf, srcRow + c * srcBpp, unfiltered, dstOff, srcBpp);
+                        }
                     }
                 }
             }
-        }
 
-        // Byte-swap for 16-bit: PNG stores big-endian uint16; convert to
-        // host-endian (assume little-endian — same as the existing UShort
-        // convention in VipsImage).
-        if (bitDepth == 16) ByteSwap16(unfiltered);
+            // Byte-swap for 16-bit: PNG stores big-endian uint16; convert to
+            // host-endian (assume little-endian — same as the existing UShort
+            // convention in VipsImage).
+            if (bitDepth == 16) ByteSwap16(unfiltered);
+        }
 
         // Expand to output channels — apply tRNS / PLTE.
         bool hasAlphaInColorType = (colorType & 4) != 0;
@@ -193,6 +210,93 @@ internal static class PurePngDecoder
                 return unfiltered;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Decode a sub-8-bit IDAT stream (1/2/4-bit greyscale or palette)
+    /// into a one-byte-per-sample buffer of size <c>width * height * channels</c>.
+    /// Greyscale samples are scaled into 0..255 when <paramref name="scaleGreyscale"/>
+    /// is true; palette indices are preserved verbatim for later PLTE lookup.
+    /// Filter bpp is 1 byte per PNG spec §6.3 ("for sub-byte samples,
+    /// <c>bpp</c> is rounded up to one byte"); row stride is the packed-bit
+    /// length rounded up to a byte boundary.
+    /// </summary>
+    private static byte[]? DecodeSubByte(byte[] raw, int width, int height, int channels,
+        int bitDepth, byte interlace, bool scaleGreyscale)
+    {
+        var dst = new byte[width * height * channels];
+
+        if (interlace == 0)
+        {
+            int packedStride = (width * channels * bitDepth + 7) / 8;
+            int expectedRawLen = (packedStride + 1) * height;
+            if (raw.Length < expectedRawLen) return null;
+            var packed = new byte[packedStride * height];
+            if (!UnfilterRows(raw, 0, packed, 0, packedStride, height, 1, packedStride))
+                return null;
+            UnpackBitsToBytes(packed, packedStride, dst, 0, width, height, channels, bitDepth, scaleGreyscale);
+            return dst;
+        }
+
+        // Adam7 with sub-8-bit: per pass, packed stride uses passW × channels × bitDepth.
+        int rawOff = 0;
+        for (int pass = 0; pass < 7; pass++)
+        {
+            int xStart = Adam7XStart[pass];
+            int yStart = Adam7YStart[pass];
+            int xStep = Adam7XStep[pass];
+            int yStep = Adam7YStep[pass];
+            int passW = Math.Max(0, (width - xStart + xStep - 1) / xStep);
+            int passH = Math.Max(0, (height - yStart + yStep - 1) / yStep);
+            if (passW == 0 || passH == 0) continue;
+            int passPackedStride = (passW * channels * bitDepth + 7) / 8;
+            if (rawOff + (passPackedStride + 1) * passH > raw.Length) return null;
+            var packedPass = new byte[passPackedStride * passH];
+            if (!UnfilterRows(raw, rawOff, packedPass, 0, passPackedStride, passH, 1, passPackedStride))
+                return null;
+            rawOff += (passPackedStride + 1) * passH;
+
+            var passBytes = new byte[passW * passH * channels];
+            UnpackBitsToBytes(packedPass, passPackedStride, passBytes, 0, passW, passH, channels, bitDepth, scaleGreyscale);
+
+            for (int r = 0; r < passH; r++)
+            {
+                int dstY = yStart + r * yStep;
+                int srcRow = r * passW * channels;
+                for (int c = 0; c < passW; c++)
+                {
+                    int dstX = xStart + c * xStep;
+                    int dstOff = (dstY * width + dstX) * channels;
+                    Buffer.BlockCopy(passBytes, srcRow + c * channels, dst, dstOff, channels);
+                }
+            }
+        }
+        return dst;
+    }
+
+    /// <summary>Bit-unpack msb-first packed samples into one byte per sample.</summary>
+    private static void UnpackBitsToBytes(byte[] packed, int packedStride, byte[] dst, int dstStartOff,
+        int width, int height, int channels, int bitDepth, bool scaleGreyscale)
+    {
+        // 1-bit→×255, 2-bit→×85, 4-bit→×17 stretches into 0..255.
+        // Palette indices (scaleGreyscale=false) keep their raw value.
+        int scale = !scaleGreyscale ? 1 : (bitDepth == 1 ? 255 : bitDepth == 2 ? 85 : 17);
+        int mask = (1 << bitDepth) - 1;
+        int samplesPerRow = width * channels;
+        int outStride = samplesPerRow;
+        for (int y = 0; y < height; y++)
+        {
+            int srcRow = y * packedStride;
+            int dstRow = dstStartOff + y * outStride;
+            for (int s = 0; s < samplesPerRow; s++)
+            {
+                int bitPos = s * bitDepth;
+                int bytePos = bitPos >> 3;
+                int shift = 8 - bitDepth - (bitPos & 7);
+                int sample = (packed[srcRow + bytePos] >> shift) & mask;
+                dst[dstRow + s] = (byte)(sample * scale);
+            }
+        }
     }
 
     // Adam7 pass-table per PNG spec §8.2.

@@ -205,10 +205,15 @@ public class Round104Tests
             // Fall back to verifying the bytes match SOMETHING decodable.
             return;
         }
-        Assert.Equal(4, channels);
-        Assert.Equal(w * h * 4, decoded.Length);
-        // Centre pixel sanity.
-        Assert.Equal((byte)(1 * 80), decoded[(1 * w + 1) * 4 + 0]);
-        Assert.Equal((byte)(1 * 80), decoded[(1 * w + 1) * 4 + 1]);
+        // Magick is free to collapse RGBA→palette/RGB when alpha is constant
+        // (it actually emits a 4-bit palette PNG for this 3×3 input). The
+        // test's job is to exercise the Adam7 empty-pass-skip path; channel
+        // count is incidental.
+        Assert.True(channels >= 3);
+        Assert.Equal(w * h * channels, decoded.Length);
+        // Centre pixel R/G channels (regardless of layout).
+        int centerOff = (1 * w + 1) * channels;
+        Assert.Equal((byte)(1 * 80), decoded[centerOff + 0]);
+        Assert.Equal((byte)(1 * 80), decoded[centerOff + 1]);
     }
 }
