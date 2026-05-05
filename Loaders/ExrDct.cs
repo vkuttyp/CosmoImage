@@ -95,23 +95,21 @@ internal static class ExrDct
     /// Expand a DWA AC token stream into <paramref name="blockCount"/>
     /// 8×8 frequency blocks (63 AC coefficients per block, DC at
     /// position 0 left untouched). Token convention from
-    /// <c>internal_dwa_decoder.h</c>: a uint16 with high byte 0xFF
-    /// stands for <c>(low_byte)</c> zeros to insert into the
-    /// zigzag stream; any other value is a literal HALF coefficient.
-    /// Block boundary is implicit — when 63 AC positions are filled
-    /// for the current block, the next token starts the next block.
+    /// <c>internal_dwa_decoder.h</c>:
+    /// <list type="bullet">
+    ///   <item><c>0xFFnn</c> with <c>nn != 0</c>: zero-run of
+    ///         <c>nn</c> positions in the zigzag stream</item>
+    ///   <item><c>0xFF00</c>: end-of-block (advance to next block;
+    ///         remaining AC slots stay zero — caller must pre-zero
+    ///         the AC positions of <paramref name="blocks"/>).
+    ///         Emitted only by VERSION≥1 encoders, harmless when
+    ///         absent (VERSION 0 streams never produce it)</item>
+    ///   <item>Anything else: literal HALF coefficient</item>
+    /// </list>
+    /// Block boundary is implicit when 63 AC positions are filled.
     /// </summary>
-    /// <param name="acTokens">Decoded AC token stream (Huffman or
-    /// zlib output, before un-RLE).</param>
-    /// <param name="blockCount">Number of 8×8 frequency blocks the
-    /// stream spans.</param>
-    /// <param name="blocks">Output array of size
-    /// <c>blockCount × 64</c>; AC positions 1..63 of each block are
-    /// filled. Position 0 is left as the caller wrote it (DC).
-    /// </param>
-    /// <returns>True if the token stream filled exactly
-    /// <c>blockCount × 63</c> AC slots; false on under- or
-    /// over-run.</returns>
+    /// <returns>True if the token stream filled or terminated all
+    /// blocks; false on overrun or partial fill.</returns>
     internal static bool ExpandAcTokens(ushort[] acTokens, int blockCount, ushort[] blocks)
     {
         if (blocks.Length < (long)blockCount * 64) return false;
@@ -125,13 +123,22 @@ internal static class ExrDct
             ushort tok = acTokens[tokIdx++];
             if ((tok & 0xFF00) == 0xFF00)
             {
-                int zeros = tok & 0xFF;
-                while (zeros > 0)
+                int count = tok & 0xFF;
+                if (count == 0)
                 {
-                    if (blockIdx >= blockCount) return false;  // overrun
+                    // EOB — advance to next block. Remaining AC
+                    // positions of this block stay at their
+                    // pre-zeroed default.
+                    blockIdx++;
+                    posInBlock = 1;
+                    continue;
+                }
+                while (count > 0)
+                {
+                    if (blockIdx >= blockCount) return false;
                     blocks[blockIdx * 64 + posInBlock] = 0;
                     posInBlock++;
-                    zeros--;
+                    count--;
                     if (posInBlock == 64)
                     {
                         blockIdx++;
@@ -152,8 +159,10 @@ internal static class ExrDct
             }
         }
 
-        // Filling exactly: blockIdx == blockCount AND posInBlock has
-        // wrapped to 1 (start of "next" block, which doesn't exist).
+        // Success: all blocks completed. blockIdx == blockCount can
+        // happen either because they all naturally filled (posInBlock
+        // wrapped to 1 on the last block) or because EOB was the
+        // final token of the last block (also leaves posInBlock at 1).
         return blockIdx == blockCount && posInBlock == 1;
     }
 

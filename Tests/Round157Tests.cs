@@ -191,6 +191,27 @@ public class Round157Tests
     }
 
     [Fact]
+    public void ExpandAc_EobMarker_AdvancesEarlyToNextBlock()
+    {
+        // Block 0 has one literal at position 1, then EOB (0xFF00).
+        // Remaining positions 2..63 of block 0 stay zero. Block 1's
+        // first token (next in the stream) goes to AC[1] of block 1.
+        var tokens = new ushort[]
+        {
+            0xCAFE,  // block 0 position 1
+            0xFF00,  // EOB → block 0 done
+            0xBEEF,  // block 1 position 1
+            0xFF3E,  // block 1: 62 zeros (positions 2..63)
+        };
+        var blocks = new ushort[2 * 64];
+        Assert.True(ExrDct.ExpandAcTokens(tokens, 2, blocks));
+        Assert.Equal(0xCAFE, blocks[1]);                    // block 0 [1]
+        for (int i = 2; i < 64; i++) Assert.Equal(0, blocks[i]);
+        Assert.Equal(0xBEEF, blocks[64 + 1]);               // block 1 [1]
+        for (int i = 2; i < 64; i++) Assert.Equal(0, blocks[64 + i]);
+    }
+
+    [Fact]
     public void PlaceBlock_AlignedAtOrigin_WritesAllPixels()
     {
         // 8×8 image, block at (0,0). Each block sample i writes
