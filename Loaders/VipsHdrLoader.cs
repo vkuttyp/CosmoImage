@@ -152,16 +152,16 @@ public static class VipsHdrLoader
 
         if (!newRle)
         {
-            // Old-style: width pixels of RGBE, possibly with old-RLE
-            // (consecutive identical pixels with E==1 indicate a run). The
-            // simpler Greg Ward "uncompressed" path handles HDRs synthesized
-            // by tools that just dump straight RGBE; we use that here for
-            // simplicity. Old-RLE handling can land later if real-world
-            // files force it.
-            if (pos + width * 4 > bytes.Length) return false;
-            Buffer.BlockCopy(bytes, pos, scanline, 0, width * 4);
-            pos += width * 4;
-            return true;
+            // Old-style: width pixels of RGBE that may include run markers.
+            // Per Greg Ward's reference decoder (oldreadcolrs in
+            // radiance/src/common/color.c), a pixel with R=G=B=1 is a run
+            // marker that replicates the previous pixel (E << rshift)
+            // times. rshift accumulates by 8 across consecutive run
+            // markers (so a multi-marker chain can encode large runs);
+            // any non-marker pixel resets rshift to 0. Plain literal
+            // scanlines decode through the same loop with no run markers
+            // ever firing.
+            return ReadOldRleScanline(bytes, ref pos, width, scanline);
         }
 
         pos += 4;
@@ -193,6 +193,58 @@ public static class VipsHdrLoader
                     pos += litLen;
                     x += litLen;
                 }
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Decode an old-style scanline. Greg Ward's algorithm: walk pixels
+    /// 4 bytes at a time, treating R=G=B=1 quads as run markers that
+    /// replicate the previous pixel <c>(E &lt;&lt; rshift)</c> times.
+    /// rshift starts at 0 and grows by 8 with each consecutive marker;
+    /// any non-marker pixel resets it.
+    /// </summary>
+    private static bool ReadOldRleScanline(byte[] bytes, ref int pos, int width, byte[] scanline)
+    {
+        int rshift = 0;
+        int x = 0;
+        while (x < width)
+        {
+            if (pos + 4 > bytes.Length) return false;
+            byte r = bytes[pos++];
+            byte g = bytes[pos++];
+            byte b = bytes[pos++];
+            byte e = bytes[pos++];
+            if (r == 1 && g == 1 && b == 1)
+            {
+                // Run marker — replicate previous pixel. A marker as the
+                // very first pixel of a scanline would have nothing to
+                // copy from; reject as malformed.
+                if (x == 0) return false;
+                int repCount = e << rshift;
+                int prevOff = (x - 1) * 4;
+                int copies = Math.Min(repCount, width - x);
+                for (int i = 0; i < copies; i++)
+                {
+                    int dst = x * 4;
+                    scanline[dst + 0] = scanline[prevOff + 0];
+                    scanline[dst + 1] = scanline[prevOff + 1];
+                    scanline[dst + 2] = scanline[prevOff + 2];
+                    scanline[dst + 3] = scanline[prevOff + 3];
+                    x++;
+                }
+                rshift += 8;
+            }
+            else
+            {
+                int dst = x * 4;
+                scanline[dst + 0] = r;
+                scanline[dst + 1] = g;
+                scanline[dst + 2] = b;
+                scanline[dst + 3] = e;
+                x++;
+                rshift = 0;
             }
         }
         return true;
