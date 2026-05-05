@@ -854,12 +854,20 @@ internal static class PureTiffDecoder
     }
 
     /// <summary>
-    /// zlib-wrapped Deflate (TIFF Compression=8, "Adobe Deflate", or
-    /// 32946, the older PKZIP alias — both produce byte-identical
-    /// streams). Raw-deflate (no zlib header) is rare but unsupported
-    /// here; falls through to Magick.
+    /// zlib-wrapped or raw Deflate (TIFF Compression=8 "Adobe Deflate",
+    /// or 32946 the older PKZIP alias — same byte-identical stream).
+    /// Most encoders emit the standard zlib wrapper; some write raw
+    /// deflate (no 2-byte CMF/FLG header, no Adler-32 trailer). We try
+    /// the zlib wrapper first, then fall back to raw DeflateStream.
     /// </summary>
     private static bool DecompressDeflate(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, int expected)
+    {
+        if (DecompressZlibWrapped(src, srcOff, srcLen, dst, dstOff, expected)) return true;
+        return DecompressRawDeflate(src, srcOff, srcLen, dst, dstOff, expected);
+    }
+
+    private static bool DecompressZlibWrapped(byte[] src, int srcOff, int srcLen,
         byte[] dst, int dstOff, int expected)
     {
         try
@@ -875,10 +883,26 @@ internal static class PureTiffDecoder
             }
             return true;
         }
-        catch
+        catch { return false; }
+    }
+
+    private static bool DecompressRawDeflate(byte[] src, int srcOff, int srcLen,
+        byte[] dst, int dstOff, int expected)
+    {
+        try
         {
-            return false;
+            using var ms = new MemoryStream(src, srcOff, srcLen);
+            using var z = new DeflateStream(ms, CompressionMode.Decompress);
+            int read = 0;
+            while (read < expected)
+            {
+                int n = z.Read(dst, dstOff + read, expected - read);
+                if (n == 0) return false;
+                read += n;
+            }
+            return true;
         }
+        catch { return false; }
     }
 
     /// <summary>
