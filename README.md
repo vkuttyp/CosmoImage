@@ -27,11 +27,15 @@ permissive-only dependency stack.
 - **Modern web formats** — JPEG, PNG, WebP, TIFF (incl. pyramidal Ptif),
   BMP, GIF, HEIF, AVIF (incl. animated sequences), APNG, PDF render,
   SVG raster.
-- **Scientific formats** — Radiance HDR, FITS, NIfTI-1 (single-file +
-  paired), OME-TIFF metadata, Matlab `.mat` v5 numeric arrays, CSV /
-  Matrix numeric grids — all pure-C#.
-- **Modern container formats** — TGA, QOI, PBM/PGM/PPM/PAM, dzsave
-  Deep Zoom (DZI / OpenSeadragon).
+- **Scientific & VFX formats** — OpenEXR (scanline + tiled,
+  MIPMAP/RIPMAP, multi-part, all compressors except DWAA-DWAB-RGB,
+  HALF/FLOAT/UINT, generic 1–4 channel sets), Radiance HDR (new + old
+  RLE, all axis orderings), FITS, NIfTI-1 (single-file + paired),
+  OME-TIFF metadata, Matlab `.mat` v5 numeric arrays, CSV / Matrix
+  numeric grids — all pure-C#.
+- **Modern container formats** — TGA (full variant matrix), QOI,
+  PBM/PGM/PPM/PAM (P1–P7, 8/16-bit), dzsave Deep Zoom (DZI /
+  OpenSeadragon).
 - **Metadata-aware** — EXIF, XMP, and ICC blobs round-trip across every
   format conversion. AutoOrient patches the EXIF orientation tag so your
   thumbnails don't double-rotate. Typed accessors via `VipsFields`
@@ -123,14 +127,14 @@ The same machinery handles:
 
 | Format | Load | Save | Animated / multi-page | Notes |
 | :--- | :---: | :---: | :---: | :--- |
-| JPEG | ✅ | ✅ | n/a | full + EXIF/XMP via APP1, ICC via multi-segment APP2 |
-| PNG | ✅ | ✅ | n/a | full-color + palette PNG-8 + iTXt for XMP |
-| WebP | ✅ | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
-| TIFF | ✅ | ✅ | ✅ multi-page + pyramidal Ptif | EXIF/XMP/ICC + ImageDescription (incl. OME-XML) |
-| BMP | ✅ pure-C# fast path + Magick fallback | ✅ pure-C# (24/32 bpp) | n/a | paletted/RLE via Magick |
-| GIF | ✅ | ✅ | ✅ animated | EXIF/XMP/ICC + Comment via Magick |
+| JPEG | ✅ pure-C# | ✅ | n/a | full + EXIF/XMP via APP1, ICC via multi-segment APP2; JFIF YCbCr / Adobe APP14 RGB / YCCK / CMYK colour-space conversion |
+| PNG | ✅ pure-C# | ✅ | n/a | 8/16-bit, color types 0/2/3/4/6, Adam7 interlace, tRNS; iTXt for XMP |
+| APNG | ✅ pure-C# (incl. IDAT-as-fallback) | ✅ | ✅ animated | full `dispose_op` / `blend_op` composition |
+| WebP | ✅ pure VP8L lossless / Magick for VP8 lossy | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
+| TIFF | ✅ pure-C# | ✅ | ✅ multi-page + pyramidal Ptif | uncompressed + LZW + Deflate (zlib + raw) + PackBits + JPEG-in-TIFF; predictor=2/3; tiled + tiled+planar=2; FillOrder=2; SampleFormat 1/2/3 incl. signed ints; CMYK + YCbCr photometric; BigTIFF; OME-XML metadata |
+| BMP | ✅ pure-C# | ✅ pure-C# (24/32 bpp) | n/a | full real-world matrix: 1/4/8 bpp paletted, 16 bpp RGB555 + BI_BITFIELDS, 24/32 bpp, BI_RLE4 + BI_RLE8 |
+| GIF | ✅ pure-C# stills / Magick for animated | ✅ | ✅ animated | EXIF/XMP/ICC + Comment via Magick |
 | HEIF / AVIF | ✅ | ✅ single-frame | ✅ animated load (sequence brand `avis` + animated HEIC) | EXIF/XMP/ICC via Magick |
-| APNG | n/a | ✅ | ✅ animated | profile + Comment on first frame |
 | PDF | ✅ | n/a | ✅ multi-page render | via Docnet |
 | SVG | ✅ raster | n/a | n/a | via Magick |
 
@@ -138,7 +142,8 @@ The same machinery handles:
 
 | Format | Load | Save | Notes |
 | :--- | :---: | :---: | :--- |
-| Radiance HDR (`.hdr`) | ✅ | ✅ | RLE-encoded RGBE; 3-band Float in linear-light RGB |
+| OpenEXR | ✅ pure-C# (substantially complete) | ❌ | scanline + tiled (ONE_LEVEL / MIPMAP / RIPMAP); multi-part (first image part); compressors NO_COMPRESSION / RLE / ZIPS / ZIP / PIZ / PXR24 / B44 / B44A / DWAA-DWAB-partial; HALF / FLOAT / UINT pixel types; arbitrary 1–4 channel sets (RGB[A] / Y / Z / U / V / arbitrary VFX names) |
+| Radiance HDR (`.hdr`) | ✅ | ✅ | new-style RLE + old-style RLE; all four Y-first axis orderings; 3-band Float in linear-light RGB |
 | FITS | ✅ | ✅ | BITPIX 8/16/32/-32/-64; BSCALE/BZERO; 2D + 3D planar transpose |
 | NIfTI-1 single-file (`.nii`) | ✅ | ✅ | datatypes 2/16/64; auto-endian detect; pixdim → XRes/YRes |
 | NIfTI-1 paired (`.hdr/.img`) | ✅ via `LoadPairedAsync` | ❌ | ni1 magic; shared decoder with single-file form |
@@ -150,10 +155,9 @@ The same machinery handles:
 
 | Format | Load | Save | Notes |
 | :--- | :---: | :---: | :--- |
-| TGA | ✅ pure-C# (types 2/3/10/11) | ✅ pure-C# | paletted via Magick |
+| TGA | ✅ pure-C# | ✅ pure-C# | full real-world matrix: types 1/9 (paletted, 15/16/24/32-bit colour map), 2/10 (truecolor at depth 15/16/24/32), 3/11 (grayscale) |
 | QOI | ✅ pure-C# | ✅ pure-C# | full QOI v1.0 spec; lossless |
-| PBM/PGM/PPM | ✅ pure-C# (P1-P6) | ✅ pure-C# (P4/P5/P6) | PAM (P7) via Magick |
-| PAM | ✅ via Magick | ✅ via Magick | — |
+| PBM/PGM/PPM/PAM | ✅ pure-C# | ✅ pure-C# (P4/P5/P6) | full Netpbm matrix: P1/P4 (PBM), P2/P5 (PGM), P3/P6 (PPM), P7 (PAM); 8 and 16 bits per sample |
 | dzsave Deep Zoom (DZI) | n/a | ✅ directory tree | Microsoft DZI 2008; OpenSeadragon-compatible |
 
 ### Stub / partial
@@ -162,7 +166,6 @@ The same machinery handles:
 | :--- | :--- |
 | JPEG XL | 🟡 header stub only — full pixel decode needs libjxl |
 | JPEG 2000 | 🟡 header only — needs libjp2k |
-| OpenEXR | ❌ — needs OpenEXR binding |
 
 EXIF / XMP / ICC blobs round-trip on JPEG, PNG, WebP, TIFF, HEIF, AVIF,
 GIF, and APNG. Cross-format conversion (e.g., JPEG → AVIF) preserves all
@@ -765,7 +768,7 @@ honest gap against either parent is *much* bigger than that:
   missing (mosaicing/, create/), a severe colour-management graph
   gap (only sRGB↔linear, missing Lab/Oklab/CMYK/etc.), many
   band-manipulation ops, several niche format codecs that need native
-  bindings (OpenEXR, JPEG XL/2K, OpenSlide, dcraw, DICOM).
+  bindings (JPEG XL/2K, OpenSlide, dcraw, DICOM, uhdr).
 - vs **ImageSharp** (~25 pixel structs, full vector-graphics drawing,
   typed metadata profiles): pixel-format zoo (4 of 25 shipped), no
   generic op surface, no vector-graphics drawing layer (paths,
