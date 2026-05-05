@@ -74,12 +74,24 @@ public static class VipsHdrLoader
             }
         }
 
-        // Resolution line. Standard form: "-Y <h> +X <w>". Other axis
-        // orderings exist but are rare in real-world files; we punt on them.
+        // Resolution line. Y-first orderings are flipped variants of
+        // a normal top-to-bottom-left-to-right image:
+        //   -Y h +X w  → standard (decode as-is)
+        //   -Y h -X w  → mirror within each row
+        //   +Y h +X w  → mirror rows top↔bottom
+        //   +Y h -X w  → mirror both
+        // X-first orderings are 90° rotations; we still punt those —
+        // they're vanishingly rare and require axis transposition.
         if (!ReadLine(bytes, ref pos, out var resLine)) return null;
         var parts = resLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 4) return null;
-        if (parts[0] != "-Y" || parts[2] != "+X") return null;
+        if (parts[0].Length != 2 || parts[2].Length != 2) return null;
+        char ySign = parts[0][0], yLabel = parts[0][1];
+        char xSign = parts[2][0], xLabel = parts[2][1];
+        if (yLabel != 'Y' || xLabel != 'X') return null;  // X-first rotation
+        if ((ySign != '+' && ySign != '-') || (xSign != '+' && xSign != '-')) return null;
+        bool flipRows = ySign == '+';   // +Y means bottom-to-top
+        bool flipCols = xSign == '-';   // -X means right-to-left
         if (!int.TryParse(parts[1], out int height)) return null;
         if (!int.TryParse(parts[3], out int width)) return null;
         if (width <= 0 || height <= 0) return null;
@@ -120,6 +132,11 @@ public static class VipsHdrLoader
             }
         }
 
+        // Apply axis-ordering flips so the output is canonical
+        // top-to-bottom / left-to-right.
+        if (flipCols) FlipColumnsInPlace(pixels, width, height);
+        if (flipRows) FlipRowsInPlace(pixels, width, height);
+
         var image = new VipsImage
         {
             Width = width,
@@ -134,6 +151,37 @@ public static class VipsHdrLoader
         };
         foreach (var kv in metadata) image.Metadata["hdr:" + kv.Key] = kv.Value;
         return image;
+    }
+
+    private static void FlipRowsInPlace(byte[] pixels, int width, int height)
+    {
+        int rowBytes = width * 12;  // 3 floats × 4 bytes/float
+        var tmp = new byte[rowBytes];
+        for (int y = 0; y < height / 2; y++)
+        {
+            int top = y * rowBytes;
+            int bot = (height - 1 - y) * rowBytes;
+            Buffer.BlockCopy(pixels, top, tmp, 0, rowBytes);
+            Buffer.BlockCopy(pixels, bot, pixels, top, rowBytes);
+            Buffer.BlockCopy(tmp, 0, pixels, bot, rowBytes);
+        }
+    }
+
+    private static void FlipColumnsInPlace(byte[] pixels, int width, int height)
+    {
+        var tmp = new byte[12];  // one pixel = 3 floats
+        for (int y = 0; y < height; y++)
+        {
+            int rowBase = y * width * 12;
+            for (int x = 0; x < width / 2; x++)
+            {
+                int left = rowBase + x * 12;
+                int right = rowBase + (width - 1 - x) * 12;
+                Buffer.BlockCopy(pixels, left, tmp, 0, 12);
+                Buffer.BlockCopy(pixels, right, pixels, left, 12);
+                Buffer.BlockCopy(tmp, 0, pixels, right, 12);
+            }
+        }
     }
 
     /// <summary>
