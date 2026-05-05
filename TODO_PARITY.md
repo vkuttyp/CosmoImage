@@ -385,8 +385,10 @@ Holes inside formats we already handle, that would close edge cases.
   ASCII tables), WCS coordinate-system reconstruction beyond the
   raw card preservation we do today.
 - [ ] **Matlab v5 writer** (mirror of the v5 reader shipped in round 21).
-- [ ] **PBM/PGM/PPM 16-bit variants** — currently fall through to
-  Magick because of parser inflation; can be added as a follow-up.
+- [x] ~~**PBM/PGM/PPM 16-bit variants**~~ (round 176) — UShort inputs
+  emit native 16-bit P5/P6 binary with maxval=65535 and big-endian
+  samples per spec. Loader already handled 16-bit on read; saver
+  no longer narrows to UChar.
 - [ ] **PAM (P7)** — currently delegates to Magick; pure-C# parser
   doable but the WIDTH/HEIGHT/DEPTH/MAXVAL/TUPLTYPE header is more
   elaborate than P1-P6.

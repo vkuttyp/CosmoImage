@@ -53,9 +53,12 @@ public static class VipsPnmSaver
             return;
         }
 
-        // Materialize. For Float/etc. inputs, cast to UChar first so the
-        // single-byte-per-sample binary variants emit correctly.
-        var src = image.BandFormat == VipsBandFormat.UChar
+        // Materialize. UShort inputs emit native 16-bit binary (P5 / P6 with
+        // maxval=65535); UChar passes through; everything else casts to UChar
+        // first since we don't have lossless rescaling for Float/Int formats.
+        bool sixteenBit = image.BandFormat == VipsBandFormat.UShort &&
+                          (resolved == VipsPnmVariant.Pgm || resolved == VipsPnmVariant.Ppm);
+        var src = (image.BandFormat == VipsBandFormat.UChar || sixteenBit)
             ? image
             : VipsImageOps.CastUChar(image);
 
@@ -82,10 +85,12 @@ public static class VipsPnmSaver
                 await WritePbmAsync(stream, pixels, width, height, bands, cancellationToken);
                 break;
             case VipsPnmVariant.Pgm:
-                await WritePgmAsync(stream, pixels, width, height, bands, cancellationToken);
+                if (sixteenBit) await WritePgm16Async(stream, pixels, width, height, bands, cancellationToken);
+                else await WritePgmAsync(stream, pixels, width, height, bands, cancellationToken);
                 break;
             case VipsPnmVariant.Ppm:
-                await WritePpmAsync(stream, pixels, width, height, bands, cancellationToken);
+                if (sixteenBit) await WritePpm16Async(stream, pixels, width, height, bands, cancellationToken);
+                else await WritePpmAsync(stream, pixels, width, height, bands, cancellationToken);
                 break;
             default:
                 throw new InvalidOperationException($"Unhandled PNM variant {resolved}");
@@ -186,6 +191,82 @@ public static class VipsPnmSaver
                     row[x * 3] = pixels[srcBase];
                     row[x * 3 + 1] = pixels[srcBase + 1];
                     row[x * 3 + 2] = pixels[srcBase + 2];
+                }
+            }
+            await stream.WriteAsync(row, ct);
+        }
+    }
+
+    /// <summary>
+    /// 16-bit PGM (P5 with maxval 65535). Per spec the binary samples are
+    /// big-endian; we host-store little-endian (UShort convention in
+    /// <see cref="VipsImage"/>) so we byte-swap on the way out.
+    /// </summary>
+    private static async Task WritePgm16Async(Stream stream, byte[] pixels, int width, int height, int bands, CancellationToken ct)
+    {
+        var header = System.Text.Encoding.ASCII.GetBytes($"P5\n{width} {height}\n65535\n");
+        await stream.WriteAsync(header, ct);
+
+        var row = new byte[width * 2];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int srcOff = (y * width + x) * bands * 2;
+                int sampleLo, sampleHi;
+                if (bands >= 3)
+                {
+                    // Luminance via Rec.709 weights, mirroring the 8-bit path.
+                    int rs = (pixels[srcOff + 1] << 8) | pixels[srcOff + 0];
+                    int gs = (pixels[srcOff + 3] << 8) | pixels[srcOff + 2];
+                    int bs = (pixels[srcOff + 5] << 8) | pixels[srcOff + 4];
+                    int gray = (int)(rs * 0.2126 + gs * 0.7152 + bs * 0.0722);
+                    sampleLo = gray & 0xFF;
+                    sampleHi = (gray >> 8) & 0xFF;
+                }
+                else
+                {
+                    sampleLo = pixels[srcOff + 0];
+                    sampleHi = pixels[srcOff + 1];
+                }
+                row[x * 2 + 0] = (byte)sampleHi; // big-endian per spec
+                row[x * 2 + 1] = (byte)sampleLo;
+            }
+            await stream.WriteAsync(row, ct);
+        }
+    }
+
+    /// <summary>16-bit PPM (P6 with maxval 65535) — RGB, big-endian samples.</summary>
+    private static async Task WritePpm16Async(Stream stream, byte[] pixels, int width, int height, int bands, CancellationToken ct)
+    {
+        var header = System.Text.Encoding.ASCII.GetBytes($"P6\n{width} {height}\n65535\n");
+        await stream.WriteAsync(header, ct);
+
+        var row = new byte[width * 6];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int srcBase = (y * width + x) * bands * 2;
+                if (bands == 3 || bands == 4)
+                {
+                    // Take RGB; drop alpha (4-band) by ignoring it.
+                    for (int c = 0; c < 3; c++)
+                    {
+                        int srcOff = srcBase + c * 2;
+                        row[x * 6 + c * 2 + 0] = pixels[srcOff + 1]; // big-endian
+                        row[x * 6 + c * 2 + 1] = pixels[srcOff + 0];
+                    }
+                }
+                else // bands == 1: replicate grey to RGB
+                {
+                    byte hi = pixels[srcBase + 1];
+                    byte lo = pixels[srcBase + 0];
+                    for (int c = 0; c < 3; c++)
+                    {
+                        row[x * 6 + c * 2 + 0] = hi;
+                        row[x * 6 + c * 2 + 1] = lo;
+                    }
                 }
             }
             await stream.WriteAsync(row, ct);
