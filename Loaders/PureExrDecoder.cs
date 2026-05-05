@@ -10,23 +10,25 @@ namespace CosmoImage.Loaders;
 
 /// <summary>
 /// Pure-managed OpenEXR decoder. Reads the file header (magic +
-/// version + attribute list), then decodes scanline-organised
-/// uncompressed pixel data into a <see cref="VipsImage"/>.
+/// version + attribute list), then decodes scanline or tiled pixel
+/// data into a <see cref="VipsImage"/>.
 ///
-/// <para>This first pass covers the foundational subset:</para>
+/// <para>Coverage:</para>
 /// <list type="bullet">
-///   <item>Single-part files only (multi-part is bit 12 of the version word)</item>
-///   <item>Scanline organisation (tiled handled by a later round)</item>
-///   <item>NO_COMPRESSION (=0); RLE / ZIP / PIZ / PXR24 / B44 / DWA come later</item>
-///   <item>HALF (=1) pixel type — converted to <see cref="float"/> on decode</item>
-///   <item>Channels named "R" / "G" / "B" / "A" — other channel sets fall through</item>
+///   <item>Single-part and multi-part files (multi-part returns part 0)</item>
+///   <item>Scanline and tiled organisations (ONE_LEVEL / MIPMAP /
+///         RIPMAP — sub-levels are walked past; we expose level 0)</item>
+///   <item>Compressors: NO_COMPRESSION, RLE, ZIPS, ZIP, PIZ, PXR24,
+///         B44, B44A. DWAA / DWAB still fall through</item>
+///   <item>Pixel types HALF, FLOAT, UINT — output band format is
+///         <see cref="VipsBandFormat.Float"/> for HALF/FLOAT and
+///         <see cref="VipsBandFormat.UInt"/> for UINT</item>
+///   <item>RGB[A] / Y / arbitrary 1–4-channel sets in alphabetical order</item>
 /// </list>
 ///
-/// <para>Returns <c>null</c> for unsupported configurations so the
-/// caller can fall back. Output is <see cref="VipsBandFormat.Float"/>
-/// because EXR's HALF pixels promote naturally and downstream ops
-/// handle Float; HALF-format storage in the <see cref="VipsImage"/>
-/// is a future optimisation.</para>
+/// <para>Returns <c>null</c> for unsupported configurations
+/// (deep parts, DWA compression, &gt;4 channels) so the caller can
+/// fall back to Magick.</para>
 /// </summary>
 internal static class PureExrDecoder
 {

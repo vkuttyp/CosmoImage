@@ -7,13 +7,13 @@ using System.IO.Compression;
 namespace CosmoImage.Loaders;
 
 /// <summary>
-/// Pure-managed PNG pixel decoder. Handles 8-bit non-interlaced
-/// streams of color types 0 (greyscale), 2 (RGB), 3 (palette), 4
-/// (greyscale + alpha), and 6 (RGB + alpha), with <c>tRNS</c>
-/// transparency expansion.
+/// Pure-managed PNG pixel decoder. Handles 8- and 16-bit streams,
+/// progressive (Adam7) interlace, and color types 0 (greyscale),
+/// 2 (RGB), 3 (palette), 4 (greyscale + alpha), and 6 (RGB + alpha),
+/// with <c>tRNS</c> transparency expansion.
 ///
-/// <para>Returns <c>null</c> for configurations we don't support
-/// (bit depth other than 8, interlaced, malformed input). Callers
+/// <para>Returns <c>null</c> for malformed input or configurations
+/// the pipeline doesn't carry (bit depths outside {8, 16}). Callers
 /// fall back to a different decoder in that case.</para>
 /// </summary>
 internal static class PurePngDecoder

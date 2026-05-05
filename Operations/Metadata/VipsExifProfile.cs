@@ -131,9 +131,9 @@ public readonly record struct VipsExifSRational(int Numerator, int Denominator)
 /// CosmoImage already round-trips via <c>image.GetExif()</c>) into a
 /// dictionary of typed values; serialize back with <see cref="ToBytes"/>.
 ///
-/// <para>Supports the most common tags across IFD0 and the Exif
-/// sub-IFD. GPS sub-IFD parsing is deferred to a later round; the
-/// pointer is preserved on read but its tags aren't surfaced.</para>
+/// <para>Supports the most common tags across IFD0, the Exif
+/// sub-IFD, and the GPS sub-IFD (Latitude / Longitude / Altitude /
+/// Timestamp / Direction / etc., all under <see cref="VipsGpsTag"/>).</para>
 ///
 /// <para>Both byte orders (II = little-endian; MM = big-endian) are
 /// supported. The byte order of a parsed profile is preserved on
