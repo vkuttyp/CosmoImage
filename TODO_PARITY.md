@@ -386,7 +386,13 @@ Holes inside formats we already handle, that would close edge cases.
 - [ ] **FITS**: NAXIS≥4 data cubes, additional HDUs (binary tables,
   ASCII tables), WCS coordinate-system reconstruction beyond the
   raw card preservation we do today.
-- [ ] **Matlab v5 writer** (mirror of the v5 reader shipped in round 21).
+- [x] ~~**Matlab v5 writer**~~ (round 178) — `VipsMatSaver` mirrors the
+  v5 reader: 128-byte ASCII descriptor, `miMATRIX` top element with
+  ArrayFlags / Dimensions / Name / RealPart sub-elements. UChar →
+  mxUInt8, Float / others → mxSingle. 1-band as 2D matrix, multi-band
+  as 3D with planes as the last dim. Row-major → column-major
+  transpose during write so the loader's reverse-transpose recovers
+  original pixels.
 - [x] ~~**PBM/PGM/PPM 16-bit variants**~~ (round 176) — UShort inputs
   emit native 16-bit P5/P6 binary with maxval=65535 and big-endian
   samples per spec. Loader already handled 16-bit on read; saver
