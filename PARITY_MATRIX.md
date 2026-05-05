@@ -79,7 +79,7 @@ flattening, premultiplication. **Major gap area.**
 | `embed` (place into larger canvas with extension mode) | ✅ | `Embed` with Black/White/Copy/Repeat/Mirror/Background modes; per-band background colour |
 | `gravity` (positional embed) | ✅ | `Pad(width, height, background, position)` with `VipsCompass` (Centre/N/E/S/W/NE/SE/SW/NW); `BackgroundColor(...)` flattens transparent pixels onto a fill colour while keeping alpha |
 | `flip` | ✅ | |
-| `rot` (orthogonal) / `rot45` | 🟡 | `Rotate(VipsAngle)` ✅; rot45 missing |
+| `rot` (orthogonal) / `rot45` | ✅ | `Rotate(VipsAngle)`; `Rot45(VipsAngle45)` (round 171) for 45°-increment rotation around the centre of a square odd-sided image. |
 | `autorot` (EXIF-based) | ✅ | `AutoOrient` |
 | `composite`, `composite2` | 🟢 | `Composite` with full Porter-Duff family (round 170): Clear / Source / Dest / Over / DestOver / In / DestIn / Out / DestOut / Atop / DestAtop / Xor / Add. Colour-modulation modes (Multiply / Screen / …) on `VipsBlend`. |
 | `recomb` | ✅ | |

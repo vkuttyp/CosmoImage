@@ -122,6 +122,24 @@ public enum VipsAngle
 }
 
 /// <summary>
+/// 45-degree rotation set used by <see cref="CosmoImage.Operations.Geometric.VipsRot45"/>.
+/// libvips' <c>rot45</c> rotates square (odd-sided) images by these increments;
+/// chiefly used to produce non-axis-aligned structuring elements for
+/// mathematical morphology.
+/// </summary>
+public enum VipsAngle45
+{
+    D0 = 0,
+    D45 = 1,
+    D90 = 2,
+    D135 = 3,
+    D180 = 4,
+    D225 = 5,
+    D270 = 6,
+    D315 = 7,
+}
+
+/// <summary>
 /// Anchor positions for ops that place a smaller image inside a larger
 /// canvas (<see cref="CosmoImage.Operations.Geometric.VipsEmbed"/> via
 /// <c>Pad</c>). Mirrors libvips <c>VipsCompassDirection</c>.

@@ -33,6 +33,9 @@ public static class VipsImageExtensions
     public static VipsImage Rotate(this VipsImage image, double degrees, VipsKernel kernel = VipsKernel.Linear)
         => VipsImageOps.Rotate(image, degrees, kernel);
 
+    public static VipsImage Rot45(this VipsImage image, VipsAngle45 angle = VipsAngle45.D45)
+        => VipsImageOps.Rot45(image, angle);
+
     public static VipsImage Flip(this VipsImage image, VipsDirection direction)
         => VipsImageOps.Flip(image, direction);
 

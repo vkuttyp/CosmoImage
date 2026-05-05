@@ -211,6 +211,17 @@ public static partial class VipsImageOps
         return Run(new VipsRotate { In = input, Angle = angle });
     }
 
+    // From Operations/Geometric/VipsRot45.cs
+    /// <summary>
+    /// Rotate a square odd-sided image by a 45° increment. Mirrors libvips'
+    /// <c>rot45</c> — chiefly for non-axis-aligned structuring elements
+    /// (mathematical morphology). Out-of-bounds samples zero-fill.
+    /// </summary>
+    public static VipsImage Rot45(VipsImage input, VipsAngle45 angle = VipsAngle45.D45)
+    {
+        return Run(new VipsRot45 { In = input, Angle = angle });
+    }
+
     // From Operations/Geometric/VipsThumbnail.cs
     public static VipsImage Thumbnail(VipsImage input, int width, int height = 0, bool crop = false)
     {

@@ -81,7 +81,10 @@ Each lands in a single PR.
   for flatten-onto-fill while keeping alpha.
 - [x] ~~`replicate`~~ (round 28) — tile across×down. Scanline-slab copy
   across tile seams.
-- [ ] `rot45` (45-degree rotate by lookup).
+- [x] ~~`rot45`~~ (round 171) — 8-angle (D0..D315) rotation around
+  the centre of a square odd-sided image. Axis-aligned angles match
+  `VipsRotate`; diagonals use rotation-matrix sampling with nearest-
+  neighbour, zero-fill out-of-bounds.
 - [x] ~~`byteswap`~~ (round 30) — reverse multi-byte sample bytes;
   UChar pass-through.
 - [x] ~~`falsecolour`~~ (round 28) — built-in jet ramp, 1-band UChar → RGB.
