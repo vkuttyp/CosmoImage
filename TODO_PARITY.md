@@ -300,10 +300,14 @@ recursive mosaicing (`lrmosaic` / `tbmosaic`), global luminosity balance
 project — corresponding to libvips' early scientific-imaging heritage.
 
 ### `iofuncs/` engine extensions
-- [ ] **Output target abstraction** (`vips_target_*`). Currently we
-  only have one-shot `PipeWriter`-based saver entry points; libvips
-  has a full `IVipsTarget` interface symmetric to `IVipsSource`.
-  Lets savers write to memory / fd / custom callbacks uniformly.
+- [x] ~~**Output target abstraction**~~ (round 185) — `IVipsTarget`
+  interface symmetric to `IVipsSource`, plus three implementations:
+  `MemoryVipsTarget` (collects into a buffer; <c>ToArray()</c>),
+  `StreamVipsTarget` (wraps any writable Stream), and
+  `CallbackVipsTarget` (forwards each write to a user delegate —
+  the libvips "custom write callback" target). Existing savers
+  keep their PipeWriter signatures unchanged; callers using
+  IVipsTarget bridge via <c>target.AsPipeWriter()</c>.
 - [ ] **Disc-backed sink** (`sinkdisc.c`). For images too big to
   materialize in memory, libvips writes a temporary tiled file and
   reads back per-tile. Closes the "what about a 50000×50000-pixel
