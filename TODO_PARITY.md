@@ -400,10 +400,17 @@ Holes inside formats we already handle, that would close edge cases.
 - [ ] **PAM (P7)** — currently delegates to Magick; pure-C# parser
   doable but the WIDTH/HEIGHT/DEPTH/MAXVAL/TUPLTYPE header is more
   elaborate than P1-P6.
-- [ ] **BMP**: paletted (1/4/8 bpp), 16bpp RGB555, RLE-compressed,
-  BITFIELDS-masked, V4/V5 colour-space variants — currently
-  fall through to Magick.
-- [ ] **TGA**: paletted (types 1/9), 16bpp RGB555 — fall through.
+- [x] ~~**BMP**: paletted (1/4/8 bpp), 16bpp RGB555, RLE-compressed,
+  BITFIELDS-masked, V4/V5 colour-space variants~~ — pure-C# fast
+  path already handles all of these (BI_RGB at 1/4/8/16/24/32 bpp,
+  BI_RLE8, BI_RLE4, BI_BITFIELDS at 16/32 bpp; V4/V5 headers via
+  the `dibSize >= 40` check). Round 179 added explicit
+  hand-crafted regression tests for the paletted + BITFIELDS paths.
+- [x] ~~**TGA**: paletted (types 1/9), 16bpp RGB555~~ — pure-C# fast
+  path covers types 1 (raw paletted), 9 (RLE paletted), 2 (raw RGB),
+  10 (RLE RGB), 3/11 (greyscale), depths 8/15/16/24/32. Round 179
+  added explicit hand-crafted regression tests for the paletted +
+  16bpp paths.
 - [ ] **dzsave**: Zoomify, IIIF, Google layouts (we ship DZI only).
 - [ ] **APNG**: all-frames-animated variant (we ship single + simple
   multi-frame).
