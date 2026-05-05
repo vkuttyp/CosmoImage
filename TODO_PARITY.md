@@ -205,7 +205,13 @@ sRGB ↔ scRGB ↔ Lab ↔ LabQ ↔ LabS ↔ LCh ↔ UCS ↔ XYZ ↔ Yxy ↔ HSV
 ↔ Oklab ↔ Oklch, plus CICP and uhdr at the edges. We have only
 sRGB↔linear and a few RGB-space matrix manipulations.
 
-- [ ] XYZ ↔ Lab, Lab ↔ LCh, LCh ↔ UCS — the CIE colourimetry chain.
+- [x] ~~XYZ ↔ Lab, Lab ↔ LCh~~ (round 33) — CIE colourimetry pair shipped.
+- [x] ~~LCh ↔ UCS perceptually-uniform colour space~~ (round 197) —
+  shipped as DIN99 (DIN 6176:2001) instead of libvips' specific
+  Munsell-renotation UCS. DIN99 is closed-form (no lookup tables)
+  and provides the same use case: Euclidean distance in DIN99 space
+  approximates ΔE2000 at a fraction of the cost. Surface as
+  `Lab2DIN99` / `DIN992Lab`.
 - [x] ~~Lab ↔ LabQ~~ (round 34) — libvips 4-byte layout
   (10-bit L + 11-bit signed a + 11-bit signed b + extension byte).
 - [x] ~~Lab ↔ LabS~~ (round 34) — 3-band Short

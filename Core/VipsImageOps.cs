@@ -1193,6 +1193,17 @@ public static partial class VipsImageOps
     /// <summary>LCh → Lab.</summary>
     public static VipsImage LCh2Lab(VipsImage input) => Run(new VipsLCh2Lab { In = input });
 
+    // From Operations/Color/VipsDIN99.cs
+    /// <summary>
+    /// CIE L*a*b* → DIN99 (DIN 6176:2001). Perceptually-uniform Lab
+    /// variant where Euclidean ΔE99 ≈ ΔE2000. Useful for clustering /
+    /// nearest-neighbour searches in colour space.
+    /// </summary>
+    public static VipsImage Lab2DIN99(VipsImage input) => Run(new VipsLab2DIN99 { In = input });
+
+    /// <summary>DIN99 → CIE L*a*b*. Inverse of <see cref="Lab2DIN99"/>.</summary>
+    public static VipsImage DIN992Lab(VipsImage input) => Run(new VipsDIN992Lab { In = input });
+
     // From Operations/Color/VipsdE.cs
     /// <summary>Per-pixel CIE76 ΔE between two Lab images.</summary>
     public static VipsImage DE76(VipsImage left, VipsImage right)
