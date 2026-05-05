@@ -213,18 +213,21 @@ internal static class PureTiffDecoder
         for (int i = 0; i < bitsPerSample.Length; i++)
             if (bitsPerSample[i] != bps) return null;
 
-        // Validate sample format: 1 = unsigned int, 3 = IEEE float.
-        // All channels must agree; the existing code only checks the
-        // first when only one entry is present.
+        // Validate sample format: 1 = unsigned int, 2 = signed int,
+        // 3 = IEEE float. All channels must agree; the existing code
+        // only checks the first when only one entry is present.
         int sampleFmt = sampleFormat.Length == 0 ? 1 : (int)sampleFormat[0];
         for (int i = 0; i < sampleFormat.Length; i++)
             if (sampleFormat[i] != sampleFmt) return null;
-        if (sampleFmt != 1 && sampleFmt != 3) return null;
-        if (sampleFmt == 1 && bps != 8 && bps != 16) return null;
+        if (sampleFmt != 1 && sampleFmt != 2 && sampleFmt != 3) return null;
+        if ((sampleFmt == 1 || sampleFmt == 2) && bps != 8 && bps != 16 && bps != 32) return null;
+        if (sampleFmt == 1 && bps == 32 && photometric != 1 && photometric != 2) return null;
+        if (sampleFmt == 2 && photometric != 1 && photometric != 2) return null;
         if (sampleFmt == 3 && bps != 32) return null;
-        // Predictor 2 doesn't apply to float; predictor 3 only applies to float.
-        if (sampleFmt == 1 && predictor == 3) return null;
+        // Predictor 2 (horizontal differencing) only applies to integer
+        // samples; predictor 3 (FP byte-shuffle) only applies to float.
         if (sampleFmt == 3 && predictor == 2) return null;
+        if (sampleFmt != 3 && predictor == 3) return null;
 
         int spp = (int)samplesPerPixel;
         if (spp < 1 || spp > 4) return null;
@@ -386,9 +389,17 @@ internal static class PureTiffDecoder
         // Apply photometric transformation.
         byte[] outPixels;
         int outBands;
-        VipsBandFormat bandFormat = sampleFmt == 3
-            ? VipsBandFormat.Float
-            : (bps == 16 ? VipsBandFormat.UShort : VipsBandFormat.UChar);
+        VipsBandFormat bandFormat = (sampleFmt, bps) switch
+        {
+            (1, 8)  => VipsBandFormat.UChar,
+            (1, 16) => VipsBandFormat.UShort,
+            (1, 32) => VipsBandFormat.UInt,
+            (2, 8)  => VipsBandFormat.Char,
+            (2, 16) => VipsBandFormat.Short,
+            (2, 32) => VipsBandFormat.Int,
+            (3, 32) => VipsBandFormat.Float,
+            _       => VipsBandFormat.UChar,
+        };
         VipsInterpretation interp;
 
         if (photometric == 0)
