@@ -33,14 +33,41 @@ public sealed class OmePhysicalSize
 }
 
 /// <summary>
+/// Full N-D layout metadata from an OME-XML <c>&lt;Pixels&gt;</c>
+/// element. <see cref="DimensionOrder"/> is the OME canonical
+/// per-page traversal order — typically <c>"XYCZT"</c> or
+/// <c>"XYZCT"</c> — telling consumers how the height-stacked
+/// multi-page TIFF buffer decomposes into the (Z, C, T) grid.
+/// </summary>
+public sealed class OmePixelsLayout
+{
+    public int? SizeX { get; init; }
+    public int? SizeY { get; init; }
+    public int? SizeZ { get; init; }
+    public int? SizeC { get; init; }
+    public int? SizeT { get; init; }
+    /// <summary>
+    /// 5-character OME dimension order, e.g. <c>"XYCZT"</c>. Drives
+    /// how a multi-page TIFF / multi-frame buffer is interpreted
+    /// when SizeZ * SizeC * SizeT &gt; 1.
+    /// </summary>
+    public string? DimensionOrder { get; init; }
+    /// <summary>OME pixel <c>Type</c> attribute, e.g. <c>"uint8"</c>, <c>"uint16"</c>, <c>"float"</c>.</summary>
+    public string? Type { get; init; }
+}
+
+/// <summary>
 /// Typed accessors for OME-XML metadata embedded in TIFF ImageDescription.
 /// The loader populates <c>Metadata["ome:xml"]</c> when it detects an
 /// OME-shaped XML payload; this class provides parsed views over that
 /// payload for callers that want structured fields rather than raw XML.
 ///
-/// <para>Multi-dimensional layout (Z, C, T) is intentionally not modelled —
-/// the underlying <see cref="VipsImage"/> is 2D / multi-page only. Use the
-/// raw XML via <see cref="GetOmeXml"/> when you need full schema access.</para>
+/// <para>Multi-dimensional layout (Z, C, T) is exposed via
+/// <see cref="GetOmePixelsLayout"/> — the loader populates the
+/// counts as <c>ome:size-z / ome:size-c / ome:size-t /
+/// ome:dimension-order</c> metadata when an OME-XML payload is
+/// detected. The underlying <see cref="VipsImage"/> stays
+/// 2D-with-multi-page; use the layout to split the stack manually.</para>
 /// </summary>
 public static class VipsOmeTiff
 {
@@ -121,6 +148,65 @@ public static class VipsOmeTiff
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Parse the first <c>&lt;Pixels&gt;</c> element's full layout
+    /// (SizeX/Y/Z/C/T + DimensionOrder + Type). Returns
+    /// <see langword="null"/> when the XML is malformed or absent;
+    /// individual fields may be null when the corresponding attributes
+    /// aren't present.
+    /// </summary>
+    public static OmePixelsLayout? GetOmePixelsLayout(VipsImage image)
+    {
+        var xml = GetOmeXml(image);
+        if (xml == null) return null;
+        try
+        {
+            var doc = XDocument.Parse(xml);
+            var pixels = FindFirst(doc.Root, "Pixels");
+            if (pixels == null) return null;
+            return new OmePixelsLayout
+            {
+                SizeX = ParseInt(pixels.Attribute("SizeX")?.Value),
+                SizeY = ParseInt(pixels.Attribute("SizeY")?.Value),
+                SizeZ = ParseInt(pixels.Attribute("SizeZ")?.Value),
+                SizeC = ParseInt(pixels.Attribute("SizeC")?.Value),
+                SizeT = ParseInt(pixels.Attribute("SizeT")?.Value),
+                DimensionOrder = pixels.Attribute("DimensionOrder")?.Value,
+                Type = pixels.Attribute("Type")?.Value,
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Populate <c>ome:size-z / ome:size-c / ome:size-t /
+    /// ome:dimension-order</c> on the image when an OME-XML payload is
+    /// present and at least one of (Z, C, T) exceeds 1. Mirrors the
+    /// height-stacking metadata convention used by NIfTI 4D (round 193)
+    /// and FITS NAXIS≥4 (round 194). Called by the TIFF loader after
+    /// <see cref="PopulatePhysicalSize"/>; safe to call directly.
+    /// </summary>
+    public static void PopulatePixelsLayout(VipsImage image)
+    {
+        var layout = GetOmePixelsLayout(image);
+        if (layout == null) return;
+
+        // Only surface the axis sizes when at least one is non-trivially > 1.
+        // 2D RGB OME-TIFFs (SizeZ=SizeC=SizeT=1) skip the metadata; the
+        // multi-page stack is still flagged via the existing n-pages key.
+        if (layout.SizeZ is int z && z > 1)
+            image.Metadata["ome:size-z"] = z.ToString(CultureInfo.InvariantCulture);
+        if (layout.SizeC is int c && c > 1)
+            image.Metadata["ome:size-c"] = c.ToString(CultureInfo.InvariantCulture);
+        if (layout.SizeT is int t && t > 1)
+            image.Metadata["ome:size-t"] = t.ToString(CultureInfo.InvariantCulture);
+        if (!string.IsNullOrEmpty(layout.DimensionOrder))
+            image.Metadata["ome:dimension-order"] = layout.DimensionOrder;
     }
 
     /// <summary>

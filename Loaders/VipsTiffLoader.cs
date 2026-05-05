@@ -250,6 +250,7 @@ public static class VipsTiffLoader
         {
             image.Metadata["ome:xml"] = imageDescription;
             CosmoImage.Core.VipsOmeTiff.PopulatePhysicalSize(image);
+            CosmoImage.Core.VipsOmeTiff.PopulatePixelsLayout(image);
         }
     }
 

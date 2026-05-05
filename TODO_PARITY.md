@@ -463,8 +463,14 @@ Holes inside formats we already handle, that would close edge cases.
 - [ ] **Animated AVIF/HEIC save** — gated on Magick.NET-Q8 HEIC
   encoder availability.
 - [ ] **TIFF**: full Tiled-TIFF with explicit tile geometry control;
-  16-bit-per-sample throughput; OME-TIFF Z/C/T full N-D mapping
-  (we surface OME-XML metadata only).
+  16-bit-per-sample throughput.
+  ~~OME-TIFF Z/C/T full N-D mapping~~ shipped in round 195 — same
+  height-stacking convention as NIfTI 4D / FITS NAXIS≥4.
+  `VipsOmeTiff.GetOmePixelsLayout` exposes the parsed
+  `<Pixels>` element (SizeX/Y/Z/C/T + DimensionOrder + Type);
+  the loader auto-populates `ome:size-z / ome:size-c /
+  ome:size-t / ome:dimension-order` metadata so consumers can
+  split the multi-page stack into a (Z, C, T) grid.
 
 ---
 
