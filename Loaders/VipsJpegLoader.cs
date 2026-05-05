@@ -163,6 +163,18 @@ public static class VipsJpegLoader
 
         var pixelsLazy = new Lazy<byte[]>(() =>
         {
+            // Pure-C# fast path. Handles baseline sequential JPEGs
+            // (the dominant on-the-web subset) without the JpegLibrary
+            // dependency. Returns null and falls through to JpegLibrary
+            // for progressive / arithmetic / 12-bit / hierarchical
+            // variants which the fast path doesn't cover.
+            var pure = PureJpegDecoder.TryDecode(jpegBytes, out int pw, out int ph, out int pc);
+            if (pure != null && pw == width && ph == height && pc == bands)
+            {
+                ConvertColorSpace(pure, width, height, bands, colorSpace);
+                return pure;
+            }
+
             int stride = width * bands;
             var buf = new byte[stride * height];
             var innerDecoder = new JpegDecoder();
