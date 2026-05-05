@@ -111,10 +111,8 @@ public static class VipsNiftiSaver
         // xyzt_units at offset 123: low 3 bits = spatial unit (2 = mm).
         header[123] = 2;
 
-        // qform_code / sform_code (offsets 252, 254). 0 = unknown — viewers
-        // fall back to pixdim. Avoids us having to compute a quaternion.
-        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(252, 2), 0);
-        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(254, 2), 0);
+        // qform / sform: pass through if loader-attached metadata exists.
+        WriteQformSform(header, src);
 
         // Magic at offset 344: "n+1\0" for single-file.
         header[344] = (byte)'n'; header[345] = (byte)'+'; header[346] = (byte)'1'; header[347] = 0;
@@ -219,8 +217,7 @@ public static class VipsNiftiSaver
             Buffer.BlockCopy(b, 0, header, 148, len);
         }
         header[123] = 2;
-        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(252, 2), 0);
-        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(254, 2), 0);
+        WriteQformSform(header, src);
         // Magic "ni1\0" — paired-form indicator.
         header[344] = (byte)'n'; header[345] = (byte)'i'; header[346] = (byte)'1'; header[347] = 0;
 
@@ -249,5 +246,73 @@ public static class VipsNiftiSaver
 
         await dataWriter.FlushAsync(cancellationToken);
         await dataWriter.CompleteAsync();
+    }
+
+    /// <summary>
+    /// Pass-through write of qform/sform fields from
+    /// <see cref="VipsImage.Metadata"/>. The loader-set keys
+    /// <c>nifti:qform_code</c>, <c>nifti:quatern</c> (b,c,d as
+    /// comma-separated floats), <c>nifti:qoffset</c> (x,y,z),
+    /// <c>nifti:sform_code</c>, and <c>nifti:srow_x/y/z</c>
+    /// (4 floats each) round-trip exactly through this saver.
+    /// Codes default to 0 (= "unknown, fall back to pixdim") when
+    /// the metadata isn't present.
+    /// </summary>
+    private static void WriteQformSform(byte[] header, VipsImage src)
+    {
+        // qform: 6 floats (quaternion b/c/d + translation x/y/z).
+        short qformCode = 0;
+        if (src.Metadata.TryGetValue("nifti:qform_code", out var qcStr) &&
+            short.TryParse(qcStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var qc))
+            qformCode = qc;
+        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(252, 2), qformCode);
+
+        if (qformCode != 0 &&
+            TryParseFloats(src.Metadata.GetValueOrDefault("nifti:quatern"), 3, out var quat) &&
+            TryParseFloats(src.Metadata.GetValueOrDefault("nifti:qoffset"), 3, out var qoff))
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(256, 4), quat[0]);
+            BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(260, 4), quat[1]);
+            BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(264, 4), quat[2]);
+            BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(268, 4), qoff[0]);
+            BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(272, 4), qoff[1]);
+            BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(276, 4), qoff[2]);
+        }
+
+        // sform: 12 floats (3 rows × 4 cols).
+        short sformCode = 0;
+        if (src.Metadata.TryGetValue("nifti:sform_code", out var scStr) &&
+            short.TryParse(scStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sc))
+            sformCode = sc;
+        BinaryPrimitives.WriteInt16LittleEndian(header.AsSpan(254, 2), sformCode);
+
+        if (sformCode != 0)
+        {
+            for (int row = 0; row < 3; row++)
+            {
+                string key = $"nifti:srow_{(char)('x' + row)}";
+                if (TryParseFloats(src.Metadata.GetValueOrDefault(key), 4, out var srow))
+                {
+                    int rowOff = 280 + row * 16;
+                    for (int col = 0; col < 4; col++)
+                        BinaryPrimitives.WriteSingleLittleEndian(header.AsSpan(rowOff + col * 4, 4), srow[col]);
+                }
+            }
+        }
+    }
+
+    /// <summary>Parse N comma-separated floats; returns false on shape mismatch / nulls.</summary>
+    private static bool TryParseFloats(string? s, int expected, out float[] values)
+    {
+        values = Array.Empty<float>();
+        if (string.IsNullOrEmpty(s)) return false;
+        var parts = s.Split(',');
+        if (parts.Length != expected) return false;
+        var result = new float[expected];
+        for (int i = 0; i < expected; i++)
+            if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out result[i]))
+                return false;
+        values = result;
+        return true;
     }
 }

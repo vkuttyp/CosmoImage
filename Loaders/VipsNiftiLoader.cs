@@ -292,6 +292,39 @@ public static class VipsNiftiLoader
         // descrip[80] at offset 148.
         var descrip = System.Text.Encoding.ASCII.GetString(bytes, 148, 80).TrimEnd('\0', ' ');
         if (descrip.Length > 0) image.Metadata["nifti:descrip"] = descrip;
+
+        // qform / sform spatial-orientation fields. Codes ≠ 0 indicate
+        // the matrices are present; we surface them as comma-separated
+        // float strings so a save→load round-trip preserves them
+        // exactly. We don't apply the spatial transform (VipsImage has
+        // no world-coordinate model) — these are pass-through metadata.
+        short qformCode = ReadShort(252);
+        short sformCode = ReadShort(254);
+        if (qformCode != 0)
+        {
+            image.Metadata["nifti:qform_code"] = qformCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            float qb = ReadFloat(256), qc = ReadFloat(260), qd = ReadFloat(264);
+            float qx = ReadFloat(268), qy = ReadFloat(272), qz = ReadFloat(276);
+            image.Metadata["nifti:quatern"] = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0},{1},{2}", qb, qc, qd);
+            image.Metadata["nifti:qoffset"] = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0},{1},{2}", qx, qy, qz);
+        }
+        if (sformCode != 0)
+        {
+            image.Metadata["nifti:sform_code"] = sformCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            for (int row = 0; row < 3; row++)
+            {
+                int rowOff = 280 + row * 16;
+                float a = ReadFloat(rowOff), b = ReadFloat(rowOff + 4),
+                      c = ReadFloat(rowOff + 8), d = ReadFloat(rowOff + 12);
+                image.Metadata[$"nifti:srow_{(char)('x' + row)}"] = string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "{0},{1},{2},{3}", a, b, c, d);
+            }
+        }
         return image;
     }
 

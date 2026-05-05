@@ -403,13 +403,17 @@ the .NET ecosystem doesn't have.
 Holes inside formats we already handle, that would close edge cases.
 
 - [ ] **NIfTI**: 4D+ time-series (fMRI volumes — needs N-D semantics
-  `VipsImage` doesn't model), full qform/sform quaternion-based
-  spatial transforms.
-  ~~Signed-int datatypes~~ shipped in round 190 (int8 / int16 /
-  int32 / uint16 / uint32 all widen to Float losslessly).
-  ~~Paired-form save~~ shipped in round 191 — `SavePairedAsync`
-  emits .hdr + .img to two PipeWriters (mirror of the existing
-  `LoadPairedAsync`).
+  `VipsImage` doesn't model). Closer-to-shipped sub-items:
+  ~~Signed-int datatypes~~ (round 190 — int8 / int16 / int32 /
+  uint16 / uint32 widen to Float losslessly).
+  ~~Paired-form save~~ (round 191 — `SavePairedAsync` emits
+  .hdr + .img to two PipeWriters).
+  ~~qform/sform metadata round-trip~~ (round 192 — loader surfaces
+  spatial-orientation fields as `nifti:qform_code` /
+  `nifti:quatern` / `nifti:qoffset` / `nifti:sform_code` /
+  `nifti:srow_x|y|z` strings; saver passes them back when
+  present. Doesn't apply the transform — VipsImage has no
+  world-coordinate model — but the metadata round-trips exactly).
 - [ ] **FITS**: NAXIS≥4 data cubes, additional HDUs (binary tables,
   ASCII tables), WCS coordinate-system reconstruction beyond the
   raw card preservation we do today.
