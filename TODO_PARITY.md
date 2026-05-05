@@ -212,8 +212,11 @@ sRGB↔linear and a few RGB-space matrix manipulations.
 - [x] ~~XYZ ↔ CMYK~~ (round 36) — naïve no-profile transform via
   sRGB-from-K. ICC-based path remains via `IccTransform`.
 - [x] ~~XYZ ↔ scRGB~~ (round 36) — standard sRGB-primary 3×3 matrix.
-- [ ] CICP2scRGB (BT.2100 / Rec.2020 / PQ / HLG transfer functions —
-  HDR / wide-gamut interop).
+- [x] ~~CICP2scRGB~~ (round 175) — `VipsCicp2scRGB` with
+  `VipsCicpPrimaries` (BT.709, BT.2020) × `VipsCicpTransfer`
+  (BT.709, Linear, BT.2020, PQ, HLG). Float scRGB output. PQ EOTF
+  scales /100 so SDR diffuse white aligns with scRGB ≈ 1.0; HLG
+  inverse-OETF is scene-referred.
 - [ ] uhdr2scRGB (Ultra HDR JPEG with gainmap).
 - [x] ~~dE76 / dE00~~ (round 33) — `DE76` Euclidean Lab and `DE2000`
   CIEDE2000 (Sharma reference vectors verified). Also exposed as

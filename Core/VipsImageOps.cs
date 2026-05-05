@@ -1251,6 +1251,17 @@ public static partial class VipsImageOps
     /// <summary>XYZ → scRGB (linear, sRGB primaries, D65).</summary>
     public static VipsImage XYZ2scRGB(VipsImage input) => Run(new VipsXYZ2scRGB { In = input });
 
+    /// <summary>
+    /// CICP → scRGB. Decode an HDR / SDR image tagged with CICP
+    /// colour primaries + transfer characteristics into linear-light
+    /// scRGB (sRGB primaries, Float 3-band, unbounded). Default is
+    /// BT.2020 + PQ — the BT.2100 HDR10 baseline.
+    /// </summary>
+    public static VipsImage Cicp2scRGB(VipsImage input,
+        VipsCicpPrimaries primaries = VipsCicpPrimaries.BT2020,
+        VipsCicpTransfer transfer = VipsCicpTransfer.PQ)
+        => Run(new VipsCicp2scRGB { In = input, Primaries = primaries, Transfer = transfer });
+
     // From Operations/Color/VipsCMYK.cs
     /// <summary>Naïve CMYK → XYZ (no ICC profile).</summary>
     public static VipsImage CMYK2XYZ(VipsImage input) => Run(new VipsCMYK2XYZ { In = input });

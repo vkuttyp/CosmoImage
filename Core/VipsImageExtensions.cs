@@ -509,6 +509,12 @@ public static class VipsImageExtensions
     /// <summary>XYZ → scRGB.</summary>
     public static VipsImage XYZ2scRGB(this VipsImage image) => VipsImageOps.XYZ2scRGB(image);
 
+    /// <summary>CICP-tagged HDR/SDR → scRGB linear.</summary>
+    public static VipsImage Cicp2scRGB(this VipsImage image,
+        VipsCicpPrimaries primaries = VipsCicpPrimaries.BT2020,
+        VipsCicpTransfer transfer = VipsCicpTransfer.PQ)
+        => VipsImageOps.Cicp2scRGB(image, primaries, transfer);
+
     /// <summary>Naïve CMYK → XYZ.</summary>
     public static VipsImage CMYK2XYZ(this VipsImage image) => VipsImageOps.CMYK2XYZ(image);
 
