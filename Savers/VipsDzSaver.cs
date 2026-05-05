@@ -14,6 +14,21 @@ public enum VipsDzTileFormat
 }
 
 /// <summary>
+/// Output layout for <see cref="VipsDzSaver"/>. Each layout fixes the
+/// on-disk directory tree and descriptor file shape; pyramid generation
+/// is identical across all layouts.
+/// </summary>
+public enum VipsDzLayout
+{
+    /// <summary>Microsoft Deep Zoom — <c>{base}.dzi</c> + <c>{base}_files/{level}/{col}_{row}.{ext}</c>.</summary>
+    Dz = 0,
+    /// <summary>Zoomify — <c>{base}/ImageProperties.xml</c> + <c>TileGroup{N}/{level}-{col}-{row}.{ext}</c>.</summary>
+    Zoomify = 1,
+    /// <summary>Google Maps — <c>{base}/{level}/{col}/{row}.{ext}</c>. No descriptor file.</summary>
+    Google = 2,
+}
+
+/// <summary>
 /// Deep Zoom Image (DZI) writer — multi-resolution pyramid output for
 /// OpenSeadragon / IIIF / Microsoft Silverlight Deep Zoom viewers. Output is
 /// a *directory tree* rather than a single stream, which is why this saver
@@ -33,24 +48,26 @@ public enum VipsDzTileFormat
 /// edges (the standard Deep Zoom values; OpenSeadragon expects them).
 /// Quality applies to JPEG tiles only.</para>
 ///
-/// Direct port of libvips <c>vips_dzsave</c> in DeepZoom layout. Other
-/// layouts (Zoomify, IIIF) are deliberately deferred — DZI is the most
-/// widely-supported, and porting the full layout matrix is its own project.
+/// Port of libvips <c>vips_dzsave</c>; supports the three most-used
+/// pyramid layouts (DZ, Zoomify, Google). IIIF is still deferred — its
+/// region-addressed URL scheme is fundamentally different from the
+/// fixed-tile-grid layouts and would need a separate code path.
 /// </summary>
 public static class VipsDzSaver
 {
     /// <summary>
-    /// Render <paramref name="image"/> as a Deep Zoom pyramid rooted at
-    /// <paramref name="basePath"/>. Writes <c>{basePath}.dzi</c> plus a
-    /// <c>{basePath}_files</c> directory of per-level tile subdirectories.
-    /// Existing files at those paths are overwritten.
+    /// Render <paramref name="image"/> as a multi-resolution pyramid in the
+    /// chosen <paramref name="layout"/>. The directory tree is rooted at
+    /// <paramref name="basePath"/>; existing files at those paths are
+    /// overwritten.
     /// </summary>
     /// <param name="image">Source image (any band format; JPEG tile output forces UChar via the existing JPEG saver).</param>
-    /// <param name="basePath">Output base path with no extension. <c>foo.dzi</c> + <c>foo_files/</c> are created relative to it.</param>
-    /// <param name="tileSize">Edge length of square tiles. 256 is the DZI default.</param>
-    /// <param name="overlap">Pixels of overlap between adjacent tiles' edges. 1 is the DZI default; 0 produces visible seams in some viewers.</param>
+    /// <param name="basePath">Output base path with no extension.</param>
+    /// <param name="tileSize">Edge length of square tiles. 256 is the universal default.</param>
+    /// <param name="overlap">Pixels of overlap between adjacent tiles. DZ default 1; Zoomify/Google use 0.</param>
     /// <param name="format">Tile format: JPEG (smaller, lossy) or PNG (lossless).</param>
     /// <param name="jpegQuality">Quality for JPEG tiles (1..100). Ignored for PNG.</param>
+    /// <param name="layout">DZ (default), Zoomify, or Google Maps.</param>
     public static async Task SaveAsync(
         VipsImage image,
         string basePath,
@@ -58,12 +75,15 @@ public static class VipsDzSaver
         int overlap = 1,
         VipsDzTileFormat format = VipsDzTileFormat.Jpeg,
         int jpegQuality = 85,
+        VipsDzLayout layout = VipsDzLayout.Dz,
         CancellationToken cancellationToken = default)
     {
         if (image == null) throw new ArgumentNullException(nameof(image));
         if (string.IsNullOrWhiteSpace(basePath)) throw new ArgumentException("basePath required", nameof(basePath));
         if (tileSize <= 0) throw new ArgumentOutOfRangeException(nameof(tileSize));
         if (overlap < 0) throw new ArgumentOutOfRangeException(nameof(overlap));
+        // Zoomify and Google layouts assume 0 overlap; clamp to spec.
+        if (layout != VipsDzLayout.Dz) overlap = 0;
 
         int W = image.Width;
         int H = image.Height;
@@ -76,10 +96,12 @@ public static class VipsDzSaver
         int dim = maxDim;
         while (dim > 1) { dim = (dim + 1) / 2; levels++; }
 
-        // Ensure clean output directory tree.
-        string filesDir = basePath + "_files";
-        if (Directory.Exists(filesDir)) Directory.Delete(filesDir, recursive: true);
-        Directory.CreateDirectory(filesDir);
+        // Layout-specific root directory. DZ writes the descriptor as a
+        // sibling file ({base}.dzi) and tiles under {base}_files/; the
+        // other two write everything inside {base}/.
+        string rootDir = layout == VipsDzLayout.Dz ? basePath + "_files" : basePath;
+        if (Directory.Exists(rootDir)) Directory.Delete(rootDir, recursive: true);
+        Directory.CreateDirectory(rootDir);
 
         // Generate each level top-down — start at full resolution (level N-1)
         // and downsample to level 0. Reusing the source image at full res for
@@ -112,12 +134,17 @@ public static class VipsDzSaver
             curH = nextH;
         }
 
+        // Cumulative tile index for Zoomify TileGroup numbering. Tiles
+        // are numbered in (level, row, col) order across all levels.
+        int zoomifyTileIndex = 0;
+        int totalTiles = 0;
+
+        string ext = format == VipsDzTileFormat.Jpeg ? ".jpg" : ".png";
+
         for (int k = 0; k < levels; k++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var (lw, lh) = levelDims[k];
-            string levelDir = Path.Combine(filesDir, k.ToString());
-            Directory.CreateDirectory(levelDir);
 
             int cols = (int)Math.Ceiling((double)lw / tileSize);
             int rows = (int)Math.Ceiling((double)lh / tileSize);
@@ -137,8 +164,19 @@ public static class VipsDzSaver
 
                     var tile = levelImages[k].ExtractArea(tx, ty, tw, th);
 
-                    string ext = format == VipsDzTileFormat.Jpeg ? ".jpg" : ".png";
-                    string tilePath = Path.Combine(levelDir, $"{c}_{r}{ext}");
+                    string tilePath = layout switch
+                    {
+                        VipsDzLayout.Dz =>
+                            Path.Combine(rootDir, k.ToString(), $"{c}_{r}{ext}"),
+                        VipsDzLayout.Zoomify =>
+                            Path.Combine(rootDir,
+                                $"TileGroup{zoomifyTileIndex / 256}",
+                                $"{k}-{c}-{r}{ext}"),
+                        VipsDzLayout.Google =>
+                            Path.Combine(rootDir, k.ToString(), c.ToString(), $"{r}{ext}"),
+                        _ => throw new ArgumentOutOfRangeException(nameof(layout)),
+                    };
+                    Directory.CreateDirectory(Path.GetDirectoryName(tilePath)!);
 
                     using var fs = File.Create(tilePath);
                     var writer = PipeWriter.Create(fs);
@@ -146,19 +184,43 @@ public static class VipsDzSaver
                         await VipsJpegSaver.SaveAsync(tile, writer, jpegQuality, cancellationToken);
                     else
                         await VipsPngSaver.SaveAsync(tile, writer, palette: null, cancellationToken);
+
+                    zoomifyTileIndex++;
+                    totalTiles++;
                 }
             }
         }
 
-        // .dzi XML descriptor. Schema is the canonical Microsoft Deep Zoom
-        // schema that OpenSeadragon and every other viewer recognises.
+        // Layout-specific descriptor.
         string ext2 = format == VipsDzTileFormat.Jpeg ? "jpg" : "png";
-        string dziXml =
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-            $"<Image TileSize=\"{tileSize}\" Overlap=\"{overlap}\" Format=\"{ext2}\" " +
-            "xmlns=\"http://schemas.microsoft.com/deepzoom/2008\">\n" +
-            $"  <Size Width=\"{W}\" Height=\"{H}\"/>\n" +
-            "</Image>\n";
-        await File.WriteAllTextAsync(basePath + ".dzi", dziXml, cancellationToken);
+        switch (layout)
+        {
+            case VipsDzLayout.Dz:
+                string dziXml =
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                    $"<Image TileSize=\"{tileSize}\" Overlap=\"{overlap}\" Format=\"{ext2}\" " +
+                    "xmlns=\"http://schemas.microsoft.com/deepzoom/2008\">\n" +
+                    $"  <Size Width=\"{W}\" Height=\"{H}\"/>\n" +
+                    "</Image>\n";
+                await File.WriteAllTextAsync(basePath + ".dzi", dziXml, cancellationToken);
+                break;
+
+            case VipsDzLayout.Zoomify:
+                // Zoomify ImageProperties.xml. Schema is fixed; viewers
+                // (Zoomify, OpenSeadragon-with-Zoomify-plugin) parse this
+                // exact attribute list.
+                string zoomifyXml =
+                    $"<IMAGE_PROPERTIES WIDTH=\"{W}\" HEIGHT=\"{H}\" " +
+                    $"NUMTILES=\"{totalTiles}\" NUMIMAGES=\"1\" VERSION=\"1.8\" " +
+                    $"TILESIZE=\"{tileSize}\"/>\n";
+                await File.WriteAllTextAsync(
+                    Path.Combine(rootDir, "ImageProperties.xml"), zoomifyXml, cancellationToken);
+                break;
+
+            case VipsDzLayout.Google:
+                // Google Maps tiles have no descriptor — viewers wire up
+                // tile dims and zoom limits in their config.
+                break;
+        }
     }
 }

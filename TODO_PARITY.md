@@ -414,7 +414,14 @@ Holes inside formats we already handle, that would close edge cases.
   10 (RLE RGB), 3/11 (greyscale), depths 8/15/16/24/32. Round 179
   added explicit hand-crafted regression tests for the paletted +
   16bpp paths.
-- [ ] **dzsave**: Zoomify, IIIF, Google layouts (we ship DZI only).
+- [x] ~~**dzsave**: Zoomify, Google layouts~~ (round 181) —
+  `VipsDzLayout` enum on `VipsDzSaver`. Zoomify emits
+  `TileGroup{N}/{level}-{col}-{row}.{ext}` with cumulative
+  256-tile-per-group numbering plus an `ImageProperties.xml`
+  descriptor. Google emits flat `{level}/{col}/{row}.{ext}` with no
+  descriptor. DZ stays the default. IIIF still deferred — its
+  region-addressed URL scheme is fundamentally different from
+  fixed-tile-grid layouts.
 - [ ] **APNG**: all-frames-animated variant (we ship single + simple
   multi-frame).
 - [ ] **Animated AVIF/HEIC save** — gated on Magick.NET-Q8 HEIC
