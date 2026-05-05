@@ -174,7 +174,13 @@ Each lands in a single PR.
   warp; coefficients = [a0..a5, b0..b5].
 - [x] ~~`similarity`~~ (round 42) — uniform scale + rotate + translate;
   thin wrapper over `Affine`.
-- [ ] Edge-preserving interpolators: `nohalo`, `lbb`, `vsqbs`.
+- [x] ~~`lbb` (Locally Bounded Bicubic)~~ (round 188) — same 4×4
+  Catmull-Rom kernel as `Cubic`, but the per-pixel weighted sum is
+  clamped per band to the min/max of the inner 2×2 pixels nearest
+  the sample point. Eliminates Catmull-Rom overshoot halos around
+  sharp edges with no extra sample cost. Wired into `VipsAffine`
+  via the existing kernel framework.
+- [ ] `nohalo`, `vsqbs` — remaining edge-preserving interpolators.
 
 ### `draw/`
 - [x] ~~`draw_circle`~~ (round 43) — Bresenham outline or span-fill.

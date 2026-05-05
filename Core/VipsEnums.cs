@@ -169,7 +169,15 @@ public enum VipsKernel
     Hermite = 7,         // Cubic Hermite spline, support 1
     BicubicSharper = 8,  // BC family with B=0, C=1 — sharpens
     BicubicSmoother = 9, // BC family with B=1.5, C=-0.25 — softer than Mitchell
-    Last = 10
+    /// <summary>
+    /// Locally Bounded Bicubic. Same 4×4 Catmull-Rom weights as
+    /// <see cref="Cubic"/>, but the weighted sum is clamped per band
+    /// to the min/max of the inner 2×2 pixels nearest the sample
+    /// point. Eliminates the overshoot halos that plain Catmull-Rom
+    /// shows around sharp edges, at no extra sample cost.
+    /// </summary>
+    Lbb = 10,
+    Last = 11
 }
 
 

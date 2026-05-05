@@ -151,6 +151,16 @@ public class VipsAffine : VipsOperation
                 }
                 double normalizer = 1.0 / (wxSum * wySum);
 
+                // LBB local-clamp anchors: the inner 2×2 pixels nearest
+                // (srcX, srcY). For Catmull-Rom (support 2) the inner
+                // pixels live at xStart+1, xStart+2 (and similarly y).
+                int innerX0 = 0, innerY0 = 0;
+                if (kernel == VipsKernel.Lbb)
+                {
+                    innerX0 = Math.Clamp((int)Math.Floor(srcX), 0, W - 1);
+                    innerY0 = Math.Clamp((int)Math.Floor(srcY), 0, H - 1);
+                }
+
                 for (int bnd = 0; bnd < bands; bnd++)
                 {
                     double sum = 0;
@@ -163,7 +173,23 @@ public class VipsAffine : VipsOperation
                             sum += inRegion.GetAddress(ix, iy)[bnd] * wx[sx] * wy[sy];
                         }
                     }
-                    outLine[x * pelSize + bnd] = (byte)Math.Clamp(sum * normalizer, 0, 255);
+                    double v = sum * normalizer;
+
+                    if (kernel == VipsKernel.Lbb)
+                    {
+                        // Bandwise min/max across the inner 2×2.
+                        int innerX1 = Math.Min(innerX0 + 1, W - 1);
+                        int innerY1 = Math.Min(innerY0 + 1, H - 1);
+                        byte p00 = inRegion.GetAddress(innerX0, innerY0)[bnd];
+                        byte p10 = inRegion.GetAddress(innerX1, innerY0)[bnd];
+                        byte p01 = inRegion.GetAddress(innerX0, innerY1)[bnd];
+                        byte p11 = inRegion.GetAddress(innerX1, innerY1)[bnd];
+                        byte lo = Math.Min(Math.Min(p00, p10), Math.Min(p01, p11));
+                        byte hi = Math.Max(Math.Max(p00, p10), Math.Max(p01, p11));
+                        v = Math.Clamp(v, lo, hi);
+                    }
+
+                    outLine[x * pelSize + bnd] = (byte)Math.Clamp(v, 0, 255);
                 }
             }
         }

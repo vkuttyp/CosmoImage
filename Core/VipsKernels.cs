@@ -25,6 +25,7 @@ internal static class VipsKernels
         VipsKernel.Hermite => 1,           // 2×2
         VipsKernel.BicubicSharper => 2,    // 4×4
         VipsKernel.BicubicSmoother => 2,   // 4×4
+        VipsKernel.Lbb => 2,               // 4×4 Catmull-Rom + post-clamp
         _ => 1
     };
 
@@ -45,6 +46,9 @@ internal static class VipsKernels
         VipsKernel.Hermite => Hermite(x),
         VipsKernel.BicubicSharper => MitchellNetravali(x, 0.0, 1.0),
         VipsKernel.BicubicSmoother => MitchellNetravali(x, 1.5, -0.25),
+        // LBB shares Catmull-Rom's separable weights; the local clamp
+        // happens in the resampler after the weighted sum, not here.
+        VipsKernel.Lbb => CatmullRom(x),
         _ => Triangle(x)
     };
 
