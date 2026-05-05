@@ -60,14 +60,18 @@ internal static class PureJpegDecoder
             {
                 case 0xC0: // SOF0 — baseline sequential
                     if (!ParseSof0(jpeg, segDataStart, segEnd, ctx)) return null;
+                    ctx.Progressive = false;
                     break;
-                case 0xC2: // SOF2 — progressive (unsupported here)
+                case 0xC2: // SOF2 — progressive
+                    if (!ParseSof0(jpeg, segDataStart, segEnd, ctx)) return null;
+                    ctx.Progressive = true;
+                    break;
                 case 0xC1: // SOF1 — extended sequential
                 case 0xC3: // SOF3 — lossless
                 case 0xC5: case 0xC6: case 0xC7:
                 case 0xC9: case 0xCA: case 0xCB:
                 case 0xCD: case 0xCE: case 0xCF:
-                    return null; // bail to JpegLibrary
+                    return null; // bail to JpegLibrary for these
                 case 0xC4: // DHT — Huffman tables
                     if (!ParseDht(jpeg, segDataStart, segEnd, ctx)) return null;
                     break;
@@ -82,7 +86,11 @@ internal static class PureJpegDecoder
                     if (!ParseSos(jpeg, segDataStart, segEnd, ctx)) return null;
                     p = segEnd;
                     if (!DecodeScan(jpeg, ref p, ctx)) return null;
-                    goto Done;
+                    // Progressive JPEGs have multiple SOS markers; loop
+                    // back so the outer marker scanner picks up the next
+                    // SOS / DHT / EOI starting at the position the bit
+                    // reader stopped at.
+                    continue;
                 default:
                     // Skip APPn / COM / DNL / unknown — metadata and
                     // out-of-scope optional segments.
@@ -91,7 +99,6 @@ internal static class PureJpegDecoder
             p = segEnd;
         }
 
-        Done:
         if (ctx.Width == 0 || ctx.Height == 0 || ctx.Components == null) return null;
         width = ctx.Width;
         height = ctx.Height;
@@ -111,11 +118,28 @@ internal static class PureJpegDecoder
         public HuffmanTable[] DcTables = new HuffmanTable[4];
         public HuffmanTable[] AcTables = new HuffmanTable[4];
         public int RestartInterval;
+        public bool Progressive;
+        // Allocated lazily on the first SOS so we don't pay if the
+        // file has no components yet (e.g., a stray SOS before SOF).
+        public bool BlocksAllocated;
 
-        // Per-component dequantized 8×8 blocks, in raster scan order
-        // (block-row × block-col), one entry per block. Filled during
-        // DecodeScan; consumed by AssembleOutput.
+        // Per-component quantized 8×8 blocks, in raster scan order
+        // (block-row × block-col), one entry per block. Coefficients
+        // are stored in zigzag-step order; AssembleOutput dequantizes
+        // and IDCTs them. Progressive scans accumulate into the same
+        // buffers across multiple SOS markers.
         public short[][] BlockData = new short[4][];
+
+        // Progressive scan parameters (set per SOS).
+        public int Ss;
+        public int Se;
+        public int Ah;
+        public int Al;
+        // Components participating in the current scan (indices into
+        // ctx.Components). For baseline this is always all components.
+        public int[] ScanComponents = Array.Empty<int>();
+        // EOB run state for progressive AC scans.
+        public int EobRun;
     }
 
     private sealed class Component
@@ -223,19 +247,43 @@ internal static class PureJpegDecoder
         if (ctx.Components == null) return false;
         if (end - p < 1) return false;
         int n = s[p++];
-        if (n != ctx.Components.Length) return false; // we don't do partial scans
+        // Progressive scans usually carry a subset of components (often
+        // 1); baseline always carries all. Both are valid.
+        if (n < 1 || n > ctx.Components.Length) return false;
         if (end - p < n * 2 + 3) return false;
+
+        var scanComps = new int[n];
         for (int i = 0; i < n; i++)
         {
             byte id = s[p++];
             byte tdta = s[p++];
-            var comp = FindComponent(ctx, id);
-            if (comp == null) return false;
-            comp.DcTableId = (byte)((tdta >> 4) & 0x0F);
-            comp.AcTableId = (byte)(tdta & 0x0F);
+            int compIdx = FindComponentIndex(ctx, id);
+            if (compIdx < 0) return false;
+            ctx.Components[compIdx].DcTableId = (byte)((tdta >> 4) & 0x0F);
+            ctx.Components[compIdx].AcTableId = (byte)(tdta & 0x0F);
+            scanComps[i] = compIdx;
         }
-        // Ss / Se / AhAl follow but are baseline-fixed (0, 63, 0).
+        ctx.ScanComponents = scanComps;
+
+        // Ss / Se / AhAl. Baseline always (0, 63, 0); progressive
+        // varies per scan and drives the dispatch in DecodeScan.
+        ctx.Ss = s[p++];
+        ctx.Se = s[p++];
+        byte ahAl = s[p++];
+        ctx.Ah = (ahAl >> 4) & 0x0F;
+        ctx.Al = ahAl & 0x0F;
+        // Reset EOB run at scan boundaries — progressive AC scans accumulate
+        // their own per-scan EOB run; not carried across SOS.
+        ctx.EobRun = 0;
         return true;
+    }
+
+    private static int FindComponentIndex(Context ctx, byte id)
+    {
+        if (ctx.Components == null) return -1;
+        for (int i = 0; i < ctx.Components.Length; i++)
+            if (ctx.Components[i].Id == id) return i;
+        return -1;
     }
 
     private static Component? FindComponent(Context ctx, byte id)
@@ -304,60 +352,308 @@ internal static class PureJpegDecoder
         int mcusAcross = (ctx.Width + mcuWidth - 1) / mcuWidth;
         int mcusDown = (ctx.Height + mcuHeight - 1) / mcuHeight;
 
-        // Per-component block-grid dims and storage.
-        for (int i = 0; i < ctx.Components.Length; i++)
+        // Allocate per-component block storage on the first scan.
+        // For progressive JPEGs, subsequent scans accumulate into the
+        // same buffers so all coefficients merge cleanly before the
+        // single end-of-decode IDCT pass.
+        if (!ctx.BlocksAllocated)
         {
-            var c = ctx.Components[i];
-            c.BlocksWide = mcusAcross * c.HSampling;
-            c.BlocksHigh = mcusDown * c.VSampling;
-            ctx.BlockData[i] = new short[c.BlocksWide * c.BlocksHigh * 64];
-            c.LastDc = 0;
+            for (int i = 0; i < ctx.Components.Length; i++)
+            {
+                var c = ctx.Components[i];
+                c.BlocksWide = mcusAcross * c.HSampling;
+                c.BlocksHigh = mcusDown * c.VSampling;
+                ctx.BlockData[i] = new short[c.BlocksWide * c.BlocksHigh * 64];
+            }
+            ctx.BlocksAllocated = true;
         }
+        // DC predictors reset at every scan boundary.
+        foreach (var c in ctx.Components) c.LastDc = 0;
+        ctx.EobRun = 0;
 
         var br = new BitReader(s, p);
-        int mcusDecoded = 0;
         int restartCounter = ctx.RestartInterval;
+        int mcusDecoded = 0;
 
-        for (int my = 0; my < mcusDown; my++)
+        // For progressive scans with a single component, the spec uses
+        // the component's own (H, V) sampling to walk blocks instead
+        // of the global MCU shape. (Multi-component progressive scans
+        // walk MCUs same as baseline.)
+        bool nonInterleaved = ctx.ScanComponents.Length == 1;
+
+        if (nonInterleaved)
         {
-            for (int mx = 0; mx < mcusAcross; mx++)
+            int ci = ctx.ScanComponents[0];
+            var comp = ctx.Components[ci];
+            int blocksAcross = comp.BlocksWide;
+            int blocksDown = comp.BlocksHigh;
+            for (int by = 0; by < blocksDown; by++)
             {
-                for (int ci = 0; ci < ctx.Components.Length; ci++)
+                for (int bx = 0; bx < blocksAcross; bx++)
                 {
-                    var comp = ctx.Components[ci];
-                    for (int by = 0; by < comp.VSampling; by++)
+                    int blockIdx = by * comp.BlocksWide + bx;
+                    if (!DecodeBlockDispatch(br, ctx, ci, comp, blockIdx)) return false;
+                    mcusDecoded++;
+                    if (ctx.RestartInterval > 0 && --restartCounter == 0
+                        && mcusDecoded < blocksAcross * blocksDown)
                     {
-                        for (int bx = 0; bx < comp.HSampling; bx++)
-                        {
-                            int blockX = mx * comp.HSampling + bx;
-                            int blockY = my * comp.VSampling + by;
-                            int blockIdx = blockY * comp.BlocksWide + blockX;
-                            var block = new short[64];
-                            if (!DecodeBlock(br, ctx, comp, block)) return false;
-                            // Dequantize in-place against the comp's quant table.
-                            var qt = ctx.QuantTables[comp.QuantTableId];
-                            if (qt == null) return false;
-                            for (int k = 0; k < 64; k++) block[k] = (short)(block[k] * qt[k]);
-                            // Store in zigzag-ordered slot; IDCT happens at output.
-                            Buffer.BlockCopy(block, 0, ctx.BlockData[ci], blockIdx * 64 * 2, 64 * 2);
-                        }
+                        br.ConsumeRestartMarker();
+                        foreach (var c in ctx.Components) c.LastDc = 0;
+                        ctx.EobRun = 0;
+                        restartCounter = ctx.RestartInterval;
                     }
                 }
-                mcusDecoded++;
-
-                // Restart marker handling. Decoder must consume RSTn and
-                // reset DC predictors + bit reader at every restart
-                // interval boundary.
-                if (ctx.RestartInterval > 0 && --restartCounter == 0
-                    && mcusDecoded < mcusAcross * mcusDown)
+            }
+        }
+        else
+        {
+            for (int my = 0; my < mcusDown; my++)
+            {
+                for (int mx = 0; mx < mcusAcross; mx++)
                 {
-                    br.ConsumeRestartMarker();
-                    foreach (var c in ctx.Components) c.LastDc = 0;
-                    restartCounter = ctx.RestartInterval;
+                    foreach (int ci in ctx.ScanComponents)
+                    {
+                        var comp = ctx.Components[ci];
+                        for (int by = 0; by < comp.VSampling; by++)
+                        {
+                            for (int bx = 0; bx < comp.HSampling; bx++)
+                            {
+                                int blockX = mx * comp.HSampling + bx;
+                                int blockY = my * comp.VSampling + by;
+                                int blockIdx = blockY * comp.BlocksWide + blockX;
+                                if (!DecodeBlockDispatch(br, ctx, ci, comp, blockIdx)) return false;
+                            }
+                        }
+                    }
+                    mcusDecoded++;
+
+                    if (ctx.RestartInterval > 0 && --restartCounter == 0
+                        && mcusDecoded < mcusAcross * mcusDown)
+                    {
+                        br.ConsumeRestartMarker();
+                        foreach (var c in ctx.Components) c.LastDc = 0;
+                        ctx.EobRun = 0;
+                        restartCounter = ctx.RestartInterval;
+                    }
                 }
             }
         }
         p = br.Position;
+        return true;
+    }
+
+    /// <summary>
+    /// Dispatch a single block decode based on the current scan type
+    /// (baseline vs the four progressive scan kinds). The block-data
+    /// slot is at <c>ctx.BlockData[ci][blockIdx * 64 ..]</c>.
+    /// </summary>
+    private static bool DecodeBlockDispatch(BitReader br, Context ctx, int ci, Component comp, int blockIdx)
+    {
+        var slot = ctx.BlockData[ci];
+        int slotOff = blockIdx * 64;
+
+        if (!ctx.Progressive)
+        {
+            // Baseline: full DC + AC scan in one pass. Decode into the
+            // slot directly in zigzag order; dequantization happens in
+            // AssembleOutput so baseline + progressive share the same
+            // post-decode pipeline.
+            var block = new short[64];
+            if (!DecodeBlock(br, ctx, comp, block)) return false;
+            Buffer.BlockCopy(block, 0, slot, slotOff * 2, 64 * 2);
+            return true;
+        }
+
+        // Progressive: dispatch by (Ss, Se, Ah, Al).
+        if (ctx.Ss == 0 && ctx.Se == 0)
+        {
+            // DC scan.
+            return ctx.Ah == 0
+                ? DecodeProgDcInitial(br, ctx, comp, slot, slotOff)
+                : DecodeProgDcRefine(br, slot, slotOff, ctx.Al);
+        }
+        // AC scan (single component per JPEG spec).
+        return ctx.Ah == 0
+            ? DecodeProgAcInitial(br, ctx, comp, slot, slotOff)
+            : DecodeProgAcRefine(br, ctx, comp, slot, slotOff);
+    }
+
+    /// <summary>
+    /// Progressive DC initial scan: read DC diff with Huffman,
+    /// shift left by Al ("point transform"), accumulate against
+    /// the component's running predictor.
+    /// </summary>
+    private static bool DecodeProgDcInitial(BitReader br, Context ctx, Component comp, short[] slot, int slotOff)
+    {
+        var dcTbl = ctx.DcTables[comp.DcTableId];
+        if (!dcTbl.Valid) return false;
+        int size = DecodeHuffmanSymbol(br, dcTbl);
+        if (size < 0) return false;
+        int diff = size == 0 ? 0 : br.ReceiveExtend(size);
+        comp.LastDc += diff;
+        slot[slotOff] = (short)(comp.LastDc << ctx.Al);
+        return true;
+    }
+
+    /// <summary>Progressive DC refinement: read 1 bit, OR into DC at bit position Al.</summary>
+    private static bool DecodeProgDcRefine(BitReader br, short[] slot, int slotOff, int al)
+    {
+        int bit = br.ReadBit();
+        if (bit < 0) return false;
+        if (bit != 0) slot[slotOff] |= (short)(1 << al);
+        return true;
+    }
+
+    /// <summary>
+    /// Progressive AC initial: zigzag walk over Ss..Se, RLE-encoded
+    /// AC coefficients with EOB-run extension (size=0, run=N → EOB
+    /// for N+1 blocks). Each new coefficient is shifted left by Al.
+    /// </summary>
+    private static bool DecodeProgAcInitial(BitReader br, Context ctx, Component comp, short[] slot, int slotOff)
+    {
+        var acTbl = ctx.AcTables[comp.AcTableId];
+        if (!acTbl.Valid) return false;
+
+        // EOB run: skip whole blocks, exit immediately.
+        if (ctx.EobRun > 0) { ctx.EobRun--; return true; }
+
+        int k = ctx.Ss;
+        while (k <= ctx.Se)
+        {
+            int rs = DecodeHuffmanSymbol(br, acTbl);
+            if (rs < 0) return false;
+            int run = (rs >> 4) & 0x0F;
+            int size = rs & 0x0F;
+            if (size == 0)
+            {
+                if (run < 15)
+                {
+                    // EOB run: skip 2^run + extra blocks. The extra
+                    // bits are unsigned magnitude (NOT sign-extended) —
+                    // ReceiveExtend would treat them as signed and
+                    // produce negative skip counts.
+                    int extra = 0;
+                    for (int i = 0; i < run; i++)
+                    {
+                        int bit = br.ReadBit();
+                        if (bit < 0) return false;
+                        extra = (extra << 1) | bit;
+                    }
+                    ctx.EobRun = (1 << run) - 1 + extra;
+                    break;
+                }
+                k += 16; // ZRL
+                continue;
+            }
+            k += run;
+            if (k > ctx.Se) return false;
+            int coef = br.ReceiveExtend(size);
+            // Coefficients are stored in zigzag-step order (slot[slotOff+k]),
+            // not row-major; this matches the baseline DecodeBlock convention
+            // and the IDCT path's inverse-zigzag.
+            slot[slotOff + k] = (short)(coef << ctx.Al);
+            k++;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Progressive AC refinement: refines existing non-zero coefficients
+    /// (read 1 correction bit each) and may create new ones from runs of
+    /// zeros. The most subtle of the four progressive scan types.
+    /// </summary>
+    private static bool DecodeProgAcRefine(BitReader br, Context ctx, Component comp, short[] slot, int slotOff)
+    {
+        var acTbl = ctx.AcTables[comp.AcTableId];
+        if (!acTbl.Valid) return false;
+        int p1 = 1 << ctx.Al;       // value of new coefficients
+        int m1 = -1 << ctx.Al;      // negative form
+
+        int k = ctx.Ss;
+        if (ctx.EobRun == 0)
+        {
+            while (k <= ctx.Se)
+            {
+                int rs = DecodeHuffmanSymbol(br, acTbl);
+                if (rs < 0) return false;
+                int run = (rs >> 4) & 0x0F;
+                int size = rs & 0x0F;
+                int newValue = 0;
+                if (size != 0)
+                {
+                    if (size != 1) return false; // refinement always reads one magnitude bit
+                    int signBit = br.ReadBit();
+                    if (signBit < 0) return false;
+                    newValue = signBit != 0 ? p1 : m1;
+                }
+                else
+                {
+                    if (run != 15)
+                    {
+                        int extra = 0;
+                        for (int i = 0; i < run; i++)
+                        {
+                            int bit = br.ReadBit();
+                            if (bit < 0) return false;
+                            extra = (extra << 1) | bit;
+                        }
+                        ctx.EobRun = (1 << run) - 1 + extra;
+                        break;
+                    }
+                    // ZRL: skip 16 zeros (with refinement applied to
+                    // any non-zero coefficients we pass over).
+                }
+
+                // Skip over `run` zero coefficients, refining any
+                // existing non-zero values along the way.
+                while (k <= ctx.Se)
+                {
+                    short cur = slot[slotOff + k];
+                    if (cur != 0)
+                    {
+                        int correctionBit = br.ReadBit();
+                        if (correctionBit < 0) return false;
+                        if (correctionBit != 0)
+                        {
+                            if ((cur & p1) == 0)
+                                slot[slotOff + k] = (short)(cur + (cur >= 0 ? p1 : m1));
+                        }
+                    }
+                    else if (run == 0)
+                    {
+                        if (newValue != 0) slot[slotOff + k] = (short)newValue;
+                        k++;
+                        goto NextSymbol;
+                    }
+                    else
+                    {
+                        run--;
+                    }
+                    k++;
+                }
+                NextSymbol: ;
+            }
+        }
+
+        // Apply per-coefficient refinement bits during EOB run.
+        if (ctx.EobRun > 0)
+        {
+            for (; k <= ctx.Se; k++)
+            {
+                short cur = slot[slotOff + k];
+                if (cur != 0)
+                {
+                    int correctionBit = br.ReadBit();
+                    if (correctionBit < 0) return false;
+                    if (correctionBit != 0)
+                    {
+                        if ((cur & p1) == 0)
+                            slot[slotOff + k] = (short)(cur + (cur >= 0 ? p1 : m1));
+                    }
+                }
+            }
+            ctx.EobRun--;
+        }
         return true;
     }
 
@@ -452,13 +748,22 @@ internal static class PureJpegDecoder
 
             // IDCT each 8×8 block and place into the component plane.
             var spatial = new double[64];
+            var qt = ctx.QuantTables[comp.QuantTableId];
+            if (qt == null) return null;
+            var dequant = new short[64];
             for (int by = 0; by < comp.BlocksHigh; by++)
             {
                 for (int bx = 0; bx < comp.BlocksWide; bx++)
                 {
                     int blockIdx = (by * comp.BlocksWide + bx) * 64;
-                    // Inverse zigzag + IDCT.
-                    InverseZigzagAndIdct(ctx.BlockData[ci], blockIdx, spatial);
+                    // Dequantize coefficient-by-coefficient (zigzag order)
+                    // then inverse-zigzag + IDCT. Doing dequant here lets
+                    // baseline + progressive share the same post-decode
+                    // pipeline — progressive coefficients accumulate
+                    // across multiple scans before this single pass.
+                    for (int k = 0; k < 64; k++)
+                        dequant[k] = (short)(ctx.BlockData[ci][blockIdx + k] * qt[k]);
+                    InverseZigzagAndIdct(dequant, 0, spatial);
                     int planeX = bx * 8;
                     int planeY = by * 8;
                     for (int y = 0; y < 8; y++)
