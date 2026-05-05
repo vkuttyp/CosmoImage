@@ -294,6 +294,9 @@ internal static class PureExrDecoder
         int? b = FindChannel(channels, "B");
         int? a = FindChannel(channels, "A");
         int? y = FindChannel(channels, "Y");
+        // RGB[A] is canonicalised to band order R,G,B[,A] — even when the
+        // file carries extra channels (Z, mask, etc.), pick just the colour
+        // channels for the output.
         if (r.HasValue && g.HasValue && b.HasValue)
         {
             if (a.HasValue) { outBands = 4; return new[] { r.Value, g.Value, b.Value, a.Value }; }
@@ -302,6 +305,18 @@ internal static class PureExrDecoder
         if (y.HasValue)
         {
             outBands = 1; return new[] { y.Value };
+        }
+        // Generic fallback for non-RGB / non-Y channel names — pass them
+        // through in the file's alphabetical order. Covers depth (Z),
+        // motion vectors (U/V), ID, mask, and arbitrary VFX channel
+        // names that previously fell back to Magick. Capped at 4 bands
+        // because the rest of the pipeline assumes 1..4 bands.
+        if (channels.Count >= 1 && channels.Count <= 4)
+        {
+            outBands = channels.Count;
+            var order = new int[channels.Count];
+            for (int i = 0; i < channels.Count; i++) order[i] = i;
+            return order;
         }
         return null;
     }
