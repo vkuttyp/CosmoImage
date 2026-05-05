@@ -314,10 +314,13 @@ project — corresponding to libvips' early scientific-imaging heritage.
   the libvips "custom write callback" target). Existing savers
   keep their PipeWriter signatures unchanged; callers using
   IVipsTarget bridge via <c>target.AsPipeWriter()</c>.
-- [ ] **Disc-backed sink** (`sinkdisc.c`). For images too big to
-  materialize in memory, libvips writes a temporary tiled file and
-  reads back per-tile. Closes the "what about a 50000×50000-pixel
-  WSI?" use case.
+- [x] ~~**Disc-backed sink**~~ (round 189) — `DiscBackedSink`
+  spills an image to a temp file in row-major order via
+  `OrderedStripSink`, then exposes a new VipsImage whose
+  GenerateFn reads back through `RandomAccess` (concurrent-safe).
+  IAsyncDisposable lifetime: file is deleted on dispose. Lets
+  pipelines free RAM for huge intermediates while keeping the
+  result usable as input to downstream ops.
 - [ ] **Op-tree reordering** (`reorder.c`). Memory-locality-aware
   ordering of pipeline stages.
 - [x] ~~**Profiling / gating**~~ (round 184) — `VipsProfiler` is a
