@@ -310,8 +310,13 @@ project — corresponding to libvips' early scientific-imaging heritage.
   WSI?" use case.
 - [ ] **Op-tree reordering** (`reorder.c`). Memory-locality-aware
   ordering of pipeline stages.
-- [ ] **Profiling / gating** (`gate.c`). Built-in op-tree profiler
-  for finding slow stages.
+- [x] ~~**Profiling / gating**~~ (round 184) — `VipsProfiler` is a
+  per-op-type runtime profiler wired into <c>VipsImageOps.Run</c>.
+  Off by default; toggle <c>Enabled</c> to accumulate
+  <c>(CallCount, TotalElapsed)</c> per <c>VipsOperation</c> type.
+  <c>Snapshot()</c> returns a defensive copy with derived
+  <c>TotalMilliseconds</c> / <c>AverageMilliseconds</c> for ranking
+  slow stages.
 - [x] ~~**LRU operation cache**~~ (round 177) — `VipsCache` now uses
   proper LRU (LinkedList + Dictionary) with cost-based eviction.
   Cost estimated as `W·H·SizeOfPel`; cap defaults to 256 MiB,

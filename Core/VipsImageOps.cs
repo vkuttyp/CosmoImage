@@ -35,8 +35,12 @@ public static partial class VipsImageOps
         var cached = VipsCache.Get(key);
         if (cached != null) return cached;
 
+        // Profiling scope: zero cost when disabled, single timer pair otherwise.
+        // Wraps Build + cache-add so we measure the full op-construction path.
+        using var _profile = VipsProfiler.Enter(op.GetType().Name);
+
         if (op.Build() != 0) throw new Exception($"Failed to build {op.GetType().Name}");
-        
+
         // Use reflection to get the 'Out' property value
         var result = (VipsImage)op.GetType().GetProperty("Out")!.GetValue(op)!;
         VipsCache.Add(key, result);
