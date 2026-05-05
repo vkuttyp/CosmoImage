@@ -151,12 +151,13 @@ public static class VipsNiftiLoader
         if (ReadInt(0) != HeaderSize) return null;
 
         int ndims = ReadShort(40);
-        if (ndims < 2 || ndims > 3) return null; // 2D and 3D only for first cut
+        if (ndims < 2 || ndims > 4) return null; // 2D / 3D / 4D supported
 
         int nx = ReadShort(42);
         int ny = ReadShort(44);
-        int nz = ndims == 3 ? ReadShort(46) : 1;
-        if (nx <= 0 || ny <= 0 || nz <= 0) return null;
+        int nz = ndims >= 3 ? ReadShort(46) : 1;
+        int nt = ndims >= 4 ? ReadShort(48) : 1;
+        if (nx <= 0 || ny <= 0 || nz <= 0 || nt <= 0) return null;
 
         short datatype = ReadShort(70);
         short bitpix = ReadShort(72);
@@ -183,8 +184,17 @@ public static class VipsNiftiLoader
         int bytesPerSample = bitpix / 8;
         if (bytesPerSample <= 0) return null;
 
-        int planes = nz;
-        if (planes > 4) return null; // multi-slice → too many bands; defer
+        // Output layout decision:
+        //  • 2D, or 3D with nz ≤ 4 and nt = 1 → keep the legacy
+        //    Z-as-bands layout. Most pathology / colour-merged
+        //    neuroimaging exports go through this path.
+        //  • 4D, or large-Z (nz > 4) → fall back to height-stacked
+        //    single-band layout (n-pages = nz·nt, page-height = ny).
+        //    Same convention used for animated GIF / multi-page TIFF;
+        //    downstream tools split the stack via metadata.
+        bool stackedLayout = ndims >= 4 || nz > 4;
+        int totalFrames = stackedLayout ? nz * nt : 1;
+        int planes = stackedLayout ? 1 : nz;
 
         bool needsTransform = sclSlope != 1f || sclInter != 0f;
         bool outFloat;
@@ -223,44 +233,68 @@ public static class VipsNiftiLoader
         };
         if (bytesPerSample != expectedBytesPerSampleByDt) return null;
 
-        long sampleCount = (long)nx * ny * planes;
+        // Total sample count covers all (z, t) frames regardless of layout.
+        long sampleCount = (long)nx * ny * nz * nt;
         long dataLen = sampleCount * bytesPerSample;
         if (dataOffset + dataLen > pixelData.Length) return null;
 
         int outBands = planes;
         int outBytesPerSample = outFloat ? 4 : 1;
-        var pixels = new byte[nx * ny * outBands * outBytesPerSample];
+        int outHeight = stackedLayout ? ny * totalFrames : ny;
+        var pixels = new byte[nx * outHeight * outBands * outBytesPerSample];
 
-        // Decode planar (NIfTI stores X fastest, then Y, then Z — i.e. each
-        // slice as a contiguous nx*ny block). VipsImage uses interleaved
-        // band order, so bands need to be transposed.
-        for (int p = 0; p < planes; p++)
+        // Decode. NIfTI stores X fastest, then Y, then Z, then T —
+        // each frame is a contiguous nx*ny block, frames in (Z, T)
+        // order. Legacy layout: per-frame interleaves into bands.
+        // Stacked layout: per-frame writes to a separate ny-row band
+        // in the output's vertical stack.
+        if (stackedLayout)
         {
-            long planeBase = (long)dataOffset + (long)p * nx * ny * bytesPerSample;
-            for (int y = 0; y < ny; y++)
+            for (int t = 0; t < nt; t++)
             {
-                for (int x = 0; x < nx; x++)
+                for (int z = 0; z < nz; z++)
                 {
-                    long srcOff = planeBase + ((long)y * nx + x) * bytesPerSample;
-                    double sample = datatype switch
+                    int frameIndex = t * nz + z;
+                    long frameSrcBase = (long)dataOffset + (long)frameIndex * nx * ny * bytesPerSample;
+                    int frameDstYBase = frameIndex * ny;
+                    for (int y = 0; y < ny; y++)
                     {
-                        2 => pixelData[srcOff],
-                        4 => ReadInt16At(pixelData, (int)srcOff, littleEndian),
-                        8 => ReadInt32At(pixelData, (int)srcOff, littleEndian),
-                        16 => ReadFloatAt(pixelData, (int)srcOff, littleEndian),
-                        64 => ReadDoubleAt(pixelData, (int)srcOff, littleEndian),
-                        256 => (sbyte)pixelData[srcOff],
-                        512 => ReadUInt16At(pixelData, (int)srcOff, littleEndian),
-                        768 => ReadUInt32At(pixelData, (int)srcOff, littleEndian),
-                        _ => 0,
-                    };
-                    if (needsTransform) sample = sample * sclSlope + sclInter;
+                        for (int x = 0; x < nx; x++)
+                        {
+                            long srcOff = frameSrcBase + ((long)y * nx + x) * bytesPerSample;
+                            double sample = ReadSampleAt(pixelData, srcOff, datatype, littleEndian);
+                            if (needsTransform) sample = sample * sclSlope + sclInter;
 
-                    int dstOff = (y * nx + x) * outBands * outBytesPerSample + p * outBytesPerSample;
-                    if (outFloat)
-                        BinaryPrimitives.WriteSingleLittleEndian(pixels.AsSpan(dstOff, 4), (float)sample);
-                    else
-                        pixels[dstOff] = (byte)Math.Clamp(sample, 0, 255);
+                            int dstOff = ((frameDstYBase + y) * nx + x) * outBytesPerSample;
+                            if (outFloat)
+                                BinaryPrimitives.WriteSingleLittleEndian(pixels.AsSpan(dstOff, 4), (float)sample);
+                            else
+                                pixels[dstOff] = (byte)Math.Clamp(sample, 0, 255);
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Legacy 3D-as-bands layout (nz ≤ 4, nt = 1).
+            for (int p = 0; p < planes; p++)
+            {
+                long planeBase = (long)dataOffset + (long)p * nx * ny * bytesPerSample;
+                for (int y = 0; y < ny; y++)
+                {
+                    for (int x = 0; x < nx; x++)
+                    {
+                        long srcOff = planeBase + ((long)y * nx + x) * bytesPerSample;
+                        double sample = ReadSampleAt(pixelData, srcOff, datatype, littleEndian);
+                        if (needsTransform) sample = sample * sclSlope + sclInter;
+
+                        int dstOff = (y * nx + x) * outBands * outBytesPerSample + p * outBytesPerSample;
+                        if (outFloat)
+                            BinaryPrimitives.WriteSingleLittleEndian(pixels.AsSpan(dstOff, 4), (float)sample);
+                        else
+                            pixels[dstOff] = (byte)Math.Clamp(sample, 0, 255);
+                    }
                 }
             }
         }
@@ -268,7 +302,7 @@ public static class VipsNiftiLoader
         var image = new VipsImage
         {
             Width = nx,
-            Height = ny,
+            Height = outHeight,
             Bands = outBands,
             BandFormat = outFloat ? VipsBandFormat.Float : VipsBandFormat.UChar,
             Interpretation = outBands == 1 ? VipsInterpretation.BW : VipsInterpretation.RGB,
@@ -284,6 +318,18 @@ public static class VipsNiftiLoader
         // them and downstream tools can inspect without re-parsing the file.
         image.Metadata["nifti:datatype"] = datatype.ToString();
         image.Metadata["nifti:dim"] = ndims.ToString();
+
+        // Stacked-layout images (4D or large-Z) carry the per-axis
+        // counts so consumers can split the height-stacked frames back
+        // into a (Z, T) grid. The animation-style n-pages / page-height
+        // keys mirror multi-page TIFF / animated GIF.
+        if (stackedLayout)
+        {
+            image.Metadata["nifti:dim3"] = nz.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["nifti:dim4"] = nt.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["n-pages"] = totalFrames.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            image.Metadata["page-height"] = ny.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
         if (sclSlope != 1f || sclInter != 0f)
         {
             image.Metadata["nifti:scl_slope"] = sclSlope.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -337,6 +383,25 @@ public static class VipsNiftiLoader
         => le
             ? BinaryPrimitives.ReadDoubleLittleEndian(bytes.AsSpan(offset, 8))
             : BinaryPrimitives.ReadDoubleBigEndian(bytes.AsSpan(offset, 8));
+
+    /// <summary>
+    /// Datatype-dispatched single-sample read. Centralises the per-type
+    /// branch so the legacy 3D-as-bands and the stacked 4D paths share
+    /// the same decode logic.
+    /// </summary>
+    private static double ReadSampleAt(byte[] pixelData, long srcOff, short datatype, bool le)
+        => datatype switch
+        {
+            2 => pixelData[srcOff],
+            4 => ReadInt16At(pixelData, (int)srcOff, le),
+            8 => ReadInt32At(pixelData, (int)srcOff, le),
+            16 => ReadFloatAt(pixelData, (int)srcOff, le),
+            64 => ReadDoubleAt(pixelData, (int)srcOff, le),
+            256 => (sbyte)pixelData[srcOff],
+            512 => ReadUInt16At(pixelData, (int)srcOff, le),
+            768 => ReadUInt32At(pixelData, (int)srcOff, le),
+            _ => 0,
+        };
 
     private static double ReadInt16At(byte[] bytes, int offset, bool le)
         => le
