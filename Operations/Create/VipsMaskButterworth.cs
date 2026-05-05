@@ -31,6 +31,10 @@ public class VipsMaskButterworth : VipsOperation
     public double RingWidth { get; set; } = 0.1;
     /// <summary>Filter order; higher = sharper cutoff. Practical range 1..10.</summary>
     public int Order { get; set; } = 2;
+    /// <summary>Band-mode peak X coordinate as fraction of <c>W/2</c> (signed).</summary>
+    public double FrequencyX { get; set; } = 0.0;
+    /// <summary>Band-mode peak Y coordinate as fraction of <c>H/2</c> (signed).</summary>
+    public double FrequencyY { get; set; } = 0.0;
 
     public override int Build()
     {
@@ -44,26 +48,29 @@ public class VipsMaskButterworth : VipsOperation
             Interpretation = VipsInterpretation.Fourier,
             XRes = 1, YRes = 1,
             GenerateFn = Generate,
-            ClientB = (Width, Height, Mode, FrequencyCutoff, RingWidth, Order),
+            ClientB = (Width, Height, Mode, FrequencyCutoff, RingWidth, Order, FrequencyX, FrequencyY),
         };
         Out.SetPipeline(VipsDemandStyle.Any);
         return 0;
     }
 
     public override int GetCacheKey()
-        => HashCode.Combine("MaskButterworth",
-            Width, Height, Mode, FrequencyCutoff, RingWidth, Order);
+        => HashCode.Combine(
+            HashCode.Combine("MaskButterworth", Width, Height, Mode),
+            FrequencyCutoff, RingWidth, Order, FrequencyX, FrequencyY);
 
     private static int Generate(VipsRegion outRegion, object? seq, object? a, object? b, ref bool stop)
     {
-        var (W, H, mode, fc, rw, order) =
-            ((int, int, VipsMaskMode, double, double, int))b!;
+        var (W, H, mode, fc, rw, order, fx, fy) =
+            ((int, int, VipsMaskMode, double, double, int, double, double))b!;
         VipsRect r = outRegion.Valid;
         double cx = W / 2.0, cy = H / 2.0;
         double half = Math.Min(W, H) / 2.0;
         double cutoff = Math.Max(1e-12, fc * half);
         double width = Math.Max(1e-12, rw * half);
         int twoN = 2 * order;
+        double peakX = fx * W / 2.0;
+        double peakY = fy * H / 2.0;
 
         for (int y = 0; y < r.Height; y++)
         {
@@ -84,12 +91,25 @@ public class VipsMaskButterworth : VipsOperation
                     case VipsMaskMode.Highpass:
                         v = (float)(1.0 - 1.0 / (1 + Math.Pow(d / cutoff, twoN)));
                         break;
-                    default: // Ring
-                        // Band-pass at cutoff with bandwidth `width`. Standard form.
-                        double r2 = cutoff * cutoff;
-                        double denom = d > 0 ? (d2 - r2) / (d * width) : double.PositiveInfinity;
-                        v = (float)(1.0 / (1 + Math.Pow(denom, twoN)));
-                        break;
+                    case VipsMaskMode.Ring:
+                        {
+                            // Band-pass at cutoff with bandwidth `width`. Standard form.
+                            double r2 = cutoff * cutoff;
+                            double denom = d > 0 ? (d2 - r2) / (d * width) : double.PositiveInfinity;
+                            v = (float)(1.0 / (1 + Math.Pow(denom, twoN)));
+                            break;
+                        }
+                    default: // Band — directional, two symmetric peaks
+                        {
+                            double d1x = dx - peakX, d1y = dy - peakY;
+                            double d2x = dx + peakX, d2y = dy + peakY;
+                            double d1 = Math.Sqrt(d1x * d1x + d1y * d1y);
+                            double d2b = Math.Sqrt(d2x * d2x + d2y * d2y);
+                            // Min-distance Butterworth: response peaks at either symmetric point.
+                            double dmin = Math.Min(d1, d2b);
+                            v = (float)(1.0 / (1 + Math.Pow(dmin / width, twoN)));
+                            break;
+                        }
                 }
                 BinaryPrimitives.WriteSingleLittleEndian(outAddr.Slice(x * 4, 4), v);
             }

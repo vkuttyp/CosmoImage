@@ -1423,6 +1423,19 @@ public static partial class VipsImageOps
             FrequencyCutoff = frequencyCutoff, RingWidth = ringWidth,
         });
 
+    /// <summary>
+    /// Gaussian directional band-pass — sum of two symmetric Gaussian peaks
+    /// at <c>(±frequencyX · width/2, ±frequencyY · height/2)</c>. Use for
+    /// orientation-selective frequency filtering (motion blur removal,
+    /// directional sharpening).
+    /// </summary>
+    public static VipsImage MaskGaussianBand(int width, int height,
+        double frequencyX, double frequencyY, double ringWidth = 0.1)
+        => Run(new VipsMaskGaussian {
+            Width = width, Height = height, Mode = VipsMaskMode.Band,
+            FrequencyX = frequencyX, FrequencyY = frequencyY, RingWidth = ringWidth,
+        });
+
     // From Operations/Create/VipsMaskButterworth.cs
     /// <summary>Butterworth-lowpass frequency mask.</summary>
     public static VipsImage MaskButterworthLowpass(int width, int height,
@@ -1446,6 +1459,33 @@ public static partial class VipsImageOps
         => Run(new VipsMaskButterworth {
             Width = width, Height = height, Mode = VipsMaskMode.Ring,
             FrequencyCutoff = frequencyCutoff, RingWidth = ringWidth, Order = order,
+        });
+
+    /// <summary>
+    /// Butterworth directional band-pass — peaks at the symmetric pair
+    /// <c>(±frequencyX · width/2, ±frequencyY · height/2)</c>. Min-distance
+    /// Butterworth response; <paramref name="order"/> controls the rolloff.
+    /// </summary>
+    public static VipsImage MaskButterworthBand(int width, int height,
+        double frequencyX, double frequencyY, double ringWidth = 0.1, int order = 2)
+        => Run(new VipsMaskButterworth {
+            Width = width, Height = height, Mode = VipsMaskMode.Band,
+            FrequencyX = frequencyX, FrequencyY = frequencyY,
+            RingWidth = ringWidth, Order = order,
+        });
+
+    /// <summary>
+    /// Ideal directional band-pass — two unit-disc peaks at
+    /// <c>(±frequencyX · width/2, ±frequencyY · height/2)</c>. Sharp edges
+    /// induce spatial-domain ringing; for practical filtering use the
+    /// Gaussian or Butterworth Band variants instead.
+    /// </summary>
+    public static VipsImage MaskIdealBand(int width, int height,
+        double frequencyX, double frequencyY, double ringWidth = 0.1, bool reject = false)
+        => Run(new VipsMaskIdealBand {
+            Width = width, Height = height,
+            FrequencyX = frequencyX, FrequencyY = frequencyY,
+            RingWidth = ringWidth, Reject = reject,
         });
 
     // From Operations/Create/VipsMaskFractal.cs

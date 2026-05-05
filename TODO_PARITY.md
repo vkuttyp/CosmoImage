@@ -249,7 +249,11 @@ generator that produces an image from parameters.
   `Gaussnoise` + `Freqmult` for spectral fractal-noise synthesis.
 - [x] ~~`fractsurf`~~ (round 40) — sum of Perlin octaves at successive
   frequencies; configurable fractal dimension.
-- [ ] `mask_*_band` (directional band-pass variants).
+- [x] ~~`mask_*_band`~~ (round 172) — directional band-pass variants
+  for Gaussian / Butterworth / Ideal mask families. Two symmetric peaks
+  at <c>(±frequencyX·W/2, ±frequencyY·H/2)</c> preserve real-FFT
+  conjugate symmetry; pair with `Freqmult` for orientation-selective
+  filtering.
 - [x] ~~`sines`~~ (round 38) — Float sinusoid pattern; frequencies in
   cycles per image.
 - [x] ~~`perlin`~~ (round 39) — Perlin 2002 fade curve;
