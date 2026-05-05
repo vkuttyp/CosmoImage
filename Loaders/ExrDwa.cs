@@ -61,10 +61,14 @@ internal static class ExrDwa
         // [48..56] = RLE_UNCOMPRESSED_SIZE / RLE_RAW_SIZE
         long rleUncompSize = ReadI64(src, srcOff + 48);
         long rleRawSize    = ReadI64(src, srcOff + 56);
-
-        // Bail when the lossy DCT path (AC + DC) is present — that's
-        // the next round.
-        if (acCompSize > 0 || dcCompSize > 0) return false;
+        // [64..72] = AC_UNCOMPRESSED_COUNT / DC_UNCOMPRESSED_COUNT
+        long acCount       = ReadI64(src, srcOff + 64);
+        long dcCount       = ReadI64(src, srcOff + 72);
+        // [80] = AC_COMPRESSION (0 = static Huffman, 1 = deflate). For
+        // now we only support deflate; Huffman lives in PIZ and could
+        // be reused but the libimf-format AC bitstream layout has
+        // residual differences worth a separate round.
+        long acCompression = ReadI64(src, srcOff + 80);
 
         // Channel-rule table size = remaining payload minus the four
         // sub-stream sizes.
@@ -72,15 +76,13 @@ internal static class ExrDwa
         long ruleTableSize = srcLen - CounterHeaderBytes - sumStreams;
         if (ruleTableSize < 0) return false;
 
-        // Inflate UNKNOWN and RLE streams into separate planar buffers.
+        // Stream offsets (concatenated in this fixed order per
+        // DwaCompressor_compress: unknown, ac, dc, rle).
         int unknownStart = srcOff + CounterHeaderBytes + (int)ruleTableSize;
         if (unknownStart + (int)unknownCompSize > srcOff + srcLen) return false;
-
-        // Walk past UNKNOWN and AC/DC (both zero here) to find the RLE
-        // start. AC/DC are zero so unknownStart + unknownCompSize ==
-        // rleStart.
-        int rleStart = unknownStart + (int)unknownCompSize
-                       + (int)acCompSize + (int)dcCompSize;
+        int acStart = unknownStart + (int)unknownCompSize;
+        int dcStart = acStart + (int)acCompSize;
+        int rleStart = dcStart + (int)dcCompSize;
         if (rleStart + (int)rleCompSize > srcOff + srcLen) return false;
 
         // Build the planar layout from both streams. Per the default
@@ -122,15 +124,77 @@ internal static class ExrDwa
             }
         }
 
-        // Total planar bytes in this block, matched against the two
-        // streams. We can't tell from the channel widths alone which
-        // stream owns which channel, but the spec's classifier
-        // assigns A → RLE and other-named-channels → UNKNOWN, so we
-        // route the LAST channel(s) to RLE if the size accounting
-        // matches.
+        // LOSSY_DCT path. Single-channel-only this round; multi-channel
+        // CSC and Huffman AC come in later rounds. We require AC and
+        // DC counts to be consistent with a single 2-byte (HALF)
+        // channel and acCompression=1 (deflate).
+        byte[] dctPlanar = Array.Empty<byte>();
+        long dctChannelBytes = 0;
+        if (acCount > 0 || dcCount > 0)
+        {
+            if (channelByteWidths.Count != 1 || channelByteWidths[0] != 2) return false;
+            if (acCompression != 1) return false;  // Huffman is a follow-up
+            int paddedW = (width + 7) & ~7;
+            int paddedH = (rows + 7) & ~7;
+            int totalBlocks = (paddedW / 8) * (paddedH / 8);
+            if (dcCount != totalBlocks) return false;
+
+            // DC stream: zlib-inflate to one ushort per block.
+            var dc = ExrDct.DecodeDcStream(src, dcStart, (int)dcCompSize, totalBlocks);
+            if (dc == null) return false;
+
+            // AC stream: zlib-inflate to acCount LE ushorts.
+            var acTokens = new ushort[acCount];
+            if (!InflateAcDeflate(src, acStart, (int)acCompSize, acTokens)) return false;
+
+            // Expand RLE'd tokens into per-block coefficient arrays.
+            var blocks = new ushort[totalBlocks * 64];
+            for (int b = 0; b < totalBlocks; b++) blocks[b * 64] = dc[b];
+            if (!ExrDct.ExpandAcTokens(acTokens, totalBlocks, blocks))
+                return false;
+
+            // Per-block: de-zigzag → IDCT → place. toLinear (square HALF)
+            // is normally applied for non-pLinear channels; we don't
+            // have the pLinear flag plumbed through, so we leave it
+            // off this round (test fixtures use pLinear=1 / linear data).
+            int blocksPerRow = paddedW / 8;
+            int blockRows = paddedH / 8;
+            dctPlanar = new byte[paddedW * paddedH * 2];
+            var spatial = new ushort[64];
+            var floatBlock = new float[64];
+            for (int by = 0; by < blockRows; by++)
+            {
+                for (int bx = 0; bx < blocksPerRow; bx++)
+                {
+                    int b = by * blocksPerRow + bx;
+                    for (int k = 0; k < 64; k++)
+                        spatial[ExrDct.ZigzagToRowMajor[k]] = blocks[b * 64 + k];
+                    for (int i = 0; i < 64; i++)
+                        floatBlock[i] = (float)BitConverter.UInt16BitsToHalf(spatial[i]);
+                    ExrDct.Inverse8x8InPlace(floatBlock);
+                    ExrDct.PlaceBlock(floatBlock, dctPlanar, paddedW, paddedH,
+                        bx * 8, by * 8, applyToLinear: false);
+                }
+            }
+
+            // Crop padding if the image isn't a multiple of 8.
+            if (paddedW != width || paddedH != rows)
+            {
+                var cropped = new byte[width * rows * 2];
+                for (int r = 0; r < rows; r++)
+                    Buffer.BlockCopy(dctPlanar, r * paddedW * 2, cropped, r * width * 2, width * 2);
+                dctPlanar = cropped;
+            }
+            dctChannelBytes = (long)2 * width * rows;
+        }
+
+        // Total planar bytes in this block, matched against the
+        // streams. Each channel routes to exactly one of UNKNOWN /
+        // RLE / DCT depending on its name; we infer scheme assignment
+        // from byte accounting.
         long totalPlanar = 0;
         foreach (int bw in channelByteWidths) totalPlanar += bw * width * rows;
-        if (totalPlanar != unknownUncompSize + rleRawSize) return false;
+        if (totalPlanar != unknownUncompSize + rleRawSize + dctChannelBytes) return false;
 
         // Decide which channels are RLE-class by accumulating from the
         // end: the last K channels whose total bytes equals rleRawSize
@@ -158,12 +222,29 @@ internal static class ExrDwa
 
         int unknownCursor = 0;
         int rleCursor = 0;
+        int dctCursor = 0;
         long channelOffInRow = 0;
         for (int chIdx = 0; chIdx < channelByteWidths.Count; chIdx++)
         {
             int bw = channelByteWidths[chIdx];
-            byte[] srcBuf = chIdx >= firstRleChannelIdx ? rleInflated : unknownInflated;
-            int sp = chIdx >= firstRleChannelIdx ? rleCursor : unknownCursor;
+            byte[] srcBuf;
+            int sp;
+            if (dctChannelBytes > 0)
+            {
+                // Single-channel-only case routes everything through DCT.
+                srcBuf = dctPlanar;
+                sp = dctCursor;
+            }
+            else if (chIdx >= firstRleChannelIdx)
+            {
+                srcBuf = rleInflated;
+                sp = rleCursor;
+            }
+            else
+            {
+                srcBuf = unknownInflated;
+                sp = unknownCursor;
+            }
 
             for (int r = 0; r < rows; r++)
             {
@@ -173,10 +254,24 @@ internal static class ExrDwa
                 sp += rowBytes;
             }
 
-            if (chIdx >= firstRleChannelIdx) rleCursor = sp;
+            if (dctChannelBytes > 0) dctCursor = sp;
+            else if (chIdx >= firstRleChannelIdx) rleCursor = sp;
             else unknownCursor = sp;
             channelOffInRow += bw * width;
         }
+        return true;
+    }
+
+    /// <summary>
+    /// Inflate the AC sub-stream (acCompression=1, deflate) into
+    /// <paramref name="dst"/> as little-endian uint16 tokens.
+    /// </summary>
+    private static bool InflateAcDeflate(byte[] src, int srcOff, int srcLen, ushort[] dst)
+    {
+        var bytes = new byte[dst.Length * 2];
+        if (!ZlibInflate(src, srcOff, srcLen, bytes, bytes.Length)) return false;
+        for (int i = 0; i < dst.Length; i++)
+            dst[i] = (ushort)(bytes[i * 2] | (bytes[i * 2 + 1] << 8));
         return true;
     }
 

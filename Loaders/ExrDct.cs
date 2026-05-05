@@ -247,4 +247,14 @@ internal static class ExrDct
         58, 59, 52, 45, 38, 31, 39, 46,
         53, 60, 61, 54, 47, 55, 62, 63,
     };
+
+    /// <summary>Inverse of <see cref="ZigzagToRowMajor"/>: row-major flat index → zigzag position.</summary>
+    internal static readonly int[] ZigzagFromRowMajor = BuildInverseZigzag();
+
+    private static int[] BuildInverseZigzag()
+    {
+        var inv = new int[64];
+        for (int k = 0; k < 64; k++) inv[ZigzagToRowMajor[k]] = k;
+        return inv;
+    }
 }
