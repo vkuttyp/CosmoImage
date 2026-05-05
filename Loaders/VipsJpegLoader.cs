@@ -1,7 +1,6 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using JpegLibrary;
@@ -192,8 +191,8 @@ public static class VipsJpegLoader
         };
 
         // Capture raw EXIF/XMP segments for lossless round-trip through save.
-        // We scan markers ourselves rather than going through MetadataExtractor
-        // because we need the untouched payload bytes, not parsed tag values.
+        // We scan markers ourselves because we need the untouched payload
+        // bytes, not parsed tag values.
         var exifBlob = ExtractApp1Segment(jpegBytes, ExifIdentifier);
         if (exifBlob != null) image.MetadataBlobs["exif"] = exifBlob;
         var xmpBlob = ExtractApp1Segment(jpegBytes, XmpIdentifier);
@@ -201,38 +200,7 @@ public static class VipsJpegLoader
         var iccBlob = ExtractIccProfile(jpegBytes);
         if (iccBlob != null) image.MetadataBlobs["icc"] = iccBlob;
 
-        try
-        {
-            var directories = MetadataExtractor.ImageMetadataReader.ReadMetadata(new MemoryStream(jpegBytes));
-            foreach (var directory in directories)
-            {
-                foreach (var tag in directory.Tags)
-                {
-                    image.Metadata[$"{directory.Name}:{tag.Name}"] = tag.Description ?? "";
-                }
-            }
-
-            // Extract EXIF orientation as a raw int for AutoOrient. The
-            // description-keyed copy above is human-readable text whose wording
-            // varies between MetadataExtractor versions, so we surface the int
-            // separately under the canonical "orientation" key.
-            var ifd0 = directories
-                .OfType<MetadataExtractor.Formats.Exif.ExifIfd0Directory>()
-                .FirstOrDefault();
-            if (ifd0 != null)
-            {
-                var raw = ifd0.GetObject(MetadataExtractor.Formats.Exif.ExifDirectoryBase.TagOrientation);
-                if (raw != null)
-                {
-                    try
-                    {
-                        image.Metadata["orientation"] = Convert.ToInt32(raw).ToString();
-                    }
-                    catch { /* tag exists but isn't numeric */ }
-                }
-            }
-        }
-        catch { /* Ignore metadata errors */ }
+        SurfaceExifTags(exifBlob, image);
 
         return image;
     }
@@ -305,32 +273,49 @@ public static class VipsJpegLoader
         var iccBlob = ExtractIccProfile(jpegBytes);
         if (iccBlob != null) image.MetadataBlobs["icc"] = iccBlob;
 
-        try
-        {
-            var directories = MetadataExtractor.ImageMetadataReader.ReadMetadata(new MemoryStream(jpegBytes));
-            foreach (var directory in directories)
-            {
-                foreach (var tag in directory.Tags)
-                {
-                    image.Metadata[$"{directory.Name}:{tag.Name}"] = tag.Description ?? "";
-                }
-            }
-            var ifd0 = directories
-                .OfType<MetadataExtractor.Formats.Exif.ExifIfd0Directory>()
-                .FirstOrDefault();
-            if (ifd0 != null)
-            {
-                var raw = ifd0.GetObject(MetadataExtractor.Formats.Exif.ExifDirectoryBase.TagOrientation);
-                if (raw != null)
-                {
-                    try { image.Metadata["orientation"] = Convert.ToInt32(raw).ToString(); }
-                    catch { }
-                }
-            }
-        }
-        catch { }
+        SurfaceExifTags(exifBlob, image);
 
         return image;
+    }
+
+    /// <summary>
+    /// Parse the EXIF blob via <see cref="VipsExifProfile"/> and surface
+    /// each tag under <c>image.Metadata["exif:{TagName}"]</c>. Also lifts
+    /// <see cref="VipsExifTag.Orientation"/> into the canonical
+    /// <c>"orientation"</c> key consumed by <c>AutoOrient</c>.
+    /// </summary>
+    private static void SurfaceExifTags(byte[]? exifBlob, VipsImage image)
+    {
+        var profile = CosmoImage.Operations.Metadata.VipsExifProfile.TryParse(exifBlob);
+        if (profile == null) return;
+
+        foreach (var tag in profile.Tags)
+        {
+            var raw = profile.GetRaw(tag);
+            image.Metadata[$"exif:{tag}"] = FormatExifValue(raw);
+        }
+        foreach (var gps in profile.GpsTags)
+        {
+            var raw = profile.GetGpsRaw(gps);
+            image.Metadata[$"exif:GPS{gps}"] = FormatExifValue(raw);
+        }
+
+        var orientation = profile.GetValue<int>(CosmoImage.Operations.Metadata.VipsExifTag.Orientation);
+        if (orientation >= 1 && orientation <= 8)
+            image.Metadata["orientation"] = orientation.ToString();
+    }
+
+    private static string FormatExifValue(object? value)
+    {
+        if (value == null) return "";
+        if (value is string s) return s;
+        if (value is Array arr)
+        {
+            var parts = new string[arr.Length];
+            for (int i = 0; i < arr.Length; i++) parts[i] = arr.GetValue(i)?.ToString() ?? "";
+            return string.Join(" ", parts);
+        }
+        return value.ToString() ?? "";
     }
 
     /// <summary>
