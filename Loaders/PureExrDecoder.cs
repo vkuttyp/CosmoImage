@@ -587,14 +587,17 @@ internal static class PureExrDecoder
         }
         if (compression == 8 || compression == 9)
         {
-            // DWAA / DWAB: handles only the UNKNOWN-channel path so
-            // far (non-RGB / non-Y / non-A names like Z, mask, ID,
-            // etc.). Returns false for files containing LOSSY_DCT or
-            // RLE channels, falling back to Magick.
+            // DWAA / DWAB: handles UNKNOWN, RLE, and single-channel
+            // LOSSY_DCT paths. Multi-channel CSC and complex routing
+            // need the channel-rule table parsing (a future round).
             var dwaWidths = new int[channels.Count];
+            var dwaPLinear = new bool[channels.Count];
             for (int i = 0; i < channels.Count; i++)
+            {
                 dwaWidths[i] = BytesPerChannelSample(channels[i].PixelType);
-            return ExrDwa.Decompress(src, srcOff, srcLen, dst, rows, dwaWidths, width);
+                dwaPLinear[i] = channels[i].PLinear != 0;
+            }
+            return ExrDwa.Decompress(src, srcOff, srcLen, dst, rows, dwaWidths, width, dwaPLinear);
         }
 
         var scratch = new byte[expected];

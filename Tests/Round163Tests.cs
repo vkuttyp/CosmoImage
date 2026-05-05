@@ -8,47 +8,61 @@ using Xunit;
 namespace CosmoImage.Tests;
 
 /// <summary>
-/// Round 162 — DWA AC Huffman path (acCompression=0). Round 161
-/// validated the deflate path; libimf's encoder defaults to static
-/// Huffman, so this round wires that in. Same canonical Huffman as
-/// PIZ; we reuse ExrPiz.HuffmanEncode + PackEncTable in the test
-/// encoder and ExrPiz.HuffmanDecode + UnpackEncTable in the
-/// production decoder.
+/// Round 163 — DWA toLinear LUT plumbing. The pLinear flag now flows
+/// from the channel header through PureExrDecoder into ExrDwa, so
+/// LOSSY_DCT channels with pLinear=0 (libimf default for colour
+/// channels) get the toLinear pass: square the HALF after IDCT,
+/// undoing the perceptual sqrt the encoder applies.
+///
+/// <para>Validation against libimf-encoded fixtures is deferred —
+/// libimf's VERSION≥1 AC token stream uses an end-of-block marker
+/// that ExpandAcTokens doesn't yet recognise. That's a follow-up
+/// round.</para>
 /// </summary>
-public class Round162Tests
+public class Round163Tests
 {
     [Fact]
-    public void DctRoundTrip_8x8_HuffmanAc_ReconstructsWithinPrecision()
+    public void DctRoundTrip_PLinearZero_AppliesToLinear()
     {
-        // Same input shape as Round 161, but the AC stream is encoded
-        // with the static-Huffman path that libimf actually uses.
-        ushort[] inputHalves = new ushort[64];
+        // Encode an 8×8 block of HALF values where the encoder
+        // pre-applies sqrt (the perceptual encoding libimf does for
+        // pLinear=0 channels). The decoder's toLinear pass should
+        // square the result, recovering the original linear values.
+        ushort[] linearHalves = new ushort[64];
         for (int i = 0; i < 64; i++)
         {
-            float v = 0.1f * (i + 1);
-            inputHalves[i] = BitConverter.HalfToUInt16Bits((Half)v);
+            float v = 0.04f * (i + 1);  // 0.04 .. 2.56, all comfortably HALF
+            linearHalves[i] = BitConverter.HalfToUInt16Bits((Half)v);
         }
 
-        var exr = BuildSingleBlockDwaaExr(inputHalves);
-        var img = PureExrDecoder.TryDecode(exr);
-        Assert.NotNull(img);
-        Assert.Equal(8, img!.Width);
-        Assert.Equal(8, img.Height);
-
-        var pix = img.PixelsLazy!.Value;
-        var got = new float[pix.Length / 4];
-        Buffer.BlockCopy(pix, 0, got, 0, pix.Length);
+        // Pre-apply sqrt to mimic the encoder's perceptual pass.
+        ushort[] perceptualHalves = new ushort[64];
         for (int i = 0; i < 64; i++)
         {
-            float expected = (float)BitConverter.UInt16BitsToHalf(inputHalves[i]);
-            Assert.True(Math.Abs(got[i] - expected) < 0.01f,
+            float v = (float)BitConverter.UInt16BitsToHalf(linearHalves[i]);
+            perceptualHalves[i] = BitConverter.HalfToUInt16Bits((Half)Math.Sqrt(v));
+        }
+
+        var exr = BuildSingleBlockDwaaExr(perceptualHalves, pLinear: 0);
+        var img = PureExrDecoder.TryDecode(exr);
+        Assert.NotNull(img);
+
+        var pix = img!.PixelsLazy!.Value;
+        var got = new float[pix.Length / 4];
+        Buffer.BlockCopy(pix, 0, got, 0, pix.Length);
+
+        // The decoder squares the post-IDCT HALFs, so output ≈ input
+        // linear values (within DCT round-trip + sqrt-then-square noise).
+        for (int i = 0; i < 64; i++)
+        {
+            float expected = (float)BitConverter.UInt16BitsToHalf(linearHalves[i]);
+            Assert.True(Math.Abs(got[i] - expected) < 0.05f,
                 $"sample {i}: expected {expected}, got {got[i]}");
         }
     }
 
-    private static byte[] BuildSingleBlockDwaaExr(ushort[] inputHalves)
+    private static byte[] BuildSingleBlockDwaaExr(ushort[] inputHalves, byte pLinear)
     {
-        // Forward DCT.
         var floatBlock = new float[64];
         for (int i = 0; i < 64; i++)
             floatBlock[i] = (float)BitConverter.UInt16BitsToHalf(inputHalves[i]);
@@ -58,39 +72,41 @@ public class Round162Tests
         for (int i = 0; i < 64; i++)
             freqHalves[i] = BitConverter.HalfToUInt16Bits((Half)floatBlock[i]);
 
-        // DC stream.
         ushort dcValue = freqHalves[0];
         var dcRaw = new byte[] { (byte)dcValue, (byte)(dcValue >> 8) };
         var dcCompressed = ZlibWrap(dcRaw);
 
-        // AC stream — Huffman encoded this round.
         var acTokens = ZigzagAndRle(freqHalves);
-        var acHuffman = HuffmanEncodeAc(acTokens);
+        var acRaw = new byte[acTokens.Length * 2];
+        for (int i = 0; i < acTokens.Length; i++)
+        {
+            acRaw[i * 2]     = (byte)acTokens[i];
+            acRaw[i * 2 + 1] = (byte)(acTokens[i] >> 8);
+        }
+        var acCompressed = ZlibWrap(acRaw);
 
-        // DWA chunk header + streams.
         var dwaPayload = new MemoryStream();
+        WriteU64(dwaPayload, 0);  // VERSION
         WriteU64(dwaPayload, 0);
         WriteU64(dwaPayload, 0);
-        WriteU64(dwaPayload, 0);
-        WriteU64(dwaPayload, (ulong)acHuffman.Length);
+        WriteU64(dwaPayload, (ulong)acCompressed.Length);
         WriteU64(dwaPayload, (ulong)dcCompressed.Length);
         WriteU64(dwaPayload, 0);
         WriteU64(dwaPayload, 0);
         WriteU64(dwaPayload, 0);
         WriteU64(dwaPayload, (ulong)acTokens.Length);
         WriteU64(dwaPayload, 1);
-        WriteU64(dwaPayload, 0);  // acCompression = 0 (Huffman)
-        dwaPayload.Write(acHuffman);
+        WriteU64(dwaPayload, 1);  // acCompression = 1 (deflate)
+        dwaPayload.Write(acCompressed);
         dwaPayload.Write(dcCompressed);
         var dwaBytes = dwaPayload.ToArray();
 
-        // Minimal scanline EXR wrapper.
         using var ms = new MemoryStream();
         WriteI32(ms, 0x01312F76);
         WriteI32(ms, 2);
         WriteAttribute(ms, "channels", "chlist", buf =>
         {
-            WriteChannel(buf, "Y");
+            WriteChannel(buf, "Y", pLinear);
             buf.WriteByte(0);
         });
         WriteAttribute(ms, "compression", "compression", buf => buf.WriteByte(8));
@@ -120,45 +136,6 @@ public class Round162Tests
         return ms.ToArray();
     }
 
-    /// <summary>
-    /// Encode AC tokens with PIZ's canonical Huffman + 20-byte header.
-    /// Output layout: u32 hufLength + u32 im + u32 iM + u32 0 +
-    /// u32 nBits + u32 0 + packed code-length table + encoded bits.
-    /// </summary>
-    private static byte[] HuffmanEncodeAc(ushort[] tokens)
-    {
-        var freq = new int[ExrPiz.HufEncSize];
-        foreach (var t in tokens) freq[t]++;
-
-        // PIZ convention: RLE marker symbol sits at the top of the
-        // alphabet (HufEncSize - 1 = 65536). Reserve one count for it
-        // even if it never fires.
-        int rlc = ExrPiz.HufEncSize - 1;
-        if (freq[rlc] == 0) freq[rlc] = 1;
-
-        ExrPiz.FrequenciesToCodeLengths(freq);
-
-        int im = 0; while (im < ExrPiz.HufEncSize && freq[im] == 0) im++;
-        int iM = rlc;
-
-        var codes = ExrPiz.BuildCanonicalCodes(freq, im, iM);
-        var (encodedBits, nBits) = ExrPiz.HuffmanEncode(codes, tokens, rlc);
-
-        var packedTable = ExrPiz.PackEncTable(freq, im, iM);
-
-        // libimf's AC Huffman has no u32 length prefix — the 20-byte
-        // header starts the stream directly.
-        using var ms = new MemoryStream();
-        WriteI32(ms, im);
-        WriteI32(ms, iM);
-        WriteI32(ms, 0);
-        WriteI32(ms, nBits);
-        WriteI32(ms, 0);
-        ms.Write(packedTable);
-        ms.Write(encodedBits);
-        return ms.ToArray();
-    }
-
     private static ushort[] ZigzagAndRle(ushort[] freqHalves)
     {
         var tokens = new System.Collections.Generic.List<ushort>();
@@ -183,8 +160,7 @@ public class Round162Tests
             }
             tokens.Add(v);
         }
-        if (zeroRun > 0)
-            tokens.Add((ushort)(0xFF00 | zeroRun));
+        if (zeroRun > 0) tokens.Add((ushort)(0xFF00 | zeroRun));
         return tokens.ToArray();
     }
 
@@ -196,12 +172,12 @@ public class Round162Tests
         return ms.ToArray();
     }
 
-    private static void WriteChannel(Stream s, string name)
+    private static void WriteChannel(Stream s, string name, byte pLinear)
     {
         foreach (char c in name) s.WriteByte((byte)c);
         s.WriteByte(0);
         WriteI32(s, 1);
-        s.WriteByte(1);
+        s.WriteByte(pLinear);
         s.WriteByte(0); s.WriteByte(0); s.WriteByte(0);
         WriteI32(s, 1); WriteI32(s, 1);
     }

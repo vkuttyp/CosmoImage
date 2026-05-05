@@ -41,7 +41,8 @@ internal static class ExrDwa
     /// not yet implemented (LOSSY_DCT or RLE).
     /// </summary>
     public static bool Decompress(byte[] src, int srcOff, int srcLen,
-        byte[] dst, int rows, IReadOnlyList<int> channelByteWidths, int width)
+        byte[] dst, int rows, IReadOnlyList<int> channelByteWidths, int width,
+        IReadOnlyList<bool>? pLinearFlags = null)
     {
         if (srcLen < CounterHeaderBytes) return false;
 
@@ -182,8 +183,14 @@ internal static class ExrDwa
                     for (int i = 0; i < 64; i++)
                         floatBlock[i] = (float)BitConverter.UInt16BitsToHalf(spatial[i]);
                     ExrDct.Inverse8x8InPlace(floatBlock);
+                    // Square the HALF when pLinear=0 (libimf default for
+                    // colour channels) — undoes the sqrt the encoder
+                    // applied to perceptually compress the dynamic range.
+                    bool toLinear = pLinearFlags != null
+                        && pLinearFlags.Count > 0
+                        && !pLinearFlags[0];
                     ExrDct.PlaceBlock(floatBlock, dctPlanar, paddedW, paddedH,
-                        bx * 8, by * 8, applyToLinear: false);
+                        bx * 8, by * 8, applyToLinear: toLinear);
                 }
             }
 
@@ -293,11 +300,12 @@ internal static class ExrDwa
     /// </summary>
     private static bool HuffmanDecodeAc(byte[] src, int srcOff, int srcLen, ushort[] dst)
     {
+        // Wire format per ImfHuf.cpp's hufUncompress: 20-byte header
+        // (im, iM, _, nBits, _) then packed code-length table then
+        // bit-packed encoded tokens. PIZ wraps an extra u32 hufLength
+        // prefix; DWA does not.
         int p = srcOff;
         int end = srcOff + srcLen;
-        if (p + 4 > end) return false;
-        int hufLength = BinaryPrimitives.ReadInt32LittleEndian(src.AsSpan(p, 4)); p += 4;
-        if (hufLength < 20 || p + hufLength > end) return false;
         if (p + 20 > end) return false;
         int im    = BinaryPrimitives.ReadInt32LittleEndian(src.AsSpan(p, 4)); p += 4;
         int iM    = BinaryPrimitives.ReadInt32LittleEndian(src.AsSpan(p, 4)); p += 4;
