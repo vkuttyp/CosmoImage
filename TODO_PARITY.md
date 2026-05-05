@@ -331,8 +331,14 @@ Each is days-to-weeks per format, replacing the corresponding
 Magick.NET dependency:
 - [ ] **TIFF** — vast variant matrix; libtiff is huge. Probably
   weeks. Most-used "drop Magick" target after PNG.
-- [ ] **GIF** — LZW + GCE + animation extension blocks. ~600-700
-  lines.
+- [x] ~~**GIF saver**~~ (round 187) — pure-C# GIF89a emitter:
+  hand-rolled variable-bit LZW encoder (CLEAR/END codes,
+  dictionary growth to 4096 entries), 255-byte sub-block framing,
+  per-frame Local Colour Tables (no forced global palette compromise),
+  NETSCAPE 2.0 loop extension for animated output. Each frame
+  independently quantized via `VipsOctreeQuantizer`. Drops the last
+  GIF-side Magick dependency. (Loader was already pure-C# via
+  `PureGifDecoder`.)
 - [ ] **WebP** — VP8 / VP8L bitstream parsers. Significant.
 - [ ] **HEIF / AVIF** — ISOBMFF box parser + AV1 / HEVC bitstream
   decoder. Out of reach without libheif / libaom; gated on managed
