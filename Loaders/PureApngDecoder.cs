@@ -55,11 +55,16 @@ internal static class PureApngDecoder
         byte bitDepth = 0, colorType = 0, interlace = 0;
         int numFrames = 0;
         bool sawActl = false;
-        bool fcTlBeforeIdat = false;
 
         var frames = new List<FrameInfo>();
         FrameInfo? current = null;
         bool sawIdat = false;
+        // IDAT-as-fallback layout: IDAT chunks may precede the first
+        // fcTL. In that case the IDATs are frame 0's pixel data — the
+        // first fcTL (when it arrives) describes frame 0's metadata.
+        // We buffer pending IDATs and attach them to the first frame's
+        // FrameInfo at fcTL time.
+        var pendingIdat = new MemoryStream();
 
         int p = 8;
         while (p + 8 <= pngBytes.Length)
@@ -90,7 +95,20 @@ internal static class PureApngDecoder
 
                 case 0x6663544C:  // fcTL
                     if (length < 26) return null;
-                    if (!sawIdat) fcTlBeforeIdat = true;
+                    // IDAT-as-fallback: if IDATs already arrived before
+                    // any fcTL, they belong to this (the first) frame —
+                    // hand the buffered stream to the new FrameInfo and
+                    // start a fresh buffer for any (rare) future IDATs.
+                    MemoryStream frameCompressed;
+                    if (current == null && pendingIdat.Length > 0)
+                    {
+                        frameCompressed = pendingIdat;
+                        pendingIdat = new MemoryStream();
+                    }
+                    else
+                    {
+                        frameCompressed = new MemoryStream();
+                    }
                     current = new FrameInfo
                     {
                         Width = (int)BinaryPrimitives.ReadUInt32BigEndian(pngBytes.AsSpan(dataStart + 4, 4)),
@@ -101,15 +119,23 @@ internal static class PureApngDecoder
                         DelayDen = BinaryPrimitives.ReadUInt16BigEndian(pngBytes.AsSpan(dataStart + 22, 2)),
                         DisposeOp = pngBytes[dataStart + 24],
                         BlendOp = pngBytes[dataStart + 25],
-                        Compressed = new MemoryStream(),
+                        Compressed = frameCompressed,
                     };
                     frames.Add(current);
                     break;
 
                 case 0x49444154:  // IDAT
                     sawIdat = true;
-                    if (current != null && fcTlBeforeIdat)
+                    if (current == null)
+                    {
+                        // Pre-fcTL: buffer for the first frame.
+                        pendingIdat.Write(pngBytes, dataStart, (int)length);
+                    }
+                    else
+                    {
+                        // After fcTL: append to the current frame.
                         current.Compressed.Write(pngBytes, dataStart, (int)length);
+                    }
                     break;
 
                 case 0x66644154:  // fdAT
@@ -128,7 +154,6 @@ internal static class PureApngDecoder
         }
 
         if (!sawActl || numFrames == 0 || frames.Count == 0) return null;
-        if (!fcTlBeforeIdat) return null;  // IDAT-as-fallback layout not supported here
         if (frames.Count != numFrames) return null;
 
         // Pass 2: decode each frame's pixel data + composite onto canvas.
