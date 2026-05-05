@@ -432,6 +432,10 @@ public static class VipsImageExtensions
     public static VipsImage Spcor(this VipsImage image, VipsImage reference)
         => VipsImageOps.Spcor(image, reference);
 
+    /// <summary>FFT-accelerated cross-correlation against a reference template.</summary>
+    public static VipsImage Fastcor(this VipsImage image, VipsImage reference)
+        => VipsImageOps.Fastcor(image, reference);
+
     /// <summary>Average black/white transitions per row (or column).</summary>
     public static double Countlines(this VipsImage image, VipsDirection direction = VipsDirection.Horizontal)
         => VipsImageOps.Countlines(image, direction);

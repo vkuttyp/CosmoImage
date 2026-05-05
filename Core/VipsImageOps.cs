@@ -1131,6 +1131,16 @@ public static partial class VipsImageOps
     public static VipsImage LabelRegions(VipsImage input)
         => Run(new VipsLabelRegions { In = input });
 
+    // From Operations/Convolution/VipsFastcor.cs
+    /// <summary>
+    /// FFT-accelerated cross-correlation. Output is UInt 1-band sized
+    /// <c>(W − tw + 1, H − th + 1)</c>; values are <c>Σ in·ref</c> at each
+    /// position (raw, not normalised). Use for fast template matching when
+    /// brightness/contrast match — otherwise prefer <see cref="Spcor"/>.
+    /// </summary>
+    public static VipsImage Fastcor(VipsImage input, VipsImage reference)
+        => Run(new VipsFastcor { In = input, Reference = reference });
+
     // From Operations/Convolution/VipsSpcor.cs
     /// <summary>Normalised cross-correlation of <paramref name="reference"/> against <paramref name="input"/>; result mapped [-1, 1] → [0, 255].</summary>
     public static VipsImage Spcor(VipsImage input, VipsImage reference)

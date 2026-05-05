@@ -117,7 +117,11 @@ Each lands in a single PR.
 - [x] ~~`compass`~~ (round 31) — 8 Kirsch rotations, max absolute
   response.
 - [x] ~~`spcor`~~ (round 32) — Pearson NCC (UChar 1-band), result mapped
-  [-1, 1] → [0, 255]. FFT-accelerated `fastcor` still missing.
+  [-1, 1] → [0, 255].
+- [x] ~~`fastcor`~~ (round 174) — FFT-accelerated cross-correlation
+  via the convolution theorem (<c>FFT(in)·conj(FFT(ref))→IFFT</c>).
+  UInt 1-band output, raw <c>Σ in·ref</c> (not normalised). Use over
+  `spcor` when speed matters and brightness/contrast match.
 - [x] ~~box-pass approximation~~ (round 49) — `BoxBlur(radius, passes)`
   via running-sum: O(W·H) per pass regardless of radius; 3+ passes
   approximate a Gaussian (central-limit theorem). Arbitrary-mask
