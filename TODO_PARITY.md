@@ -422,8 +422,13 @@ Holes inside formats we already handle, that would close edge cases.
   descriptor. DZ stays the default. IIIF still deferred — its
   region-addressed URL scheme is fundamentally different from
   fixed-tile-grid layouts.
-- [ ] **APNG**: all-frames-animated variant (we ship single + simple
-  multi-frame).
+- [x] ~~**APNG**: pure-C# saver~~ (round 182) — composes per-frame
+  PNGs (from `VipsPngSaver`) into APNG `acTL` / `fcTL` / `fdAT`
+  chunks directly. All-frames-animated variant: every frame
+  (including frame 0) participates in the animation; loops infinitely.
+  Drops the last Magick dependency in the APNG path. Round-trip via
+  `PureApngDecoder` verifies frame content. <c>dispose_op=NONE</c>,
+  <c>blend_op=SOURCE</c> for full-canvas frames.
 - [ ] **Animated AVIF/HEIC save** — gated on Magick.NET-Q8 HEIC
   encoder availability.
 - [ ] **TIFF**: full Tiled-TIFF with explicit tile geometry control;
