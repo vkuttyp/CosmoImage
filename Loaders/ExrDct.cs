@@ -156,6 +156,45 @@ internal static class ExrDct
     }
 
     /// <summary>
+    /// Write one 8×8 post-IDCT spatial block into a planar HALF
+    /// target at <paramref name="blockX"/>, <paramref name="blockY"/>.
+    /// Edge blocks (where blockX + 8 &gt; planeWidth or
+    /// blockY + 8 &gt; planeHeight) write only the valid pixels.
+    /// When <paramref name="applyToLinear"/> is true the value is
+    /// squared in HALF arithmetic — undoes the perceptual sqrt the
+    /// DWA encoder applies to non-pLinear channels.
+    /// </summary>
+    internal static void PlaceBlock(
+        float[] block,
+        byte[] dst,
+        int planeWidth,
+        int planeHeight,
+        int blockX,
+        int blockY,
+        bool applyToLinear)
+    {
+        int maxY = Math.Min(8, planeHeight - blockY);
+        int maxX = Math.Min(8, planeWidth - blockX);
+        if (maxX <= 0 || maxY <= 0) return;
+
+        for (int y = 0; y < maxY; y++)
+        {
+            int dstY = blockY + y;
+            int rowBase = dstY * planeWidth * 2;
+            for (int x = 0; x < maxX; x++)
+            {
+                int dstX = blockX + x;
+                Half h = (Half)block[y * 8 + x];
+                if (applyToLinear) h = h * h;
+                ushort bits = BitConverter.HalfToUInt16Bits(h);
+                int o = rowBase + dstX * 2;
+                dst[o]     = (byte)bits;
+                dst[o + 1] = (byte)(bits >> 8);
+            }
+        }
+    }
+
+    /// <summary>
     /// Standard JPEG zigzag scan order. <c>ZigzagToRowMajor[k]</c> is
     /// the row-major flat index <c>(row * 8 + col)</c> of the k-th
     /// position in the zigzag scan. Used by encoders to serialize

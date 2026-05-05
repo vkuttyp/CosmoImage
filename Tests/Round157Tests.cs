@@ -189,4 +189,109 @@ public class Round157Tests
         var blocks = new ushort[64];
         Assert.False(ExrDct.ExpandAcTokens(tokens, 1, blocks));
     }
+
+    [Fact]
+    public void PlaceBlock_AlignedAtOrigin_WritesAllPixels()
+    {
+        // 8×8 image, block at (0,0). Each block sample i writes
+        // HALF((i+1)/64) to the corresponding pixel.
+        var block = new float[64];
+        for (int i = 0; i < 64; i++) block[i] = (i + 1) / 64.0f;
+        var dst = new byte[8 * 8 * 2];
+        ExrDct.PlaceBlock(block, dst, 8, 8, 0, 0, applyToLinear: false);
+
+        for (int i = 0; i < 64; i++)
+        {
+            ushort bits = (ushort)(dst[i * 2] | (dst[i * 2 + 1] << 8));
+            Half h = BitConverter.UInt16BitsToHalf(bits);
+            Assert.Equal((float)(Half)((i + 1) / 64.0f), (float)h, 1e-3f);
+        }
+    }
+
+    [Fact]
+    public void PlaceBlock_RightEdge_ClipsExtraColumns()
+    {
+        // 6-wide image, block at (0,0): only the leftmost 6 columns
+        // of each row are valid. Mark all 64 dst bytes 0xFF first to
+        // verify we don't touch the trailing region.
+        var block = new float[64];
+        for (int i = 0; i < 64; i++) block[i] = 1.0f;
+        var dst = new byte[6 * 8 * 2];
+        for (int i = 0; i < dst.Length; i++) dst[i] = 0xAA;  // sentinel
+
+        ExrDct.PlaceBlock(block, dst, 6, 8, 0, 0, applyToLinear: false);
+
+        // First 6 pixels of each of 8 rows touched; trailing untouched.
+        ushort halfOne = BitConverter.HalfToUInt16Bits((Half)1.0f);
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 6; x++)
+            {
+                int o = (y * 6 + x) * 2;
+                ushort bits = (ushort)(dst[o] | (dst[o + 1] << 8));
+                Assert.Equal(halfOne, bits);
+            }
+        }
+    }
+
+    [Fact]
+    public void PlaceBlock_BottomEdge_ClipsExtraRows()
+    {
+        // 8-wide × 4-tall image, block at (0,0): only top 4 rows valid.
+        var block = new float[64];
+        for (int i = 0; i < 64; i++) block[i] = 0.5f;
+        var dst = new byte[8 * 4 * 2];
+        ExrDct.PlaceBlock(block, dst, 8, 4, 0, 0, applyToLinear: false);
+
+        ushort halfHalf = BitConverter.HalfToUInt16Bits((Half)0.5f);
+        for (int i = 0; i < 32; i++)
+        {
+            ushort bits = (ushort)(dst[i * 2] | (dst[i * 2 + 1] << 8));
+            Assert.Equal(halfHalf, bits);
+        }
+    }
+
+    [Fact]
+    public void PlaceBlock_OffsetBlock_LandsAtRightCorner()
+    {
+        // 16×16 image, block at (8, 8). Verifies the block lands in
+        // the bottom-right quadrant; corners of the other 3 quadrants
+        // stay zero.
+        var block = new float[64];
+        for (int i = 0; i < 64; i++) block[i] = 2.0f;
+        var dst = new byte[16 * 16 * 2];
+        ExrDct.PlaceBlock(block, dst, 16, 16, 8, 8, applyToLinear: false);
+
+        ushort halfTwo = BitConverter.HalfToUInt16Bits((Half)2.0f);
+
+        // Pixel (8, 8): start of placed block.
+        int p = (8 * 16 + 8) * 2;
+        Assert.Equal(halfTwo, (ushort)(dst[p] | (dst[p + 1] << 8)));
+        // Pixel (15, 15): last pixel of block.
+        p = (15 * 16 + 15) * 2;
+        Assert.Equal(halfTwo, (ushort)(dst[p] | (dst[p + 1] << 8)));
+        // Pixel (0, 0): outside the placed block, stays zero.
+        Assert.Equal(0, dst[0]);
+        Assert.Equal(0, dst[1]);
+        // Pixel (7, 8): just left of block, stays zero.
+        p = (8 * 16 + 7) * 2;
+        Assert.Equal(0, dst[p]);
+    }
+
+    [Fact]
+    public void PlaceBlock_ToLinearTrueSquaresHalfValues()
+    {
+        // applyToLinear squares the HALF — input 2.0 → output 4.0.
+        var block = new float[64];
+        for (int i = 0; i < 64; i++) block[i] = 2.0f;
+        var dst = new byte[8 * 8 * 2];
+        ExrDct.PlaceBlock(block, dst, 8, 8, 0, 0, applyToLinear: true);
+
+        ushort halfFour = BitConverter.HalfToUInt16Bits((Half)4.0f);
+        for (int i = 0; i < 64; i++)
+        {
+            ushort bits = (ushort)(dst[i * 2] | (dst[i * 2 + 1] << 8));
+            Assert.Equal(halfFour, bits);
+        }
+    }
 }
