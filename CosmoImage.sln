@@ -4,6 +4,8 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CosmoImage", "CosmoImage.csproj", "{3BD26FEC-FA43-32EF-6C45-914B133F9E09}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CosmoImagePdf.Shared", "..\CosmoImagePdf.Shared\CosmoImagePdf.Shared.csproj", "{8F916910-7E59-46CB-BDB0-7717D8A45C3F}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CosmoImage.Tests", "Tests\CosmoImage.Tests.csproj", "{43A4BC2F-5EC3-8E3C-81A4-294B319FAF75}"
@@ -18,6 +20,10 @@ Global
 		{3BD26FEC-FA43-32EF-6C45-914B133F9E09}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3BD26FEC-FA43-32EF-6C45-914B133F9E09}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3BD26FEC-FA43-32EF-6C45-914B133F9E09}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F916910-7E59-46CB-BDB0-7717D8A45C3F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F916910-7E59-46CB-BDB0-7717D8A45C3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F916910-7E59-46CB-BDB0-7717D8A45C3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F916910-7E59-46CB-BDB0-7717D8A45C3F}.Release|Any CPU.Build.0 = Release|Any CPU
 		{43A4BC2F-5EC3-8E3C-81A4-294B319FAF75}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{43A4BC2F-5EC3-8E3C-81A4-294B319FAF75}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{43A4BC2F-5EC3-8E3C-81A4-294B319FAF75}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -2,9 +2,8 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Docnet.Core;
-using Docnet.Core.Models;
-using Docnet.Core.Readers;
+using CosmoImagePdf.Shared.Pdf;
+using ImageMagick;
 
 namespace CosmoImage.Loaders;
 
@@ -35,7 +34,7 @@ public static class VipsPdfLoader
         if (!await IsPdfAsync(source, cancellationToken))
             return null;
 
-        var ms = new MemoryStream();
+        using var ms = new MemoryStream();
         var buffer = new byte[81920];
         while (true)
         {
@@ -46,16 +45,9 @@ public static class VipsPdfLoader
 
         var pdfBytes = ms.ToArray();
         double scalingFactor = dpi / 72.0;
-
-        int totalPages, width, pageHeight;
-        using (var docReader = DocLib.Instance.GetDocReader(pdfBytes, new PageDimensions(scalingFactor)))
-        {
-            totalPages = docReader.GetPageCount();
-            if (page < 0 || page >= totalPages) return null;
-            using var firstReader = docReader.GetPageReader(page);
-            width = firstReader.GetPageWidth();
-            pageHeight = firstReader.GetPageHeight();
-        }
+        var rasterizer = new PdfDocumentRasterizer(pdfBytes);
+        int totalPages = rasterizer.PageCount;
+        if (page < 0 || page >= totalPages) return null;
 
         int pagesToLoad = n switch
         {
@@ -65,16 +57,23 @@ public static class VipsPdfLoader
         };
         if (pagesToLoad <= 0) return null;
 
+        if (!rasterizer.Support.IsSupported)
+        {
+            return LoadWithFallbackOrThrow(pdfBytes, page, pagesToLoad, dpi, rasterizer.Support.Summary);
+        }
+
+        var firstPage = rasterizer.RenderPage(page, scalingFactor);
+        int width = firstPage.Width;
+        int pageHeight = firstPage.Height;
         int totalHeight = pageHeight * pagesToLoad;
-        int firstPage = page;
-        double capturedScale = scalingFactor;
+        int firstPageIndex = page;
         const int bands = 4;
 
         var image = new VipsImage
         {
             Width = width,
             Height = totalHeight,
-            Bands = bands, // PDFium renders to BGRA → we'll swap to RGBA
+            Bands = bands,
             BandFormat = VipsBandFormat.UChar,
             Interpretation = VipsInterpretation.RGB,
             Coding = VipsCoding.None,
@@ -83,38 +82,208 @@ public static class VipsPdfLoader
             PixelsLazy = new Lazy<byte[]>(() =>
             {
                 int frameSize = width * pageHeight * bands;
-                var buf = new byte[frameSize * pagesToLoad];
+                var pixels = new byte[frameSize * pagesToLoad];
 
-                using var docReader = DocLib.Instance.GetDocReader(pdfBytes, new PageDimensions(capturedScale));
                 for (int p = 0; p < pagesToLoad; p++)
                 {
-                    using var pageReader = docReader.GetPageReader(firstPage + p);
-                    var bgra = pageReader.GetImage();
-                    int pageBase = p * frameSize;
-
-                    // BGRA → RGBA per pixel.
-                    for (int i = 0; i < frameSize; i += 4)
-                    {
-                        buf[pageBase + i + 0] = bgra[i + 2];
-                        buf[pageBase + i + 1] = bgra[i + 1];
-                        buf[pageBase + i + 2] = bgra[i + 0];
-                        buf[pageBase + i + 3] = bgra[i + 3];
-                    }
+                    var renderedPage = p == 0
+                        ? firstPage
+                        : rasterizer.RenderPage(firstPageIndex + p, scalingFactor);
+                    WritePageFrame(pixels, p * frameSize, renderedPage, width, pageHeight);
                 }
-                return buf;
+
+                return pixels;
             })
         };
 
-        // Loaded-image multi-frame metadata (matches GIF/WebP/TIFF convention).
         if (pagesToLoad > 1)
         {
             image.Metadata["n-pages"] = pagesToLoad.ToString();
             image.Metadata["page-height"] = pageHeight.ToString();
         }
-        // PDF-specific: total page count in the source document, regardless of
-        // how many we actually loaded. Useful for callers that want to iterate.
         image.Metadata["pdf-n-pages"] = totalPages.ToString();
+        image.Metadata["pdf-renderer"] = "shared";
 
         return image;
+    }
+
+    internal static bool IsFallbackRendererAvailable => HasPdfFallbackBackend();
+
+    private static VipsImage? LoadWithFallbackOrThrow(byte[] pdfBytes, int page, int pagesToLoad, double dpi, string reason)
+    {
+        if (!HasPdfFallbackBackend())
+            throw new NotSupportedException($"pdf: shared rasterizer cannot safely render this document ({reason}) and the PDF fallback renderer is unavailable");
+
+        try
+        {
+            return LoadViaMagick(pdfBytes, page, pagesToLoad, dpi, reason);
+        }
+        catch (Exception ex) when (ex is MagickException or InvalidOperationException)
+        {
+            throw new NotSupportedException($"pdf: shared rasterizer cannot safely render this document ({reason}) and the PDF fallback renderer failed: {ex.Message}", ex);
+        }
+    }
+
+    private static VipsImage? LoadViaMagick(byte[] pdfBytes, int page, int pagesToLoad, double dpi, string reason)
+    {
+        using var collection = ReadPdfCollection(pdfBytes, dpi);
+        int totalPages = collection.Count;
+        if (page < 0 || page >= totalPages)
+            return null;
+
+        pagesToLoad = Math.Min(pagesToLoad, totalPages - page);
+        if (pagesToLoad <= 0)
+            return null;
+
+        using var firstFrame = PrepareFallbackFrame(collection[page]);
+        int width = (int)firstFrame.Width;
+        int pageHeight = (int)firstFrame.Height;
+        int totalHeight = pageHeight * pagesToLoad;
+        const int bands = 4;
+
+        var image = new VipsImage
+        {
+            Width = width,
+            Height = totalHeight,
+            Bands = bands,
+            BandFormat = VipsBandFormat.UChar,
+            Interpretation = VipsInterpretation.RGB,
+            Coding = VipsCoding.None,
+            XRes = dpi / 25.4,
+            YRes = dpi / 25.4,
+            PixelsLazy = new Lazy<byte[]>(() =>
+            {
+                using var frames = ReadPdfCollection(pdfBytes, dpi);
+                int frameSize = width * pageHeight * bands;
+                var pixels = new byte[frameSize * pagesToLoad];
+
+                for (int p = 0; p < pagesToLoad; p++)
+                {
+                    using var frame = PrepareFallbackFrame(frames[page + p]);
+                    WriteMagickFrame(pixels, p * frameSize, frame, width, pageHeight);
+                }
+
+                return pixels;
+            })
+        };
+
+        if (pagesToLoad > 1)
+        {
+            image.Metadata["n-pages"] = pagesToLoad.ToString();
+            image.Metadata["page-height"] = pageHeight.ToString();
+        }
+        image.Metadata["pdf-n-pages"] = totalPages.ToString();
+        image.Metadata["pdf-renderer"] = "magick-fallback";
+        image.Metadata["pdf-renderer-reason"] = reason;
+        return image;
+    }
+
+    private static bool HasPdfFallbackBackend()
+    {
+        string fileName = OperatingSystem.IsWindows() ? "gswin64c.exe" : "gs";
+        string? pathValue = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathValue))
+            return false;
+
+        foreach (var rawSegment in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.IsNullOrWhiteSpace(rawSegment))
+                continue;
+
+            string candidate = Path.Combine(rawSegment, fileName);
+            if (File.Exists(candidate))
+                return true;
+
+            if (OperatingSystem.IsWindows())
+            {
+                string altCandidate = Path.Combine(rawSegment, "gswin32c.exe");
+                if (File.Exists(altCandidate))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static MagickImageCollection ReadPdfCollection(byte[] pdfBytes, double dpi)
+    {
+        var settings = new MagickReadSettings
+        {
+            Density = new Density(dpi),
+            Format = MagickFormat.Pdf
+        };
+
+        var collection = new MagickImageCollection();
+        collection.Read(pdfBytes, settings);
+        return collection;
+    }
+
+    private static IMagickImage<byte> PrepareFallbackFrame(IMagickImage<byte> source)
+    {
+        var frame = source.Clone();
+        frame.BackgroundColor = MagickColors.White;
+        frame.ColorSpace = ColorSpace.sRGB;
+        frame.Alpha(AlphaOption.Remove);
+        return frame;
+    }
+
+    private static void WriteMagickFrame(byte[] destination, int destinationOffset, IMagickImage<byte> frame, int targetWidth, int targetHeight)
+    {
+        int frameLength = targetWidth * targetHeight * 4;
+        for (int i = destinationOffset; i < destinationOffset + frameLength; i += 4)
+        {
+            destination[i + 0] = 255;
+            destination[i + 1] = 255;
+            destination[i + 2] = 255;
+            destination[i + 3] = 255;
+        }
+
+        int copyWidth = Math.Min(targetWidth, (int)frame.Width);
+        int copyHeight = Math.Min(targetHeight, (int)frame.Height);
+        using var pixels = frame.GetPixels();
+        for (int y = 0; y < copyHeight; y++)
+        {
+            var row = pixels.GetArea(0, y, (uint)copyWidth, 1)
+                ?? throw new InvalidOperationException($"PDF fallback: row {y} returned null");
+            int destinationRow = destinationOffset + (y * targetWidth * 4);
+            for (int x = 0; x < copyWidth; x++)
+            {
+                int sourceIndex = x * 3;
+                int destinationIndex = destinationRow + (x * 4);
+                destination[destinationIndex + 0] = row[sourceIndex + 0];
+                destination[destinationIndex + 1] = row[sourceIndex + 1];
+                destination[destinationIndex + 2] = row[sourceIndex + 2];
+                destination[destinationIndex + 3] = 255;
+            }
+        }
+    }
+
+    private static void WritePageFrame(byte[] destination, int destinationOffset, PdfRasterPage page, int targetWidth, int targetHeight)
+    {
+        int frameLength = targetWidth * targetHeight * 4;
+        for (int i = destinationOffset; i < destinationOffset + frameLength; i += 4)
+        {
+            destination[i + 0] = 255;
+            destination[i + 1] = 255;
+            destination[i + 2] = 255;
+            destination[i + 3] = 255;
+        }
+
+        int copyWidth = Math.Min(targetWidth, page.Width);
+        int copyHeight = Math.Min(targetHeight, page.Height);
+        for (int y = 0; y < copyHeight; y++)
+        {
+            int sourceRow = y * page.Width * 3;
+            int destinationRow = destinationOffset + (y * targetWidth * 4);
+            for (int x = 0; x < copyWidth; x++)
+            {
+                int sourceIndex = sourceRow + (x * 3);
+                int destinationIndex = destinationRow + (x * 4);
+                destination[destinationIndex + 0] = page.RgbPixels[sourceIndex + 0];
+                destination[destinationIndex + 1] = page.RgbPixels[sourceIndex + 1];
+                destination[destinationIndex + 2] = page.RgbPixels[sourceIndex + 2];
+                destination[destinationIndex + 3] = 255;
+            }
+        }
     }
 }

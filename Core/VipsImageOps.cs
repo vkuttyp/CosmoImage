@@ -661,8 +661,8 @@ public static partial class VipsImageOps
 
     /// <summary>
     /// Draw shaped text onto <paramref name="canvas"/> using
-    /// SixLabors.Fonts (kerning + ligatures). Mirrors ImageSharp's
-    /// <c>image.Mutate(c =&gt; c.DrawText(text, font, color, point))</c>.
+    /// CosmoFonts (kerning via the legacy <c>kern</c> table). Mirrors
+    /// ImageSharp's <c>image.Mutate(c =&gt; c.DrawText(text, font, color, point))</c>.
     /// </summary>
     public static VipsImage DrawText(VipsImage canvas, VipsTextOptions opts, bool aa = true)
         => VipsTextOps.DrawText(canvas, opts, aa);

@@ -746,7 +746,6 @@ Every package is permissive (MIT / Apache-2.0 / BSD / public domain):
 | `Magick.NET-Q8-arm64` | HEIF/AVIF/WebP/TIFF/GIF/SVG/BMP codecs + profile API; quantization |
 | `JpegLibrary` | JPEG codec |
 | `StbImageSharp` | PNG decode (lightweight) |
-| `Docnet.Core` | PDF render |
 | `MetadataExtractor` | JPEG EXIF parsing |
 | `MathNet.Numerics` | FFT |
 | `System.IO.Hashing` | PNG CRC32 |

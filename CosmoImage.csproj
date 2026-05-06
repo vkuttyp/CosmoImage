@@ -6,13 +6,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Cosmo.Transport\src\Cosmo.Transport\Cosmo.Transport.csproj" />
+    <ProjectReference Include="..\CosmoImagePdf.Shared\CosmoImagePdf.Shared.csproj" />
+    <ProjectReference Include="..\CosmoFonts\src\CosmoFonts.Core\CosmoFonts.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Docnet.Core" Version="2.6.0" />
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.13.0" />
     <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
-    <PackageReference Include="SixLabors.Fonts" Version="2.1.3" />
     <PackageReference Include="System.IO.Hashing" Version="10.0.7" />
   </ItemGroup>
 

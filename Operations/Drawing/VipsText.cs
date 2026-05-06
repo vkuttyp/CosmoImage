@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using SixLabors.Fonts;
-using SixLabors.Fonts.Tables.AdvancedTypographic;
+using CosmoFonts.Font.Opentype;
+using CosmoFonts.Loader;
+using CosmoFonts.Shaping;
 
 namespace CosmoImage.Operations.Drawing;
 
@@ -148,11 +149,10 @@ public sealed class VipsTextOptions
 public readonly record struct VipsTextSize(double X, double Y, double Width, double Height);
 
 /// <summary>
-/// Shaped text rendering via <c>SixLabors.Fonts</c>. Pipeline:
-/// load font → shape glyphs (kerning + ligatures + basic OpenType
-/// features handled by SixLabors) → emit each glyph's outline as
-/// <see cref="VipsPath"/> segments → fill with the existing scanline
-/// rasteriser.
+/// Shaped text rendering via <c>CosmoFonts</c>. Pipeline:
+/// load font → shape glyphs (cmap + kern table) → emit each
+/// glyph's outline as <see cref="VipsPath"/> segments → fill with
+/// the existing scanline rasteriser.
 ///
 /// <para>Gives proper per-glyph positioning (not just monospace
 /// stamping) — a substantial step up from the legacy
@@ -190,8 +190,9 @@ public static class VipsTextOps
         if (opts == null) throw new ArgumentNullException(nameof(opts));
         if (string.IsNullOrEmpty(opts.Text)) return new VipsPath();
         var textOptions = BuildTextOptions(opts);
-        var renderer = new VipsGlyphRenderer((TextDecorations)opts.Decorations);
+        var renderer = new VipsGlyphRenderer();
         TextRenderer.RenderTextTo(renderer, opts.Text, textOptions);
+        AppendDecorations(renderer.Path, opts.Text, textOptions, opts.Decorations);
         return renderer.Path;
     }
 
@@ -208,7 +209,9 @@ public static class VipsTextOps
             return new VipsTextSize(opts.X, opts.Y, 0, 0);
         var textOptions = BuildTextOptions(opts);
         var r = TextMeasurer.MeasureSize(opts.Text, textOptions);
-        return new VipsTextSize(r.X, r.Y, r.Width, r.Height);
+        // CosmoFonts' MeasureSize returns the (Width, Height) extents only;
+        // anchor at the caller-supplied opts.X/Y for the public API.
+        return new VipsTextSize(opts.X, opts.Y, r.Width, r.Height);
     }
 
     /// <summary>
@@ -240,56 +243,133 @@ public static class VipsTextOps
 
     private static TextOptions BuildTextOptions(VipsTextOptions opts)
     {
-        var font = LoadFont(opts);
-        // Note: SL.Fonts' HorizontalAlignment enum order differs from
-        // the natural Left/Center/Right — explicit map.
+        var face = LoadFont(opts);
         var hAlign = opts.HAlign switch
         {
-            VipsTextHAlign.Left => HorizontalAlignment.Left,
+            VipsTextHAlign.Left   => HorizontalAlignment.Left,
             VipsTextHAlign.Center => HorizontalAlignment.Center,
-            VipsTextHAlign.Right => HorizontalAlignment.Right,
+            VipsTextHAlign.Right  => HorizontalAlignment.Right,
             _ => HorizontalAlignment.Left,
         };
-        // SL.Fonts' HorizontalAlignment is anchor-style (positions text
-        // relative to Origin). Users with a wrap box typically expect
-        // "align within box" — shift the effective origin so opts.X
-        // always means the wrap box's LEFT edge regardless of HAlign.
-        double effectiveX = opts.X;
-        if (opts.WrappingLength is double wrap)
+        var wordBreak = opts.WordBreak switch
         {
-            effectiveX += opts.HAlign switch
-            {
-                VipsTextHAlign.Center => wrap / 2,
-                VipsTextHAlign.Right => wrap,
-                _ => 0,
-            };
-        }
-        var textOptions = new TextOptions(font)
-        {
-            Origin = new Vector2((float)effectiveX, (float)opts.Y),
-            LineSpacing = (float)opts.LineSpacing,
-            HorizontalAlignment = hAlign,
-            WordBreaking = (WordBreaking)opts.WordBreak,
-            TextJustification = (TextJustification)opts.Justify,
-            LayoutMode = (LayoutMode)opts.LayoutMode,
-            TextDirection = (TextDirection)opts.TextDirection,
+            VipsTextWordBreak.BreakAll => WordBreaking.BreakAll,
+            VipsTextWordBreak.KeepAll  => WordBreaking.KeepAll,
+            // BreakWord falls back to Standard — no mid-word break support yet.
+            _ => WordBreaking.Standard,
         };
-        if (opts.WrappingLength is double w)
-            textOptions.WrappingLength = (float)w;
+        var justify = opts.Justify switch
+        {
+            VipsTextJustify.InterWord      => TextJustification.InterWord,
+            VipsTextJustify.InterCharacter => TextJustification.InterCharacter,
+            _ => TextJustification.None,
+        };
+        // CosmoFonts merges the four explicit horizontal/vertical modes;
+        // mixed-orientation variants (CJK partial rotations) collapse to
+        // their pure vertical equivalents — close enough for ASCII / non-CJK.
+        var layoutMode = opts.LayoutMode switch
+        {
+            VipsTextLayoutMode.HorizontalBottomTop      => LayoutMode.HorizontalBottomTop,
+            VipsTextLayoutMode.VerticalLeftRight        => LayoutMode.VerticalLeftRight,
+            VipsTextLayoutMode.VerticalRightLeft        => LayoutMode.VerticalRightLeft,
+            VipsTextLayoutMode.VerticalMixedLeftRight   => LayoutMode.VerticalLeftRight,
+            VipsTextLayoutMode.VerticalMixedRightLeft   => LayoutMode.VerticalRightLeft,
+            _ => LayoutMode.HorizontalTopBottom,
+        };
+        // CosmoFonts has no Auto/BiDi mode — fall back to LTR. A caller
+        // that needs proper bidirectional text should wire BiDiReorder
+        // separately (CosmoFonts.Advanced exposes that).
+        var direction = opts.TextDirection switch
+        {
+            VipsTextDirection.RightToLeft => Direction.RightToLeft,
+            _ => Direction.LeftToRight,
+        };
+
+        List<Tag>? featureTags = null;
         if (opts.OpenTypeFeatures != null && opts.OpenTypeFeatures.Count > 0)
         {
-            var tags = new List<Tag>(opts.OpenTypeFeatures.Count);
+            featureTags = new List<Tag>(opts.OpenTypeFeatures.Count);
             foreach (var s in opts.OpenTypeFeatures)
             {
                 if (s == null || s.Length != 4)
                     throw new ArgumentException(
                         $"OpenType feature tags must be exactly 4 characters; got '{s}'",
                         nameof(opts));
-                tags.Add(Tag.Parse(s));
+                featureTags.Add(Tag.Parse(s));
             }
-            textOptions.FeatureTags = tags;
         }
-        return textOptions;
+
+        // CosmoFonts' HorizontalAlignment is "align within wrap box";
+        // there's no Origin-shift step needed — it already aligns relative
+        // to opts.X (the wrap box's left edge).
+        return new TextOptions(face, (float)opts.FontSize)
+        {
+            Origin              = new Vector2((float)opts.X, (float)opts.Y),
+            LineSpacing         = (float)opts.LineSpacing,
+            HorizontalAlignment = hAlign,
+            WordBreaking        = wordBreak,
+            TextJustification   = justify,
+            LayoutMode          = layoutMode,
+            Direction           = direction,
+            WrappingWidth       = opts.WrappingLength is double w ? (float)w : 0f,
+            FeatureTags         = featureTags,
+            // RightToLeft pre-pass: a string-reverse stand-in for full BiDi.
+            // Enough to flip glyph order for "AB" → "BA"; not script-aware.
+            BiDiReorder = direction == Direction.RightToLeft
+                ? (s, _) => new string(s.Reverse().ToArray())
+                : null,
+        };
+    }
+
+    /// <summary>
+    /// Append decoration rectangles (underline / strikeout / overline) to
+    /// <paramref name="path"/>. CosmoFonts has no per-line decoration hook
+    /// in <see cref="IGlyphRenderer"/>, so we synthesise the rectangles
+    /// from the face metrics + per-line widths after shaping.
+    ///
+    /// <para>Soft-wrapped lines aren't tracked here — only hard <c>\n</c>
+    /// splits. That's fine for the common single-line decoration case;
+    /// soft-wrap-aware decoration positioning can be added when needed.</para>
+    /// </summary>
+    private static void AppendDecorations(VipsPath path, string text, TextOptions options, VipsTextDecoration decorations)
+    {
+        if (decorations == VipsTextDecoration.None) return;
+
+        var face = options.Face;
+        float scale     = options.SizePt / face.UnitsPerEm;
+        float ascender  = face.Ascender * scale;          // > 0
+        float lineHeight = (face.Ascender - face.Descender + face.LineGap)
+                         * scale * options.LineSpacing;
+        float emPx      = options.SizePt;
+        float thickness = MathF.Max(1f, emPx * 0.06f);
+
+        string[] hardLines = text.Split('\n');
+        for (int i = 0; i < hardLines.Length; i++)
+        {
+            float lineWidth = TextMeasurer.MeasureSize(hardLines[i], options).Width;
+            if (lineWidth <= 0f) continue;
+
+            float baseline = options.Origin.Y + i * lineHeight + ascender;
+            float left     = options.Origin.X;
+
+            if ((decorations & VipsTextDecoration.Underline) != 0)
+                AddDecorationRect(path, left, baseline + emPx * 0.10f, lineWidth, thickness);
+            if ((decorations & VipsTextDecoration.Strikeout) != 0)
+                AddDecorationRect(path, left, baseline - ascender * 0.30f, lineWidth, thickness);
+            if ((decorations & VipsTextDecoration.Overline) != 0)
+                AddDecorationRect(path, left, baseline - ascender - emPx * 0.05f, lineWidth, thickness);
+        }
+    }
+
+    private static void AddDecorationRect(VipsPath path, float x, float yCenter, float width, float thickness)
+    {
+        float top    = yCenter - thickness * 0.5f;
+        float bottom = yCenter + thickness * 0.5f;
+        path.MoveTo(x, top);
+        path.LineTo(x + width, top);
+        path.LineTo(x + width, bottom);
+        path.LineTo(x, bottom);
+        path.Close();
     }
 
     /// <summary>
@@ -366,29 +446,27 @@ public static class VipsTextOps
         return result;
     }
 
-    private static Font LoadFont(VipsTextOptions opts)
+    private static Face LoadFont(VipsTextOptions opts)
     {
         if (!string.IsNullOrEmpty(opts.FontFile))
         {
             if (!File.Exists(opts.FontFile))
                 throw new FileNotFoundException("Font file not found", opts.FontFile);
-            var coll = new FontCollection();
-            var family = coll.Add(opts.FontFile);
-            return family.CreateFont((float)opts.FontSize);
+            return Face.Load(File.ReadAllBytes(opts.FontFile));
         }
+        var collection = SystemFontCollection.LoadDefault();
         if (!string.IsNullOrEmpty(opts.FontFamily))
-            return SystemFonts.CreateFont(opts.FontFamily, (float)opts.FontSize);
-        // Fallback: first available system font.
-        var first = SystemFonts.Collection.Families.FirstOrDefault();
-        if (first.Name == null)
+            return collection.CreateFont(opts.FontFamily);
+        var first = collection.Families.FirstOrDefault();
+        if (first == null)
             throw new InvalidOperationException(
                 "No system fonts available — set VipsTextOptions.FontFamily or .FontFile");
-        return first.CreateFont((float)opts.FontSize);
+        return collection.CreateFont(first);
     }
 }
 
 /// <summary>
-/// Glyph-outline renderer that translates SixLabors.Fonts'
+/// Glyph-outline renderer that translates CosmoFonts'
 /// <see cref="IGlyphRenderer"/> callbacks into <see cref="VipsPath"/>
 /// segments. Each glyph's contour becomes a closed sub-path; compound
 /// glyphs (e.g., 'O', 'g') emit multiple closed sub-paths whose holes
@@ -396,14 +474,11 @@ public static class VipsTextOps
 /// </summary>
 internal sealed class VipsGlyphRenderer : IGlyphRenderer
 {
-    private readonly TextDecorations _enabled;
     public VipsPath Path { get; } = new VipsPath();
 
-    public VipsGlyphRenderer(TextDecorations enabled = TextDecorations.None) { _enabled = enabled; }
-
-    public void BeginText(in FontRectangle bounds) { }
+    public void BeginText(RectF bounds) { }
     public void EndText() { }
-    public bool BeginGlyph(in FontRectangle bounds, in GlyphRendererParameters parameters) => true;
+    public void BeginGlyph(RectF bounds, GlyphRendererParameters parameters) { }
     public void EndGlyph() { }
 
     public void BeginFigure() { }
@@ -415,30 +490,6 @@ internal sealed class VipsGlyphRenderer : IGlyphRenderer
         => Path.QuadraticTo(c.X, c.Y, point.X, point.Y);
     public void CubicBezierTo(Vector2 c1, Vector2 c2, Vector2 point)
         => Path.CubicTo(c1.X, c1.Y, c2.X, c2.Y, point.X, point.Y);
-
-    public TextDecorations EnabledDecorations() => _enabled;
-
-    /// <summary>
-    /// Append the decoration line as a thin filled rectangle to the
-    /// same path. Width is <paramref name="thickness"/>; the rectangle
-    /// is built by offsetting <paramref name="s"/>..<paramref name="e"/>
-    /// perpendicular to its direction by ±thickness/2.
-    /// </summary>
-    public void SetDecoration(TextDecorations d, Vector2 s, Vector2 e, float thickness)
-    {
-        if (thickness <= 0) return;
-        Vector2 along = e - s;
-        float len = along.Length();
-        if (len < 1e-6f) return;
-        Vector2 unit = along / len;
-        // Right-hand perpendicular, scaled to half-thickness.
-        Vector2 perp = new Vector2(-unit.Y, unit.X) * (thickness * 0.5f);
-        Path.MoveTo(s.X + perp.X, s.Y + perp.Y);
-        Path.LineTo(e.X + perp.X, e.Y + perp.Y);
-        Path.LineTo(e.X - perp.X, e.Y - perp.Y);
-        Path.LineTo(s.X - perp.X, s.Y - perp.Y);
-        Path.Close();
-    }
 }
 
 /// <summary>

@@ -1,6 +1,6 @@
 using System.Linq;
 using CosmoImage.Operations.Drawing;
-using SixLabors.Fonts;
+using CosmoFonts.Loader;
 using Xunit;
 
 namespace CosmoImage.Tests;
@@ -27,11 +27,13 @@ public class Round73Tests
             }
         };
 
+    private static readonly SystemFontCollection s_fonts = SystemFontCollection.LoadDefault();
+
     private static string? PickFont()
     {
         foreach (var name in new[] { "Helvetica", "Arial", "DejaVu Sans", "Liberation Sans" })
-            if (SystemFonts.Collection.TryGet(name, out _)) return name;
-        return SystemFonts.Collection.Families.FirstOrDefault().Name;
+            if (s_fonts.TryFind(name, out _)) return name;
+        return s_fonts.Families.FirstOrDefault();
     }
 
     private static (double minY, double maxY, double minX, double maxX) Bounds(VipsPath p)
