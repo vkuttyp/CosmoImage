@@ -1,0 +1,50 @@
+name: Publish to NuGet
+
+# Triggers on any tag matching v* (e.g. v1.0.1).
+# The package version is read from the csproj <Version>, NOT from the tag.
+# The tag is just the release signal — bump <Version> in the csproj as part
+# of the release commit, then push the tag.
+#
+# Cross-repo refs in CosmoImage.csproj resolve to nuget.org PackageReferences
+# in CI (the csproj uses Condition="'$(CI)' == 'true'"); GitHub Actions sets
+# CI=true automatically.
+#
+# Setup: add NUGET_API_KEY as a repository secret
+# (Settings → Secrets and variables → Actions → New repository secret).
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Pack
+        run: |
+          mkdir -p ./out
+          dotnet pack CosmoImage.csproj -c Release -o ./out --nologo
+
+      - name: List packed
+        run: ls -la ./out
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -e
+          for pkg in ./out/*.nupkg; do
+            echo "==> push $(basename "$pkg")"
+            dotnet nuget push "$pkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done

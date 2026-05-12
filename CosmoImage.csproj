@@ -4,13 +4,21 @@
     <Compile Remove="Tests\**" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!--
+    Cross-repo refs: ProjectReference for local dev, PackageReference for
+    CI (GitHub Actions sets CI=true).
+  -->
+  <ItemGroup Condition="'$(CI)' != 'true'">
     <ProjectReference Include="..\Cosmo.Transport\src\Cosmo.Transport\Cosmo.Transport.csproj" />
     <ProjectReference Include="..\CosmoImagePdf.Shared\CosmoImagePdf.Shared.csproj" />
-    <ProjectReference Include="..\CosmoFonts\src\CosmoFonts.Core\CosmoFonts.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(CI)' == 'true'">
+    <PackageReference Include="Cosmo.Transport"      Version="1.0.2" />
+    <PackageReference Include="CosmoImagePdf.Shared" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CosmoFonts.Core" Version="1.0.0" />
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.13.0" />
     <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
     <PackageReference Include="System.IO.Hashing" Version="10.0.7" />
@@ -20,6 +28,15 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageId>CosmoImage</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>vkuttyp</Authors>
+    <Description>Image processing library — loaders, savers, geometric/colour/convolution/effects operations. Wraps Magick.NET for codec support.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/vkuttyp/CosmoImage</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/vkuttyp/CosmoImage</PackageProjectUrl>
+    <PackageTags>image;imageprocessing;magick;png;jpeg;tiff;resize;convolution</PackageTags>
   </PropertyGroup>
 
   <!--
