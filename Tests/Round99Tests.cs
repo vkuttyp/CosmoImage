@@ -186,14 +186,51 @@ public class Round99Tests
     }
 
     [Fact]
+    public void Octree_AcceptsGreyscale()
+    {
+        // Greyscale (1-band) input — the quantizer now supports it via
+        // an equal-population histogram partition, so it should produce
+        // a 1-band output with no more than `Colors` unique values.
+        var src = new VipsImage
+        {
+            Width = 256, Height = 4, Bands = 1, BandFormat = VipsBandFormat.UChar,
+            Interpretation = VipsInterpretation.BW,
+            GenerateFn = (VipsRegion reg, object? seq, object? a, object? bb, ref bool stop) => {
+                for (int y = 0; y < reg.Valid.Height; y++)
+                {
+                    var addr = reg.GetAddress(reg.Valid.Left, reg.Valid.Top + y);
+                    for (int x = 0; x < reg.Valid.Width; x++)
+                        addr[x] = (byte)(reg.Valid.Left + x);
+                }
+                return 0;
+            }
+        };
+        var output = new VipsOctreeQuantizer { Colors = 4 }.Apply(src);
+        Assert.Equal(1, output.Bands);
+        var seen = new HashSet<byte>();
+        using (var reg = new VipsRegion(output))
+        {
+            reg.Prepare(new VipsRect(0, 0, output.Width, output.Height));
+            for (int y = 0; y < output.Height; y++)
+            {
+                var addr = reg.GetAddress(0, y);
+                for (int x = 0; x < output.Width; x++)
+                    seen.Add(addr[x]);
+            }
+        }
+        Assert.True(seen.Count <= 4, $"expected ≤ 4 unique values, got {seen.Count}");
+    }
+
+    [Fact]
     public void Octree_RejectsBadBandCount()
     {
-        var oneBand = new VipsImage
+        // 2-band (greyscale + alpha) input — still unsupported.
+        var twoBand = new VipsImage
         {
-            Width = 4, Height = 4, Bands = 1, BandFormat = VipsBandFormat.UChar,
+            Width = 4, Height = 4, Bands = 2, BandFormat = VipsBandFormat.UChar,
             GenerateFn = (VipsRegion reg, object? seq, object? a, object? bb, ref bool stop) => 0,
         };
-        Assert.Throws<ArgumentException>(() => new VipsOctreeQuantizer().Apply(oneBand));
+        Assert.Throws<ArgumentException>(() => new VipsOctreeQuantizer().Apply(twoBand));
     }
 
     [Fact]
