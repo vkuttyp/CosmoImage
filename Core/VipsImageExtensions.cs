@@ -56,6 +56,43 @@ public static class VipsImageExtensions
     public static VipsImage AutoOrient(this VipsImage image)
         => VipsImageOps.AutoOrient(image);
 
+    /// <summary>Auto-deskew + auto-crop: detect dominant text/line orientation, rotate to horizontal, and crop to the page bounding box.</summary>
+    public static VipsImage Deskew(this VipsImage image,
+        double maxAngleDegrees = CosmoImage.Operations.Geometric.VipsDeskew.DefaultMaxAngleDegrees,
+        double minAngleToCorrect = 0.1,
+        VipsKernel interpolate = VipsKernel.Linear,
+        bool autoCrop = true,
+        int autoCropThreshold = CosmoImage.Operations.Geometric.VipsDeskew.DefaultAutoCropThreshold)
+        => VipsImageOps.Deskew(image, maxAngleDegrees, minAngleToCorrect, interpolate, autoCrop, autoCropThreshold);
+
+    /// <summary>Return the detected skew angle in degrees without rotating.</summary>
+    public static double DetectSkewDegrees(this VipsImage image,
+        double maxAngleDegrees = CosmoImage.Operations.Geometric.VipsDeskew.DefaultMaxAngleDegrees)
+        => VipsImageOps.DetectSkewDegrees(image, maxAngleDegrees);
+
+    /// <summary>Crop to the detected page bounding box via Canny + Hough.</summary>
+    public static VipsImage AutoCropDocument(this VipsImage image,
+        int threshold = CosmoImage.Operations.Geometric.VipsDeskew.DefaultAutoCropThreshold)
+        => VipsImageOps.AutoCropDocument(image, threshold);
+
+    /// <summary>Return the detected page bounding rectangle without cropping.</summary>
+    public static VipsRect DetectPageBounds(this VipsImage image,
+        int brightThreshold = CosmoImage.Operations.Analysis.VipsDetectPageBounds.DefaultBrightThreshold,
+        int darkThreshold = CosmoImage.Operations.Analysis.VipsDetectPageBounds.DefaultDarkThreshold,
+        double minNonBedFraction = CosmoImage.Operations.Analysis.VipsDetectPageBounds.DefaultMinNonBedFraction,
+        double insetFraction = CosmoImage.Operations.Analysis.VipsDetectPageBounds.DefaultInsetFraction,
+        int gapTolerance = CosmoImage.Operations.Analysis.VipsDetectPageBounds.DefaultGapTolerance)
+        => VipsImageOps.DetectPageBounds(image, brightThreshold, darkThreshold, minNonBedFraction, insetFraction, gapTolerance);
+
+    /// <summary>Upright-confidence signal. +ve ⇒ upright, −ve ⇒ upside-down.</summary>
+    public static double DetectUpright(this VipsImage image)
+        => VipsImageOps.DetectUpright(image);
+
+    /// <summary>True if the document is rotated 180° from upright.</summary>
+    public static bool IsUpsideDown(this VipsImage image,
+        double decisionThreshold = CosmoImage.Operations.Analysis.VipsDetectUpright.DefaultFlipDecisionThreshold)
+        => VipsImageOps.IsUpsideDown(image, decisionThreshold);
+
     // --- Pointwise / arithmetic ---
 
     public static VipsImage Invert(this VipsImage image)

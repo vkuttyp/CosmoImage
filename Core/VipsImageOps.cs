@@ -215,6 +215,64 @@ public static partial class VipsImageOps
         return Run(new VipsRotate { In = input, Angle = angle });
     }
 
+    // From Operations/Geometric/VipsDeskew.cs
+    /// <summary>
+    /// Auto-detect the document skew, rotate to straighten, and (by
+    /// default) crop to the page bounding box. Skips resampling if the
+    /// detected skew is below <paramref name="minAngleToCorrect"/>; the
+    /// crop pass still runs since a non-rotated scan-bed image has
+    /// margin to trim.
+    /// </summary>
+    public static VipsImage Deskew(VipsImage input,
+        double maxAngleDegrees = VipsDeskew.DefaultMaxAngleDegrees,
+        double minAngleToCorrect = 0.1,
+        VipsKernel interpolate = VipsKernel.Linear,
+        bool autoCrop = true,
+        int autoCropThreshold = VipsDeskew.DefaultAutoCropThreshold)
+        => VipsDeskew.Compute(input, maxAngleDegrees, minAngleToCorrect, interpolate, autoCrop, autoCropThreshold);
+
+    /// <summary>
+    /// Return the detected skew in degrees without rotating. Positive =
+    /// image is rotated clockwise relative to upright.
+    /// </summary>
+    public static double DetectSkewDegrees(VipsImage input,
+        double maxAngleDegrees = VipsDeskew.DefaultMaxAngleDegrees)
+        => VipsDeskew.DetectSkewDegrees(input, maxAngleDegrees);
+
+    /// <summary>
+    /// Crop the image to its detected page bounding box (Canny + Hough).
+    /// </summary>
+    public static VipsImage AutoCropDocument(VipsImage input,
+        int threshold = VipsDeskew.DefaultAutoCropThreshold)
+        => VipsDeskew.AutoCropDocument(input, threshold);
+
+    // From Operations/Analysis/VipsDetectPageBounds.cs
+    /// <summary>
+    /// Locate the page bounding rectangle by per-row/column counts of
+    /// bright pixels (paper, including white margins). Returns the
+    /// full-image rect when no row/column accumulates enough bright pixels.
+    /// </summary>
+    public static VipsRect DetectPageBounds(VipsImage input,
+        int brightThreshold = VipsDetectPageBounds.DefaultBrightThreshold,
+        int darkThreshold = VipsDetectPageBounds.DefaultDarkThreshold,
+        double minNonBedFraction = VipsDetectPageBounds.DefaultMinNonBedFraction,
+        double insetFraction = VipsDetectPageBounds.DefaultInsetFraction,
+        int gapTolerance = VipsDetectPageBounds.DefaultGapTolerance)
+        => VipsDetectPageBounds.Compute(input, brightThreshold, darkThreshold, minNonBedFraction, insetFraction, gapTolerance);
+
+    // From Operations/Analysis/VipsDetectUpright.cs
+    /// <summary>
+    /// Return the upright-confidence signal for a document image.
+    /// Positive ⇒ upright; negative ⇒ upside-down; near-zero ⇒ ambiguous.
+    /// </summary>
+    public static double DetectUpright(VipsImage input)
+        => VipsDetectUpright.Compute(input);
+
+    /// <summary>True if the document is rotated 180° from upright.</summary>
+    public static bool IsUpsideDown(VipsImage input,
+        double decisionThreshold = VipsDetectUpright.DefaultFlipDecisionThreshold)
+        => VipsDetectUpright.IsUpsideDown(input, decisionThreshold);
+
     // From Operations/Geometric/VipsRot45.cs
     /// <summary>
     /// Rotate a square odd-sided image by a 45° increment. Mirrors libvips'
@@ -2063,10 +2121,9 @@ public static partial class VipsImageOps
     /// <summary>
     /// Quantize via a pluggable <see cref="IVipsQuantizer"/>. Mirrors
     /// ImageSharp's <c>Quantize(IQuantizer)</c>. Use this overload to
-    /// inject a custom quantization algorithm (or a tuned
-    /// <see cref="MagickQuantizer"/>); the simpler
+    /// inject a custom quantization algorithm; the simpler
     /// <see cref="Quantize(VipsImage, int, bool)"/> overload routes
-    /// through the default Magick implementation.
+    /// through <see cref="VipsOctreeQuantizer"/> (pure managed).
     /// </summary>
     public static VipsImage Quantize(VipsImage input, IVipsQuantizer quantizer)
     {

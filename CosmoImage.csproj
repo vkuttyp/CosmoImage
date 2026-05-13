@@ -29,7 +29,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>CosmoImage</PackageId>
-    <Version>1.0.1</Version>
+    <Version>1.0.16</Version>
     <Authors>vkuttyp</Authors>
     <Description>Image processing library — loaders, savers, geometric/colour/convolution/effects operations. Wraps Magick.NET for codec support.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
