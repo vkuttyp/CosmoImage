@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.IO.Pipelines;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -80,7 +82,7 @@ public static class VipsJpegSaver
         if (image.MetadataBlobs.TryGetValue("exif", out var exifBlob))
             await WriteApp1MarkerAsync(stream, VipsJpegLoader.ExifIdentifier, exifBlob, cancellationToken);
         if (image.MetadataBlobs.TryGetValue("xmp", out var xmpBlob))
-            await WriteApp1MarkerAsync(stream, VipsJpegLoader.XmpIdentifier, xmpBlob, cancellationToken);
+            await WriteXmpAsync(stream, xmpBlob, cancellationToken);
         if (image.MetadataBlobs.TryGetValue("icc", out var iccBlob))
             await WriteIccApp2MarkersAsync(stream, iccBlob, cancellationToken);
 
@@ -94,12 +96,20 @@ public static class VipsJpegSaver
     {
         // APP1 segment length includes the 2 length bytes themselves, the
         // identifier (with its trailing NUL already in the array), and payload.
-        // Hard cap at 65533 (length field is uint16, minus the 2 bytes for length).
+        // Hard cap at 65535 (length field is uint16).
         int totalLen = 2 + identifier.Length + payload.Length;
         if (totalLen > 65535)
+        {
+            // EXIF cannot legitimately be split across multiple APP1 markers
+            // per JEITA CP-3451 — readers are not required to concatenate.
+            // XMP routes through WriteXmpAsync which implements the Adobe
+            // ExtendedXMP scheme, so this branch only triggers for EXIF.
             throw new NotSupportedException(
-                $"APP1 segment too large to write in a single marker ({totalLen} > 65535). " +
-                "Multi-segment write is not yet implemented.");
+                $"APP1 segment ({totalLen} bytes) exceeds the 65535-byte JPEG marker limit. " +
+                "EXIF cannot be split across markers per JEITA CP-3451 — strip embedded " +
+                "thumbnails or oversized maker notes from MetadataBlobs[\"exif\"] before save. " +
+                "(XMP > 64 KB is handled automatically via Adobe ExtendedXMP in WriteXmpAsync.)");
+        }
 
         var header = new byte[4];
         header[0] = 0xFF;
@@ -111,6 +121,94 @@ public static class VipsJpegSaver
         await stream.WriteAsync(identifier, ct);
         await stream.WriteAsync(payload, ct);
     }
+
+    /// <summary>
+    /// Write the XMP packet as either a single StandardXMP APP1 (if it fits)
+    /// or a StandardXMP stub + one-or-more ExtendedXMP APP1 segments per
+    /// Adobe XMP Specification Part 3 (Storage in Files).
+    ///
+    /// <para>For the multi-segment case the StandardXMP carries only a
+    /// <c>xmpNote:HasExtendedXMP</c> property whose value is the MD5 hex
+    /// digest of the full XMP packet — readers that understand ExtendedXMP
+    /// reassemble the packet from the extension segments using that GUID.</para>
+    /// </summary>
+    private static async Task WriteXmpAsync(Stream stream, byte[] xmp, CancellationToken ct)
+    {
+        int singleSegLen = 2 + VipsJpegLoader.XmpIdentifier.Length + xmp.Length;
+        if (singleSegLen <= 65535)
+        {
+            // Single-segment fast path — far more common.
+            await WriteApp1MarkerAsync(stream, VipsJpegLoader.XmpIdentifier, xmp, ct);
+            return;
+        }
+
+        // Multi-segment path. MD5 of the FULL XMP becomes the GUID that
+        // ties the StandardXMP stub to the ExtendedXMP segments.
+        string guid;
+        using (var md5 = MD5.Create())
+        {
+            var hash = md5.ComputeHash(xmp);
+            guid = Convert.ToHexString(hash);  // 32 uppercase hex chars
+        }
+
+        // Minimal StandardXMP stub. Readers that don't understand
+        // ExtendedXMP will see this as a near-empty XMP packet carrying
+        // only HasExtendedXMP — they lose the payload but get a clear
+        // pointer to the extension.
+        string stubText =
+            "<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>" +
+            "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">" +
+            "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">" +
+            "<rdf:Description rdf:about=\"\" " +
+            "xmlns:xmpNote=\"http://ns.adobe.com/xmp/note/\" " +
+            $"xmpNote:HasExtendedXMP=\"{guid}\"/>" +
+            "</rdf:RDF></x:xmpmeta>" +
+            "<?xpacket end=\"r\"?>";
+        var stubBytes = System.Text.Encoding.UTF8.GetBytes(stubText);
+        await WriteApp1MarkerAsync(stream, VipsJpegLoader.XmpIdentifier, stubBytes, ct);
+
+        // ExtendedXMP segments. Per-segment overhead is:
+        //   2  length field
+        //   35 identifier ("http://ns.adobe.com/xmp/extension/\0")
+        //   32 GUID (ASCII hex)
+        //   4  full XMP length (big-endian)
+        //   4  offset of this chunk within the full XMP (big-endian)
+        // → max chunk payload = 65535 - 77 = 65458 bytes
+        var extId = ExtendedXmpIdentifier;
+        var guidBytes = System.Text.Encoding.ASCII.GetBytes(guid);
+        const int maxChunk = 65535 - 2 - 35 - 32 - 4 - 4;
+        int fullLen = xmp.Length;
+        for (int offset = 0; offset < fullLen; offset += maxChunk)
+        {
+            int chunkLen = Math.Min(maxChunk, fullLen - offset);
+            int markerLen = 2 + extId.Length + 32 + 4 + 4 + chunkLen;
+
+            var header = new byte[4];
+            header[0] = 0xFF;
+            header[1] = 0xE1;
+            header[2] = (byte)(markerLen >> 8);
+            header[3] = (byte)(markerLen & 0xFF);
+            await stream.WriteAsync(header, ct);
+            await stream.WriteAsync(extId, ct);
+            await stream.WriteAsync(guidBytes, ct);
+
+            var lenOff = new byte[8];
+            lenOff[0] = (byte)(fullLen >> 24);
+            lenOff[1] = (byte)(fullLen >> 16);
+            lenOff[2] = (byte)(fullLen >> 8);
+            lenOff[3] = (byte)fullLen;
+            lenOff[4] = (byte)(offset >> 24);
+            lenOff[5] = (byte)(offset >> 16);
+            lenOff[6] = (byte)(offset >> 8);
+            lenOff[7] = (byte)offset;
+            await stream.WriteAsync(lenOff, ct);
+
+            await stream.WriteAsync(xmp.AsMemory(offset, chunkLen), ct);
+        }
+    }
+
+    private static readonly byte[] ExtendedXmpIdentifier =
+        System.Text.Encoding.ASCII.GetBytes("http://ns.adobe.com/xmp/extension/\0");
 
     /// <summary>
     /// Write an ICC profile as a sequence of APP2 markers per ICC.1:1998-09

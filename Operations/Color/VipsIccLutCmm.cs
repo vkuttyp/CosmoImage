@@ -22,6 +22,13 @@ namespace CosmoImage.Operations.Color;
 /// </summary>
 public sealed class VipsIccLutCmm
 {
+    /// <summary>Maximum supported number of device channels. The ICC spec
+    /// allows up to 15, but most real n-ink profiles cap at Hexachrome (6)
+    /// or 8-color press. We bound at 8 because <see cref="LutTransform.NLinearLookup"/>
+    /// uses 8-element stackallocs for hypercube corner traversal — going
+    /// higher would need those sizes bumped too.</summary>
+    internal const int MaxDeviceChannels = 8;
+
     private enum Pcs { Xyz, Lab }
 
     private readonly LutTransform _forward;
@@ -62,8 +69,8 @@ public sealed class VipsIccLutCmm
         var rev = LutTransform.TryFromTag(dst, b2aTag) ?? LutTransform.TryFromTag(dst, "B2A0");
         if (fwd == null || rev == null) return null;
         if (fwd.OutputChannels != 3 || rev.InputChannels != 3) return null;
-        if (fwd.InputChannels < 1 || fwd.InputChannels > 4) return null;
-        if (rev.OutputChannels < 1 || rev.OutputChannels > 4) return null;
+        if (fwd.InputChannels < 1 || fwd.InputChannels > MaxDeviceChannels) return null;
+        if (rev.OutputChannels < 1 || rev.OutputChannels > MaxDeviceChannels) return null;
 
         Pcs srcPcs = src.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
         Pcs dstPcs = dst.ConnectionColorSpace == VipsIccColorSpace.Lab ? Pcs.Lab : Pcs.Xyz;
@@ -106,9 +113,9 @@ public sealed class VipsIccLutCmm
         if (srcBands < srcCh) throw new ArgumentException($"srcBands {srcBands} < required {srcCh}", nameof(srcBands));
         if (dstBands < dstCh) throw new ArgumentException($"dstBands {dstBands} < required {dstCh}", nameof(dstBands));
 
-        Span<double> inBuf = stackalloc double[4];
+        Span<double> inBuf = stackalloc double[MaxDeviceChannels];
         Span<double> pcs = stackalloc double[3];
-        Span<double> outBuf = stackalloc double[4];
+        Span<double> outBuf = stackalloc double[MaxDeviceChannels];
 
         bool passAlpha = srcBands > srcCh && dstBands > dstCh;
 
@@ -380,7 +387,7 @@ internal sealed class Mft2Transform : LutTransform
     {
         int inCh = _m.InputChannels;
         int outCh = _m.OutputChannels;
-        Span<double> v = stackalloc double[4];
+        Span<double> v = stackalloc double[VipsIccLutCmm.MaxDeviceChannels];
 
         // Input curves.
         for (int i = 0; i < inCh; i++)
@@ -396,7 +403,7 @@ internal sealed class Mft2Transform : LutTransform
         }
 
         // CLUT n-linear lookup.
-        Span<double> clutOut = stackalloc double[4];
+        Span<double> clutOut = stackalloc double[VipsIccLutCmm.MaxDeviceChannels];
         Span<int> grids = stackalloc int[inCh];
         for (int i = 0; i < inCh; i++) grids[i] = _m.GridSize;
         NLinearLookup(_m.Clut, grids.ToArray(), outCh, v.Slice(0, inCh), clutOut);
@@ -422,8 +429,8 @@ internal sealed class LutABTransform : LutTransform
 
     public override void Apply(ReadOnlySpan<double> input, Span<double> output)
     {
-        Span<double> tmp = stackalloc double[4];
-        Span<double> tmp2 = stackalloc double[4];
+        Span<double> tmp = stackalloc double[VipsIccLutCmm.MaxDeviceChannels];
+        Span<double> tmp2 = stackalloc double[VipsIccLutCmm.MaxDeviceChannels];
         int curLen = input.Length;
         for (int i = 0; i < curLen; i++) tmp[i] = input[i];
 

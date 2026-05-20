@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -58,6 +59,112 @@ public static class VipsJpegLoader
 
     private static System.ReadOnlySpan<byte> AsSpan(byte[] arr, int start, int length) =>
         arr.AsSpan(start, length);
+
+    // APP1 identifier for Adobe ExtendedXMP segments (35 bytes including the
+    // trailing NUL). See Adobe XMP Specification Part 3, Storage in Files.
+    private static readonly byte[] ExtendedXmpIdentifier =
+        System.Text.Encoding.ASCII.GetBytes("http://ns.adobe.com/xmp/extension/\0");
+
+    /// <summary>
+    /// Extract the XMP packet from a JPEG, transparently reassembling Adobe
+    /// ExtendedXMP when the StandardXMP segment is just a stub pointing at a
+    /// GUID. Counterpart to <c>VipsJpegSaver.WriteXmpAsync</c>.
+    ///
+    /// <para>Algorithm:
+    /// <list type="number">
+    ///   <item>Extract the StandardXMP via the regular APP1 walker.</item>
+    ///   <item>Look for <c>xmpNote:HasExtendedXMP="GUID"</c> in the StandardXMP.</item>
+    ///   <item>If found, walk all APP1 markers with the ExtendedXMP identifier
+    ///   carrying that GUID; reassemble by their declared offset.</item>
+    ///   <item>Verify the MD5 of the reassembled buffer against the GUID; on
+    ///   mismatch fall back to the StandardXMP (better degraded data than
+    ///   silent corruption).</item>
+    /// </list>
+    /// Returns null when no XMP is present at all.</para>
+    /// </summary>
+    internal static byte[]? ExtractXmpWithExtended(byte[] jpeg)
+    {
+        var standard = ExtractApp1Segment(jpeg, XmpIdentifier);
+        if (standard == null) return null;
+
+        // Look for HasExtendedXMP attribute. Stop at the closing quote.
+        string standardText = System.Text.Encoding.UTF8.GetString(standard);
+        int markerIdx = standardText.IndexOf("HasExtendedXMP", StringComparison.Ordinal);
+        if (markerIdx < 0) return standard;  // plain StandardXMP, no extension.
+
+        // Find the value: look for '="..."' or '=\'...\'' after the marker.
+        int eq = standardText.IndexOf('=', markerIdx);
+        if (eq < 0) return standard;
+        int quoteStart = -1, quoteEnd = -1;
+        for (int i = eq + 1; i < standardText.Length; i++)
+        {
+            char c = standardText[i];
+            if (c == '"' || c == '\'') { quoteStart = i; break; }
+            if (!char.IsWhiteSpace(c)) break;
+        }
+        if (quoteStart < 0) return standard;
+        char quoteChar = standardText[quoteStart];
+        quoteEnd = standardText.IndexOf(quoteChar, quoteStart + 1);
+        if (quoteEnd < 0) return standard;
+        string guid = standardText.Substring(quoteStart + 1, quoteEnd - quoteStart - 1).Trim();
+        if (guid.Length != 32) return standard;  // GUID is a 32-char hex MD5
+        var guidBytes = System.Text.Encoding.ASCII.GetBytes(guid);
+
+        // Walk ALL APP1 ExtendedXMP segments matching the GUID and reassemble.
+        // Segment layout: identifier(35) + GUID(32) + fullLen(4 BE) + offset(4 BE) + chunk.
+        byte[]? assembled = null;
+        int expectedLen = -1;
+        if (jpeg.Length < 4 || jpeg[0] != 0xFF || jpeg[1] != 0xD8) return standard;
+        int i2 = 2;
+        while (i2 + 3 < jpeg.Length)
+        {
+            if (jpeg[i2] != 0xFF) break;
+            byte marker = jpeg[i2 + 1];
+            if (marker == 0xD8 || marker == 0xD9 || marker == 0x01 ||
+                (marker >= 0xD0 && marker <= 0xD7)) { i2 += 2; continue; }
+            if (marker == 0xDA) break;
+            int length = (jpeg[i2 + 2] << 8) | jpeg[i2 + 3];
+            if (length < 2 || i2 + 2 + length > jpeg.Length) break;
+
+            if (marker == 0xE1 && length >= 2 + ExtendedXmpIdentifier.Length + 32 + 4 + 4 &&
+                jpeg.AsSpan(i2 + 4, ExtendedXmpIdentifier.Length).SequenceEqual(ExtendedXmpIdentifier) &&
+                jpeg.AsSpan(i2 + 4 + ExtendedXmpIdentifier.Length, 32).SequenceEqual(guidBytes))
+            {
+                int g = i2 + 4 + ExtendedXmpIdentifier.Length + 32;
+                int fullLen = BinaryPrimitives.ReadInt32BigEndian(jpeg.AsSpan(g, 4));
+                int offset  = BinaryPrimitives.ReadInt32BigEndian(jpeg.AsSpan(g + 4, 4));
+                int chunkLen = length - 2 - ExtendedXmpIdentifier.Length - 32 - 4 - 4;
+                if (fullLen <= 0 || offset < 0 || chunkLen < 0 || offset + chunkLen > fullLen)
+                {
+                    // Malformed segment; skip and continue. Other segments may
+                    // still be valid.
+                    i2 += 2 + length;
+                    continue;
+                }
+                if (assembled == null) { assembled = new byte[fullLen]; expectedLen = fullLen; }
+                else if (expectedLen != fullLen)
+                {
+                    // Inconsistent fullLen across segments — bail out.
+                    return standard;
+                }
+                jpeg.AsSpan(g + 8, chunkLen).CopyTo(assembled.AsSpan(offset, chunkLen));
+            }
+            i2 += 2 + length;
+        }
+
+        if (assembled == null) return standard;  // GUID present but no segments found.
+
+        // Verify MD5 of the reassembled buffer matches the GUID. Mismatch
+        // typically means a tool stripped some ExtendedXMP segments — fall
+        // back to the (truncated) StandardXMP rather than serve corrupt
+        // metadata.
+        var md5 = MD5.HashData(assembled);
+        string actualGuid = Convert.ToHexString(md5);
+        if (!string.Equals(actualGuid, guid, StringComparison.OrdinalIgnoreCase))
+            return standard;
+
+        return assembled;
+    }
 
     /// <summary>
     /// Walk APP2 markers tagged with "ICC_PROFILE\0", read 1-based sequence and
@@ -187,7 +294,7 @@ public static class VipsJpegLoader
         // bytes, not parsed tag values.
         var exifBlob = ExtractApp1Segment(jpegBytes, ExifIdentifier);
         if (exifBlob != null) image.MetadataBlobs["exif"] = exifBlob;
-        var xmpBlob = ExtractApp1Segment(jpegBytes, XmpIdentifier);
+        var xmpBlob = ExtractXmpWithExtended(jpegBytes);
         if (xmpBlob != null) image.MetadataBlobs["xmp"] = xmpBlob;
         var iccBlob = ExtractIccProfile(jpegBytes);
         if (iccBlob != null) image.MetadataBlobs["icc"] = iccBlob;
@@ -265,7 +372,7 @@ public static class VipsJpegLoader
         // path; the only difference is jpegBytes won't outlive this method.
         var exifBlob = ExtractApp1Segment(jpegBytes, ExifIdentifier);
         if (exifBlob != null) image.MetadataBlobs["exif"] = exifBlob;
-        var xmpBlob = ExtractApp1Segment(jpegBytes, XmpIdentifier);
+        var xmpBlob = ExtractXmpWithExtended(jpegBytes);
         if (xmpBlob != null) image.MetadataBlobs["xmp"] = xmpBlob;
         var iccBlob = ExtractIccProfile(jpegBytes);
         if (iccBlob != null) image.MetadataBlobs["icc"] = iccBlob;

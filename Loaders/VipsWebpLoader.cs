@@ -3,10 +3,19 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using ImageMagick;
 
 namespace CosmoImage.Loaders;
 
+/// <summary>
+/// WebP loader, pure-managed (no native deps). Decodes VP8L (lossless)
+/// via <see cref="PureWebpLossless"/>; extracts EXIF / XMP / ICCP metadata
+/// via the in-line RIFF walker.
+///
+/// <para>Scope: <b>VP8L lossless only</b>. VP8 lossy and animated WebPs
+/// return <c>null</c> from <see cref="LoadAsync"/> — the loader dispatch
+/// layer is expected to skip to the next handler. (Lossy decode requires
+/// a full VP8 codec port, which is out of scope for this phase.)</para>
+/// </summary>
 public static class VipsWebpLoader
 {
     public static async ValueTask<bool> IsWebpAsync(IVipsSource source, CancellationToken cancellationToken = default)
@@ -19,12 +28,15 @@ public static class VipsWebpLoader
                span[8] == (byte)'W' && span[9] == (byte)'E' && span[10] == (byte)'B' && span[11] == (byte)'P';
     }
 
+    /// <summary>
+    /// Parse the VP8X / VP8 / VP8L chunk to expose dimensions without
+    /// decoding the pixel data. Pure-managed; no codec invoked.
+    /// </summary>
     public static async ValueTask<VipsImage?> LoadHeaderAsync(IVipsSource source, CancellationToken cancellationToken = default)
     {
         if (!await IsWebpAsync(source, cancellationToken))
             return null;
 
-        // Skip RIFF header
         var headerBuffer = new byte[12];
         await source.ReadAsync(headerBuffer, cancellationToken);
 
@@ -44,9 +56,7 @@ public static class VipsWebpLoader
                 if (read < 10) break;
 
                 bool hasAlpha = (data[0] & 0x10) != 0;
-                // Spec: byte 0 = flags, bytes 1..3 = reserved, bytes 4..6 =
-                // canvas_width-1 (24-bit LE), bytes 7..9 = canvas_height-1.
-                int width = 1 + (data[4] | (data[5] << 8) | (data[6] << 16));
+                int width  = 1 + (data[4] | (data[5] << 8) | (data[6] << 16));
                 int height = 1 + (data[7] | (data[8] << 8) | (data[9] << 16));
 
                 return new VipsImage
@@ -61,7 +71,7 @@ public static class VipsWebpLoader
                     YRes = 1.0
                 };
             }
-            else if (type == 0x56503820) // "VP8 "
+            else if (type == 0x56503820) // "VP8 " (lossy)
             {
                 var data = new byte[10];
                 read = await source.ReadAsync(data, cancellationToken);
@@ -69,7 +79,7 @@ public static class VipsWebpLoader
 
                 if ((data[0] & 1) == 0 && data[3] == 0x9D && data[4] == 0x01 && data[5] == 0x2A)
                 {
-                    int width = (BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(6, 2)) & 0x3FFF);
+                    int width  = (BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(6, 2)) & 0x3FFF);
                     int height = (BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(8, 2)) & 0x3FFF);
 
                     return new VipsImage
@@ -94,7 +104,7 @@ public static class VipsWebpLoader
                 if (data[0] == 0x2F)
                 {
                     uint val = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(1, 4));
-                    int width = (int)((val & 0x3FFF) + 1);
+                    int width  = (int)((val & 0x3FFF) + 1);
                     int height = (int)(((val >> 14) & 0x3FFF) + 1);
                     bool hasAlpha = ((val >> 28) & 1) != 0;
 
@@ -126,6 +136,12 @@ public static class VipsWebpLoader
         return null;
     }
 
+    /// <summary>
+    /// Full decode. Returns the VipsImage on VP8L (lossless) success, or
+    /// <c>null</c> for VP8 (lossy), animated (ANIM/ANMF), or malformed
+    /// streams — the dispatch layer is expected to treat null as "this
+    /// loader can't handle the input".
+    /// </summary>
     public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken cancellationToken = default)
     {
         var ms = new MemoryStream();
@@ -137,200 +153,75 @@ public static class VipsWebpLoader
             ms.Write(buffer, 0, readCount);
         }
 
-        var imageBytes = ms.ToArray();
-
-        // Pure-managed fast path for plain VP8L (lossless) WebPs. Returns
-        // null for VP8/VP8X (lossy or animated) — those flow through the
-        // Magick path below.
-        var pure = PureWebpLossless.TryDecode(imageBytes);
-        if (pure != null)
-        {
-            AttachWebpMetadata(imageBytes, pure);
-            return pure;
-        }
-
-        var memSource = new PipeVipsSource(System.IO.Pipelines.PipeReader.Create(new MemoryStream(imageBytes)));
-        var image = await LoadHeaderAsync(memSource, cancellationToken);
-        if (image == null) return null;
-
-        int width = image.Width;
-        int pageHeight = image.Height;
-        int bands = image.Bands;
-
-        // Detect animated WebP via MagickImageCollection. Single-frame WebPs
-        // produce a 1-element collection — we always use the collection path
-        // for uniformity; the per-frame loop just runs once for non-animated.
-        int nPages = 1;
-        string? animationDelays = null;
-        try
-        {
-            using var probe = new MagickImageCollection(imageBytes);
-            nPages = probe.Count;
-            if (nPages > 1)
-            {
-                width = (int)probe[0].Width;
-                pageHeight = (int)probe[0].Height;
-
-                var sb = new System.Text.StringBuilder();
-                for (int i = 0; i < nPages; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append(probe[i].AnimationDelay);
-                }
-                animationDelays = sb.ToString();
-            }
-        }
-        catch { /* fall through; nPages stays 1 */ }
-
-        AttachWebpMetadata(imageBytes, image);
-
-        // Update image dims for animated layout: tall buffer with frames stacked.
-        int totalHeight = pageHeight * nPages;
-        if (nPages > 1)
-        {
-            image.Width = width;
-            image.Height = totalHeight;
-            image.Metadata["n-pages"] = nPages.ToString();
-            image.Metadata["page-height"] = pageHeight.ToString();
-            if (animationDelays != null)
-                image.Metadata["animation-delays"] = animationDelays;
-        }
-
-        image.PixelsLazy = new Lazy<byte[]>(() =>
-        {
-            int stride = width * bands;
-            var buf = new byte[stride * totalHeight];
-
-            using var collection = new MagickImageCollection(imageBytes);
-            for (int p = 0; p < nPages; p++)
-            {
-                var frame = collection[p];
-                if (bands == 4) frame.ColorSpace = ColorSpace.sRGB;
-                else frame.Alpha(AlphaOption.Off);
-
-                using var pixels = frame.GetPixels();
-                int pageBase = p * pageHeight * stride;
-                for (int y = 0; y < pageHeight; y++)
-                {
-                    var row = pixels.GetArea(0, y, (uint)width, 1)
-                        ?? throw new InvalidOperationException($"WebP: page {p} row {y} returned null");
-                    Array.Copy(row, 0, buf, pageBase + y * stride, stride);
-                }
-            }
-            return buf;
-        });
-
-        return image;
+        return DecodeBytes(ms.ToArray());
     }
 
     /// <summary>
-    /// Streaming WebP load: feeds the source directly to Magick.NET, decodes
-    /// all frames eagerly into the same tall buffer (n-pages × page-height
-    /// stack used by animated formats here), and drops the encoded buffer.
+    /// Streaming variant. Same scope (VP8L only); the streaming guarantee
+    /// is moot for VP8L because the entire bitstream is required before
+    /// any pixel can be produced — we still buffer to a byte array.
     /// </summary>
     public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
     {
         if (!await IsWebpAsync(source, cancellationToken)) return null;
         await Task.Yield();
 
-        try
+        using var stream = source.AsStream();
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, cancellationToken);
+        return DecodeBytes(ms.ToArray());
+    }
+
+    private static VipsImage? DecodeBytes(byte[] imageBytes)
+    {
+        var image = PureWebpLossless.TryDecode(imageBytes);
+        if (image == null)
         {
-            using var stream = source.AsStream();
-            using var collection = new MagickImageCollection(stream);
-            if (collection.Count == 0) return null;
-
-            int width = (int)collection[0].Width;
-            int pageHeight = (int)collection[0].Height;
-            int bands = collection[0].HasAlpha ? 4 : 3;
-            int nPages = collection.Count;
-            int totalHeight = pageHeight * nPages;
-
-            int stride = width * bands;
-            var buf = new byte[stride * totalHeight];
-
-            string? animationDelays = null;
-            if (nPages > 1)
-            {
-                var sb = new System.Text.StringBuilder();
-                for (int i = 0; i < nPages; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append(collection[i].AnimationDelay);
-                }
-                animationDelays = sb.ToString();
-            }
-
-            for (int p = 0; p < nPages; p++)
-            {
-                var frame = collection[p];
-                if (bands == 4) frame.ColorSpace = ColorSpace.sRGB;
-                else frame.Alpha(AlphaOption.Off);
-
-                using var pixels = frame.GetPixels();
-                int pageBase = p * pageHeight * stride;
-                for (int y = 0; y < pageHeight; y++)
-                {
-                    var row = pixels.GetArea(0, y, (uint)width, 1)
-                        ?? throw new InvalidOperationException($"WebP streaming: page {p} row {y} returned null");
-                    Array.Copy(row, 0, buf, pageBase + y * stride, stride);
-                }
-            }
-
-            var image = new VipsImage
-            {
-                Width = width,
-                Height = totalHeight,
-                Bands = bands,
-                BandFormat = VipsBandFormat.UChar,
-                Interpretation = VipsInterpretation.RGB,
-                Coding = VipsCoding.None,
-                XRes = 1.0,
-                YRes = 1.0,
-                PixelsLazy = new Lazy<byte[]>(() => buf),
-            };
-
-            if (nPages > 1)
-            {
-                image.Metadata["n-pages"] = nPages.ToString();
-                image.Metadata["page-height"] = pageHeight.ToString();
-                if (animationDelays != null)
-                    image.Metadata["animation-delays"] = animationDelays;
-            }
-
-            // Profiles attach to the first frame.
-            var first = collection[0];
-            var exifProfile = first.GetProfile("exif");
-            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
-            var xmpProfile = first.GetProfile("xmp");
-            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
-            var iccProfile = first.GetColorProfile();
-            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
-
-            return image;
-        }
-        catch
-        {
+            // VP8 (lossy) or animated (ANIM/ANMF) or malformed — out of
+            // scope for the pure-managed loader. Returning null lets the
+            // dispatch layer fall through.
             return null;
         }
+
+        AttachWebpMetadata(imageBytes, image);
+        return image;
     }
 
     /// <summary>
-    /// Best-effort EXIF / XMP / ICC extraction via Magick. Swallows
-    /// failures so metadata extraction never fails an otherwise
-    /// successful load.
+    /// Pure-managed RIFF chunk walker for EXIF / XMP / ICCP. Stops at the
+    /// first VP8/VP8L chunk (metadata always precedes image data when
+    /// present in a VP8X-wrapped file). Best-effort: swallows malformed
+    /// chunks rather than failing the load.
     /// </summary>
-    private static void AttachWebpMetadata(byte[] imageBytes, VipsImage image)
+    private static void AttachWebpMetadata(byte[] bytes, VipsImage image)
     {
-        try
+        if (bytes.Length < 12 + 8) return;
+        int p = 12; // skip RIFF<size>WEBP
+
+        while (p + 8 <= bytes.Length)
         {
-            using var probe = new MagickImage(imageBytes);
-            var exifProfile = probe.GetProfile("exif");
-            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
-            var xmpProfile = probe.GetProfile("xmp");
-            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
-            var iccProfile = probe.GetColorProfile();
-            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
+            uint fourcc = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(p, 4));
+            int len = BitConverter.ToInt32(bytes, p + 4);
+            int payload = p + 8;
+            if (len < 0 || payload + len > bytes.Length) return;
+
+            switch (fourcc)
+            {
+                case 0x50434349: // "ICCP"
+                    image.MetadataBlobs["icc"] = bytes.AsSpan(payload, len).ToArray();
+                    break;
+                case 0x46495845: // "EXIF"
+                    image.MetadataBlobs["exif"] = bytes.AsSpan(payload, len).ToArray();
+                    break;
+                case 0x20504D58: // "XMP "
+                    image.MetadataBlobs["xmp"] = bytes.AsSpan(payload, len).ToArray();
+                    break;
+                case 0x4C385056: // "VP8L"
+                case 0x20385056: // "VP8 "
+                    return;
+            }
+
+            p = payload + len + (len & 1); // RIFF pads payloads to even.
         }
-        catch { /* best-effort */ }
     }
 }

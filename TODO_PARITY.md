@@ -12,6 +12,31 @@ Tier numbers are gone — they over-promised. Replaced with **scope
 classes** (mechanical / op-set / subsystem / native-binding) that
 describe what kind of work each gap is.
 
+> **⚠️ Doc-vs-reality note (Magick.NET removal):** Items in this list
+> originally framed as "drop the Magick dependency in X" have, in many
+> cases, **landed**. Magick.NET is no longer a production dependency.
+> Specific outcomes:
+>
+> - SVG renderer — **shipped** (pure-managed; closes the "permanent
+>   Magick dep" prediction).
+> - WebP VP8L bitstream parser + encoder — **shipped** (palette,
+>   ColorTransform, LZ77, boundary package-merge Huffman).
+> - `IccTransform` — pure-managed CMM **shipped**; still one-shot
+>   (pipeline-aware ICC remains future work).
+> - Artistic effects (`OilPaint` / `Charcoal` / `Sketch` / `Polaroid`)
+>   and quantizers (`Octree` / `Palette` / `FloydSteinberg`) —
+>   pure-managed.
+> - HEIF / AVIF — **dropped** rather than ported. Pure-managed
+>   HEVC/AV1 codecs aren't in reach without a native binding the
+>   .NET ecosystem doesn't have.
+> - WebP VP8 lossy — **dropped** (out of scope for the lossless-only
+>   path).
+>
+> Individual checkboxes below have not been retro-edited in bulk;
+> specific items that are unambiguously closed have been ticked at
+> the leaves. See the README Dependencies section + `CONTRIBUTING.md`
+> for the current policy.
+
 For what's already shipped, see `PARITY_MATRIX.md`. The section
 headers below mirror libvips' subsystem directories.
 
@@ -354,12 +379,23 @@ Magick.NET dependency:
   independently quantized via `VipsOctreeQuantizer`. Drops the last
   GIF-side Magick dependency. (Loader was already pure-C# via
   `PureGifDecoder`.)
-- [ ] **WebP** — VP8 / VP8L bitstream parsers. Significant.
-- [ ] **HEIF / AVIF** — ISOBMFF box parser + AV1 / HEVC bitstream
-  decoder. Out of reach without libheif / libaom; gated on managed
-  AV1 decoder availability.
-- [ ] **SVG** — full vector renderer, not a codec. Likely permanent
-  Magick dep (out of scope to port the rendering engine).
+- [x] ~~**WebP** — VP8L bitstream parser + encoder~~ (this session) —
+  pure-managed lossless: SubtractGreen, color cache, ColorIndexing
+  palette (8/4/2/1 px/byte bundling), ColorTransform with coarse global
+  triple fit, LZ77 with hash-chain match finder, boundary package-merge
+  Huffman length-limiting. VP8 (lossy) and animated dropped — not
+  parsed.
+- [x] ~~**HEIF / AVIF**~~ — **dropped** rather than ported. Pure-managed
+  HEVC/AV1 codecs aren't in reach without native bindings .NET doesn't
+  have. `VipsHeifLoader` sniffs + parses ISOBMFF dimensions but its
+  `LoadAsync` returns null; `VipsHeifSaver` throws with a clear message.
+- [x] ~~**SVG** — full vector renderer~~ (this session) — pure-managed
+  renderer: shapes / paths (with arc-to-cubic), affine transforms,
+  linear + radial gradients with `xlink:href` chain inheritance,
+  `clipPath`, soft `<mask>` (luminance × alpha), text via CosmoFonts
+  (`<text>` base case), filter chain (`feGaussianBlur` / `feOffset`
+  / `feFlood` / `feMerge`). Defers: `<tspan>`, `<use>`, `<image>`,
+  `feComposite`, `feColorMatrix`.
 
 ### `Image<TPixel>` generic op surface
 The `TypedImage<TPixel>` access layer is shipped. Making *every* op

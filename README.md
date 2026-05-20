@@ -130,13 +130,13 @@ The same machinery handles:
 | JPEG | ✅ pure-C# | ✅ | n/a | full + EXIF/XMP via APP1, ICC via multi-segment APP2; JFIF YCbCr / Adobe APP14 RGB / YCCK / CMYK colour-space conversion |
 | PNG | ✅ pure-C# | ✅ | n/a | 8/16-bit, color types 0/2/3/4/6, Adam7 interlace, tRNS; iTXt for XMP |
 | APNG | ✅ pure-C# (incl. IDAT-as-fallback) | ✅ | ✅ animated | full `dispose_op` / `blend_op` composition |
-| WebP | ✅ pure VP8L lossless / Magick for VP8 lossy | ✅ | ✅ animated | EXIF/XMP/ICC via Magick |
+| WebP | ✅ pure-C# (VP8L lossless only) | ✅ pure-C# (VP8L) | ❌ | EXIF/XMP/ICC via pure-managed RIFF walker. VP8 (lossy) and any animated WebP return null. |
 | TIFF | ✅ pure-C# | ✅ | ✅ multi-page + pyramidal Ptif | uncompressed + LZW + Deflate (zlib + raw) + PackBits + JPEG-in-TIFF; predictor=2/3; tiled + tiled+planar=2; FillOrder=2; SampleFormat 1/2/3 incl. signed ints; CMYK + YCbCr photometric; BigTIFF; OME-XML metadata |
 | BMP | ✅ pure-C# | ✅ pure-C# (24/32 bpp) | n/a | full real-world matrix: 1/4/8 bpp paletted, 16 bpp RGB555 + BI_BITFIELDS, 24/32 bpp, BI_RLE4 + BI_RLE8 |
-| GIF | ✅ pure-C# stills / Magick for animated | ✅ | ✅ animated | EXIF/XMP/ICC + Comment via Magick |
-| HEIF / AVIF | ✅ | ✅ single-frame | ✅ animated load (sequence brand `avis` + animated HEIC) | EXIF/XMP/ICC via Magick |
+| GIF | ✅ pure-C# stills | ✅ | ✅ animated | pure-managed decoder + saver |
+| HEIF / AVIF | ❌ | ❌ | ❌ | sniffer + ISOBMFF header parser only; loaders return null, savers throw — no pure-managed HEVC/AV1 codec yet |
 | PDF | ✅ | n/a | ✅ multi-page render | via Docnet |
-| SVG | ✅ raster | n/a | n/a | via Magick |
+| SVG | ✅ pure-managed raster | n/a | n/a | shapes, paths, transforms, gradients (incl. `xlink:href` chains), clipPath, masks, text via CosmoFonts, filter chain (`feGaussianBlur` / `feOffset` / `feFlood` / `feMerge`) |
 
 ### Scientific / niche (all pure-C#)
 
@@ -167,9 +167,10 @@ The same machinery handles:
 | JPEG XL | 🟡 header stub only — full pixel decode needs libjxl |
 | JPEG 2000 | 🟡 header only — needs libjp2k |
 
-EXIF / XMP / ICC blobs round-trip on JPEG, PNG, WebP, TIFF, HEIF, AVIF,
-GIF, and APNG. Cross-format conversion (e.g., JPEG → AVIF) preserves all
-three blob types.
+EXIF / XMP / ICC blobs round-trip on JPEG, PNG, WebP (VP8L), TIFF, GIF,
+and APNG. Cross-format conversion (e.g., JPEG → WebP) preserves all three
+blob types. JPEG additionally supports Adobe ExtendedXMP (multi-segment
+APP1 with GUID + MD5) on both read and write.
 
 ---
 
@@ -267,7 +268,9 @@ image.Maplut(lutImage);
 
 // Color management
 image.Colourspace(VipsInterpretation.Lab);
-image.IccTransform(targetIccProfile, inputIccProfile);  // via Magick.NET
+image.IccTransform(targetIccProfile, inputIccProfile);  // pure-managed CMM:
+                                                        // matrix/TRC, mAB/mBA, CMYK, Lab PCS,
+                                                        // BPC, rendering-intent, up to 8 ink channels
 
 // Format conversion
 image.Cast(VipsBandFormat.Float);
@@ -316,7 +319,7 @@ image.Pixelate(blockSize: 8);              // box-average + nearest upscale
 image.Glow(sigma: 5.0, strength: 0.3);     // bloom-style halo
 image.BokehBlur(radius: 6);                // hex-aperture blur
 
-// Magick.NET-backed artistic effects
+// Pure-managed artistic effects
 image.OilPaint(radius: 3.0, sigma: 1.0);
 image.Charcoal(radius: 1.0, sigma: 0.5);
 image.Sketch(radius: 1.0, sigma: 0.5, angle: 0);
@@ -421,10 +424,10 @@ var eager = await VipsTiffLoader.LoadStreamingAsync(source);
 // lazy keeps ~250 MB, streaming keeps ~200 MB.
 ```
 
-Available on JPEG, TIFF, BMP, WebP (animated), GIF (animated), HEIF/AVIF
-(animated sequences), SVG, plus the Magick wrapper (TGA / QOI / PBM /
-PAM). PNG and PDF still byte-buffer because their decoders take
-`byte[]` only.
+Available on JPEG, TIFF, BMP, GIF (animated), SVG, TGA, QOI, and the PNM
+family. PNG, WebP, and PDF still byte-buffer because their decoders take
+`byte[]` only (WebP because VP8L decode wants the full container; PNG
+because the underlying StbImageSharp decoder is byte-array oriented).
 
 ---
 
@@ -535,8 +538,8 @@ await avif.SaveAvifAsync(writer);
 ```
 
 Cross-format conversion preserves all three blob types between JPEG, PNG,
-WebP, TIFF, HEIF, and AVIF. PNG XMP via `iTXt` and animated-format
-metadata are TODOs.
+WebP (VP8L), and TIFF. PNG XMP via `iTXt` and animated-format metadata are
+TODOs.
 
 ---
 
@@ -731,24 +734,34 @@ dotnet build CosmoImage.csproj
 dotnet test  Tests/CosmoImage.Tests.csproj
 ```
 
-Target framework: **net10.0**. 233 tests cover loaders, savers, ops,
-the typed-pixel layer, the allocator path, and round-trip equivalence
-between lazy and streaming load.
+Target framework: **net10.0**. The test suite (~1700 Fact / InlineData
+instances) covers loaders, savers, ops, the typed-pixel layer, the
+allocator path, round-trip equivalence between lazy and streaming load,
+and end-to-end byte-perfect encode → decode for the pure-managed WebP and
+JPEG paths.
 
 ---
 
 ## Dependencies
 
-Every package is permissive (MIT / Apache-2.0 / BSD / public domain):
+Every package is permissive (MIT / Apache-2.0 / BSD / public domain).
+Production has **no native dependencies** — everything pixel-touching is
+pure managed C#:
 
 | Package | Role |
 | :--- | :--- |
-| `Magick.NET-Q8-arm64` | HEIF/AVIF/WebP/TIFF/GIF/SVG/BMP codecs + profile API; quantization |
-| `JpegLibrary` | JPEG codec |
-| `StbImageSharp` | PNG decode (lightweight) |
-| `MetadataExtractor` | JPEG EXIF parsing |
+| `Cosmo.Transport` | Pipe-reader / pipe-writer source/sink primitives |
+| `CosmoImagePdf.Shared` | Cross-package PDF render glue (paired with `CosmoPdf`) |
+| `CosmoFonts.Core` | OpenType loader + shaping (used by `<text>` in the SVG renderer) |
 | `MathNet.Numerics` | FFT |
-| `System.IO.Hashing` | PNG CRC32 |
+| `System.IO.Hashing` | PNG CRC32, ExtendedXMP MD5 |
+
+Magick.NET used to back HEIF/AVIF, lossy WebP, animated GIF, SVG,
+quantization, and ICC. It has been **removed from production** — replaced
+by pure-managed pipelines (or, in the HEIF/AVIF case, dropped pending a
+pure-managed HEVC/AV1 implementation). It is retained as a **test-only
+oracle** in `Tests/CosmoImage.Tests.csproj` for golden-fixture
+generation; see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the policy.
 
 There is **no Six Labors / ImageSharp** dependency. The library was
 explicitly migrated off it to escape the Six Labors Split License for

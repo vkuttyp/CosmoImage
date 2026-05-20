@@ -414,7 +414,10 @@ public sealed class VipsIccProfile
         int inCh = data[8];
         int outCh = data[9];
         int grid = data[10];
-        if (inCh < 1 || inCh > 4 || outCh < 1 || outCh > 4 || grid < 2 || grid > 255)
+        // Channel cap matches VipsIccLutCmm.MaxDeviceChannels (8). The ICC
+        // spec allows up to 15 but NLinearLookup's stackallocs are sized
+        // for 8 — going wider needs those sizes bumped too.
+        if (inCh < 1 || inCh > 8 || outCh < 1 || outCh > 8 || grid < 2 || grid > 255)
             return null;
 
         var matrix = new double[3, 3];
@@ -492,7 +495,10 @@ public sealed class VipsIccProfile
         int inCh = data[8];
         int outCh = data[9];
         int grid = data[10];
-        if (inCh < 1 || inCh > 4 || outCh < 1 || outCh > 4 || grid < 2 || grid > 255)
+        // Channel cap matches VipsIccLutCmm.MaxDeviceChannels (8). The ICC
+        // spec allows up to 15 but NLinearLookup's stackallocs are sized
+        // for 8 — going wider needs those sizes bumped too.
+        if (inCh < 1 || inCh > 8 || outCh < 1 || outCh > 8 || grid < 2 || grid > 255)
             return null;
 
         var matrix = new double[3, 3];
@@ -559,7 +565,9 @@ public sealed class VipsIccProfile
 
         int inCh = data[8];
         int outCh = data[9];
-        if (inCh < 1 || inCh > 4 || outCh < 1 || outCh > 4) return null;
+        // Channel cap matches VipsIccLutCmm.MaxDeviceChannels (8). See note
+        // on mft2 above for why 8 and not the spec's 15.
+        if (inCh < 1 || inCh > 8 || outCh < 1 || outCh > 8) return null;
 
         uint offB = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(12, 4));
         uint offMatrix = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(16, 4));

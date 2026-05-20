@@ -14,6 +14,24 @@ choice and won't ever close — others are just work we haven't done.
 
 Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing.
 
+> **⚠️ Doc-vs-reality note (Magick.NET removal):** This matrix predates
+> the production-side removal of `Magick.NET`. Any cell below that
+> reads "via Magick", "Magick-backed", "Magick.NET-Q8", or claims
+> Magick as a current dependency describes the **prior state**, not the
+> current implementation. As of the removal:
+>
+> - **Pure-managed now:** SVG raster, WebP VP8L lossless encoder,
+>   `IccTransform`, quantizers (`VipsOctreeQuantizer` /
+>   `VipsPaletteQuantizer` / `VipsFloydSteinbergQuantizer`), artistic
+>   effects (`OilPaint` / `Charcoal` / `Sketch` / `Polaroid`).
+> - **Dropped:** HEIF / AVIF entirely (no pure-managed HEVC/AV1 codec
+>   yet — was previously an ImageSharp *advantage*; now a parity gap),
+>   WebP VP8 lossy.
+>
+> Individual line items below have **not** been retro-edited; they will
+> be updated as the team revisits each subsystem. See `README.md`
+> Dependencies section + `CONTRIBUTING.md` for the current policy.
+
 ---
 
 ## Architecture

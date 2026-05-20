@@ -1,6 +1,10 @@
 using System;
+using System.IO;
 using System.IO.Pipelines;
 using System.Threading.Tasks;
+using CosmoImage.Core;
+using CosmoImage.Loaders;
+using CosmoImage.Savers;
 using Xunit;
 
 namespace CosmoImage.Tests;
@@ -53,4 +57,65 @@ public class HeifLoaderTests
         // Assert
         Assert.True(isHeif);
     }
+
+    [Fact]
+    public async Task LoadAsync_ValidHeic_ReturnsNull()
+    {
+        // Contract: HEIF decoding is not implemented (see CONTRIBUTING.md).
+        // LoadAsync returns null even for a valid HEIC bitstream, so the
+        // dispatch layer falls through to the next loader.
+        byte[] heicBytes = { 0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63 };
+        var pipe = new Pipe();
+        await pipe.Writer.WriteAsync(heicBytes);
+        await pipe.Writer.CompleteAsync();
+        await using var source = new PipeVipsSource(pipe.Reader);
+
+        var result = await VipsHeifLoader.LoadAsync(source);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task LoadStreamingAsync_ValidHeic_ReturnsNull()
+    {
+        byte[] heicBytes = { 0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63 };
+        var pipe = new Pipe();
+        await pipe.Writer.WriteAsync(heicBytes);
+        await pipe.Writer.CompleteAsync();
+        await using var source = new PipeVipsSource(pipe.Reader);
+
+        var result = await VipsHeifLoader.LoadStreamingAsync(source);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task SaveHeifAsync_Throws()
+    {
+        var img = MakeMinimalImage();
+        using var ms = new MemoryStream();
+        var writer = PipeWriter.Create(ms);
+        var ex = await Assert.ThrowsAsync<NotSupportedException>(
+            () => VipsHeifSaver.SaveHeifAsync(img, writer));
+        Assert.Contains("HEVC", ex.Message);
+    }
+
+    [Fact]
+    public async Task SaveAvifAsync_Throws()
+    {
+        var img = MakeMinimalImage();
+        using var ms = new MemoryStream();
+        var writer = PipeWriter.Create(ms);
+        var ex = await Assert.ThrowsAsync<NotSupportedException>(
+            () => VipsHeifSaver.SaveAvifAsync(img, writer));
+        Assert.Contains("AV1", ex.Message);
+    }
+
+    private static VipsImage MakeMinimalImage() => new VipsImage
+    {
+        Width = 4, Height = 4, Bands = 3,
+        BandFormat = VipsBandFormat.UChar,
+        Interpretation = VipsInterpretation.RGB,
+        Coding = VipsCoding.None,
+        XRes = 1.0, YRes = 1.0,
+        PixelsLazy = new Lazy<byte[]>(() => new byte[48]),
+    };
 }

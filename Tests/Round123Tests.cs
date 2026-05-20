@@ -224,6 +224,62 @@ public class Round123Tests
     }
 
     [Fact]
+    public void LutCmm_FiveInkProfile_TryBuildSucceedsAndApplies()
+    {
+        // Task #28: VipsIccLutCmm was capped at 4 device channels; n-ink
+        // profiles (Hexachrome, CMYK + Orange/Green, 7-color press) were
+        // rejected at TryBuild. We bumped the cap to MaxDeviceChannels = 8.
+        // Synthetic profile: 5-channel device → 3-channel PCS, with a
+        // small CLUT where output[c] = average of the 5 inputs.
+        var src = VipsIccProfile.TryParse(BuildFiveInkSourceProfile())!;
+        var dst = VipsIccProfile.TryParse(BuildIdentityRgbDest())!;
+        var cmm = VipsIccLutCmm.TryBuild(src, dst);
+        Assert.NotNull(cmm);
+        Assert.Equal(5, cmm!.SrcChannels);
+        Assert.Equal(3, cmm.DstChannels);
+
+        // Single pixel through to verify the per-pixel loop's stackalloc
+        // bumps are correct. Pure-ink-1 input (255, 0, 0, 0, 0) averages to
+        // 1/5 = 0.2 → ~51.
+        var input = new byte[] { 255, 0, 0, 0, 0 };
+        var output = new byte[3];
+        cmm.Apply(input, 0, srcBands: 5, output, 0, dstBands: 3, count: 1);
+        Assert.InRange(output[0], (byte)45, (byte)60);
+        Assert.InRange(output[1], (byte)45, (byte)60);
+        Assert.InRange(output[2], (byte)45, (byte)60);
+    }
+
+    /// <summary>5-channel n-ink mAB source profile with a 2^5 = 32-entry CLUT
+    /// implementing the "average all inputs" mapping. Small enough to fit in a
+    /// test fixture; large enough to exercise the n-linear CLUT lookup at 5D.</summary>
+    private static byte[] BuildFiveInkSourceProfile()
+    {
+        var idCurve = new ushort[256];
+        for (int i = 0; i < 256; i++) idCurve[i] = (ushort)(i * 65535 / 255);
+
+        const int g = 2;  // 2 grid points per axis → 32-entry CLUT
+        var clut = new ushort[g * g * g * g * g * 3];
+        int idx = 0;
+        for (int a = 0; a < g; a++)
+        for (int b = 0; b < g; b++)
+        for (int c = 0; c < g; c++)
+        for (int d = 0; d < g; d++)
+        for (int e = 0; e < g; e++)
+        {
+            double avg = (a + b + c + d + e) / 5.0;  // each is 0 or 1
+            ushort v = (ushort)Math.Round(avg * 65535);
+            clut[idx++] = v; clut[idx++] = v; clut[idx++] = v;
+        }
+        var aCurves = new[] { idCurve, idCurve, idCurve, idCurve, idCurve };
+        var bCurves = new[] { idCurve, idCurve, idCurve };
+        var identity = new double[3, 4] { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 } };
+        var mab = BuildLutAB(isAtoB: true, inCh: 5, outCh: 3,
+            aCurves: aCurves, bCurves: bCurves, matrix: identity,
+            clut: (new[] { g, g, g, g, g }, clut));
+        return BuildSyntheticProfile(mab, mab);
+    }
+
+    [Fact]
     public void LutCmm_CmykWithAlpha_PassesThrough()
     {
         // Source: CMYK + alpha (5 bands), dest: RGB + alpha (4 bands).

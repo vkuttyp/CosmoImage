@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Runtime.CompilerServices;
 using CosmoImage.Operations.Metadata;
-using ImageMagick;
 
 namespace CosmoImage.Operations.Color;
 
@@ -36,9 +35,12 @@ public class VipsIccTransform : VipsOperation
 
         // Pre-build a pure CMM if possible. Try Matrix/TRC first (the 90%
         // case — sRGB / AdobeRGB / Display-P3 / etc., precomputed LUTs);
-        // fall through to the LUT-based CMM (printer / scanner profiles
-        // using mft2); finally fall back to Magick for anything else
-        // (mAB / mBA, CMYK destination, Lab in unusual encodings).
+        // fall through to the LUT-based CMM (mft1/mft2 lut tables, mAB/mBA
+        // multi-process elements, CMYK 4D CLUTs, Lab PCS — covered by
+        // Round121–123 tests). Throw at Generate time only for the narrow
+        // cases that escape both paths: channel-count mismatch with a
+        // matrix profile, missing A2B/B2A tags, or 5+ channel device
+        // profiles — see Generate() for the diagnostic message.
         VipsIccCmm? matrixCmm = null;
         VipsIccLutCmm? lutCmm = null;
         if (InputProfile != null)
@@ -60,6 +62,10 @@ public class VipsIccTransform : VipsOperation
         int dstBands = 3;
         if (lutCmm != null) dstBands = lutCmm.DstChannels;
         if (In.Bands == dstBands + 1 || In.Bands == 4 && dstBands == 3) dstBands = In.Bands;
+        // Gray+alpha (2-band) through a 3-channel matrix CMM: preserve alpha
+        // so the output is RGBA (4 bands), not just RGB. Pure-gray (1-band)
+        // through matrix CMM stays at 3 (no alpha to preserve).
+        else if (matrixCmm != null && In.Bands == 2 && dstBands == 3) dstBands = 4;
 
         Out = new VipsImage
         {
@@ -77,8 +83,6 @@ public class VipsIccTransform : VipsOperation
             ClientA = In,
             ClientB = new TransformContext
             {
-                InputProfile = InputProfile,
-                OutputProfile = OutputProfile,
                 Cmm = matrixCmm,
                 LutCmm = lutCmm,
                 DstBands = dstBands,
@@ -92,8 +96,6 @@ public class VipsIccTransform : VipsOperation
 
     private sealed class TransformContext
     {
-        public byte[]? InputProfile;
-        public byte[]? OutputProfile;
         public VipsIccCmm? Cmm;
         public VipsIccLutCmm? LutCmm;
         public int DstBands;
@@ -124,10 +126,38 @@ public class VipsIccTransform : VipsOperation
         int dstBands = ctx.DstBands;
         if (ctx.Cmm != null && srcBands == dstBands && (srcBands == 3 || srcBands == 4))
             return GeneratePureCmm(inRegion, outRegion, r, srcBands, ctx.Cmm);
+        // Gray (or gray + alpha) input through an RGB matrix profile: replicate
+        // the gray byte to all three channels before the matrix multiply. The
+        // output is 3-band RGB (or 4-band RGBA with the source alpha preserved).
+        if (ctx.Cmm != null && (srcBands == 1 || srcBands == 2)
+            && (dstBands == 3 || dstBands == 4))
+            return GeneratePureCmmFromGray(inRegion, outRegion, r, srcBands, dstBands, ctx.Cmm);
         if (ctx.LutCmm != null)
             return GeneratePureLutCmm(inRegion, outRegion, r, srcBands, dstBands, ctx.LutCmm);
 
-        return GenerateMagick(inRegion, outRegion, r, srcBands, ctx.InputProfile, ctx.OutputProfile!);
+        // We reach here only when both CMMs failed to build/match. The pure
+        // CMM stack covers Matrix/TRC (sRGB-family), mft1/mft2 lut tables,
+        // mAB/mBA multi-process elements, CMYK 4D CLUTs, Lab PCS, BPC, and
+        // rendering-intent selection — covered by Round121–123 + Round137
+        // tests. The realistic triggers for this throw are narrow:
+        //
+        //   • Matrix profile matched but srcBands isn't 3 or 4 (e.g.
+        //     1-band gray input through an RGB matrix profile).
+        //   • srcBands ≠ dstBands and no LUT path applies (matrix profiles
+        //     can't change channel count).
+        //   • Profile pair has no A2B/B2A tag in any rendering intent and
+        //     also isn't a matrix profile (uncommon — most v2 / v4
+        //     profiles carry at least the perceptual tag).
+        //   • Device profiles with 5+ channels (Hexachrome, n-ink) —
+        //     VipsIccLutCmm caps SrcChannels/DstChannels at 4.
+        throw new NotSupportedException(
+            $"ICC transform: cannot build a pure-managed CMM for this profile pair " +
+            $"with srcBands={srcBands}, dstBands={dstBands}. " +
+            $"Matrix={(ctx.Cmm != null ? "built" : "not buildable")}, " +
+            $"LUT={(ctx.LutCmm != null ? "built" : "not buildable")}. " +
+            "Likely cause: channel-count mismatch (e.g. 1-band gray through an RGB matrix " +
+            "profile), profile pair missing A2B/B2A tags, or a 5+ channel device profile. " +
+            "Convert to a 3- or 4-band image first, or extend VipsIccLutCmm's channel cap.");
     }
 
     /// <summary>
@@ -148,6 +178,42 @@ public class VipsIccTransform : VipsOperation
             var inLine = inRegion.GetAddress(r.Left, r.Top + y);
             inLine.Slice(0, srcRowBytes).CopyTo(rowBuf);
             cmm.Apply(rowBuf, 0, srcBands, dstBuf, 0, dstBands, r.Width);
+            var outLine = outRegion.GetAddress(r.Left, r.Top + y);
+            dstBuf.AsSpan(0, dstRowBytes).CopyTo(outLine);
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Auto-promote 1-band gray (or 2-band gray+alpha) input to 3 (or 4)
+    /// channels before running the matrix CMM. Common workflow: applying
+    /// an sRGB ICC transform to a grayscale image — without this branch the
+    /// shape mismatch would have thrown.
+    /// </summary>
+    private static int GeneratePureCmmFromGray(VipsRegion inRegion, VipsRegion outRegion,
+        VipsRect r, int srcBands, int dstBands, VipsIccCmm cmm)
+    {
+        bool hasAlpha = srcBands == 2;
+        int matrixBands = hasAlpha ? 4 : 3;
+        int srcRowBytes = r.Width * srcBands;
+        int matrixRowBytes = r.Width * matrixBands;
+        int dstRowBytes = r.Width * dstBands;
+        var expanded = new byte[matrixRowBytes];
+        var dstBuf = new byte[matrixRowBytes];
+        for (int y = 0; y < r.Height; y++)
+        {
+            var inLine = inRegion.GetAddress(r.Left, r.Top + y);
+            for (int x = 0; x < r.Width; x++)
+            {
+                int sp = x * srcBands;
+                int dp = x * matrixBands;
+                byte g = inLine[sp];
+                expanded[dp + 0] = g;
+                expanded[dp + 1] = g;
+                expanded[dp + 2] = g;
+                if (hasAlpha) expanded[dp + 3] = inLine[sp + 1];
+            }
+            cmm.Apply(expanded, 0, dstBuf, 0, r.Width, matrixBands);
             var outLine = outRegion.GetAddress(r.Left, r.Top + y);
             dstBuf.AsSpan(0, dstRowBytes).CopyTo(outLine);
         }
@@ -177,42 +243,4 @@ public class VipsIccTransform : VipsOperation
         return 0;
     }
 
-    private static int GenerateMagick(VipsRegion inRegion, VipsRegion outRegion,
-        VipsRect r, int bands, byte[]? inputProfile, byte[] outputProfile)
-    {
-        // Magick fallback for LUT-based / Lab / CMYK / grayscale profiles.
-        // Re-encodes the region through MagickImage to apply the transform —
-        // slow but correct for profile types the pure CMM doesn't model.
-        byte[] pix = new byte[r.Width * r.Height * bands];
-        for (int y = 0; y < r.Height; y++)
-        {
-            var line = inRegion.GetAddress(r.Left, r.Top + y);
-            line.Slice(0, r.Width * bands).CopyTo(pix.AsSpan(y * r.Width * bands));
-        }
-
-        using var magickImage = new MagickImage();
-        var settings = new MagickReadSettings
-        {
-            Width = (uint)r.Width,
-            Height = (uint)r.Height,
-            Format = bands == 3 ? MagickFormat.Rgb : (bands == 1 ? MagickFormat.Gray : MagickFormat.Rgba),
-        };
-        magickImage.Read(pix, settings);
-
-        if (inputProfile != null)
-            magickImage.SetProfile(new ColorProfile(inputProfile));
-        magickImage.SetProfile(new ColorProfile(outputProfile));
-
-        using var outPixels = magickImage.GetPixels();
-        var outData = outPixels.ToByteArray(0, 0, (uint)r.Width, (uint)r.Height, "RGB");
-        if (outData == null) return -1;
-
-        int outBands = 3;
-        for (int y = 0; y < r.Height; y++)
-        {
-            var destLine = outRegion.GetAddress(r.Left, r.Top + y);
-            outData.AsSpan(y * r.Width * outBands, r.Width * outBands).CopyTo(destLine);
-        }
-        return 0;
-    }
 }

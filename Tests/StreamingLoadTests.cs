@@ -145,18 +145,24 @@ public class StreamingLoadTests
     [Fact]
     public async Task Webp_StreamingLoad_PropagatesMetadata()
     {
-        byte[] bytes;
-        using (var ms = new MemoryStream())
+        // Previously generated a lossy WebP via Magick; now we encode a
+        // lossless WebP via our own encoder so the streaming load exercises
+        // the pure-managed path end-to-end.
+        const int W = 16, H = 16;
+        var px = new byte[W * H * 4];
+        for (int p = 0; p < W * H; p++)
         {
-            using var img = new ImageMagick.MagickImage(ImageMagick.MagickColors.Green, 16, 16);
-            img.Write(ms, ImageMagick.MagickFormat.WebP);
-            bytes = ms.ToArray();
+            px[p * 4 + 0] = 0;
+            px[p * 4 + 1] = 128;
+            px[p * 4 + 2] = 0;
+            px[p * 4 + 3] = 255;
         }
+        var bytes = CosmoImage.Savers.PureWebpLosslessEncoder.Encode(px, W, H);
 
         var streamed = await VipsWebpLoader.LoadStreamingAsync(SourceFromBytes(bytes));
         Assert.NotNull(streamed);
-        Assert.Equal(16, streamed!.Width);
-        Assert.Equal(16, streamed.Height);
+        Assert.Equal(W, streamed!.Width);
+        Assert.Equal(H, streamed.Height);
     }
 
     [Fact]

@@ -130,20 +130,37 @@ public class Round113Tests
     }
 
     [Fact]
-    public async Task LoadAsync_LossyWebp_FallsBackToMagick()
+    public async Task LoadAsync_LosslessWebp_RoundTripsViaPureManagedPath()
     {
+        // Previously generated lossy WebP via Magick and relied on the
+        // Magick fallback. Pure-managed loader is VP8L lossless only —
+        // encode via our own encoder and verify round-trip end-to-end.
         int w = 16, h = 8;
         var px = BuildRgbaPixels(w, h);
-        var settings = new MagickReadSettings { Width = (uint)w, Height = (uint)h, Format = MagickFormat.Rgba, Depth = 8 };
-        using var mi = new MagickImage();
-        mi.Read(px, settings);
-        mi.Format = MagickFormat.WebP;
-        mi.Quality = 90;
-        var webp = mi.ToByteArray();
+        var webp = CosmoImage.Savers.PureWebpLosslessEncoder.Encode(px, w, h);
         var src = new PipeVipsSource(PipeReader.Create(new MemoryStream(webp)));
         var img = await VipsWebpLoader.LoadAsync(src);
         Assert.NotNull(img);
         Assert.Equal(w, img!.Width);
         Assert.Equal(h, img.Height);
+    }
+
+    [Fact]
+    public async Task LoadAsync_LossyWebp_ReturnsNull()
+    {
+        // Hand-craft a RIFF/WEBP file with a VP8 chunk header. The loader's
+        // chunk walker rejects VP8 before any decode is attempted — no
+        // codec needed for the assertion.
+        var fake = new byte[]
+        {
+            (byte)'R', (byte)'I', (byte)'F', (byte)'F',
+            12, 0, 0, 0,
+            (byte)'W', (byte)'E', (byte)'B', (byte)'P',
+            (byte)'V', (byte)'P', (byte)'8', (byte)' ',
+            0, 0, 0, 0,
+        };
+        var src = new PipeVipsSource(PipeReader.Create(new MemoryStream(fake)));
+        var img = await VipsWebpLoader.LoadAsync(src);
+        Assert.Null(img);
     }
 }

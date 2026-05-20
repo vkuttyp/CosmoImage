@@ -10,6 +10,28 @@ magnitude — this rewrite mirrors libvips' actual subsystem layout
 
 Status legend: ✅ full · 🟢 production-ready · 🟡 partial · ❌ missing
 
+> **⚠️ Doc-vs-reality note (Magick.NET removal):** This matrix predates
+> the production-side removal of `Magick.NET`. Any cell below that reads
+> "via Magick", "Magick-backed", or "Magick.NET-Q8" describes the **prior
+> state**, not the current implementation. As of the removal:
+>
+> - **Pure-managed now (Magick path replaced):** SVG (full renderer with
+>   shapes / paths / transforms / gradients incl. `xlink:href` chains /
+>   clipPath / masks / text via CosmoFonts / filter chain), WebP VP8L
+>   lossless encoder (palette + ColorTransform + LZ77 + boundary
+>   package-merge Huffman), `IccTransform` (matrix/TRC + mAB/mBA + CMYK
+>   + Lab + BPC + rendering intent + n-ink ≤ 8), quantizers
+>   (`VipsOctreeQuantizer` / `VipsPaletteQuantizer` /
+>   `VipsFloydSteinbergQuantizer`), artistic effects (`OilPaint` /
+>   `Charcoal` / `Sketch` / `Polaroid`).
+> - **Dropped (no replacement):** HEIF / AVIF (loaders return null,
+>   savers throw — no pure-managed HEVC/AV1 codec), WebP VP8 lossy
+>   load/save, DICOM.
+>
+> Individual line items below have **not** been retro-edited; they will
+> be updated as the team revisits each subsystem. See `README.md`
+> Dependencies section + `CONTRIBUTING.md` for the current policy.
+
 ---
 
 ## Architecture (`iofuncs/`)

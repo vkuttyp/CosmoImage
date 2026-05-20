@@ -9,6 +9,13 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <!--
+      Magick.NET is a test-only oracle: it synthesises reference fixtures
+      (e.g. golden ICC-transformed images) for verifying our pure-managed
+      encoder/decoder output. NEVER pull this into the production csproj —
+      see CONTRIBUTING.md for the policy.
+    -->
+    <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.13.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
@@ -35,6 +42,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CosmoImage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\*.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
