@@ -3,6 +3,7 @@ using System.IO.Pipelines;
 using System.Threading.Tasks;
 using CosmoImage.Loaders;
 using CosmoImage.Savers;
+using ImageMagick;
 using Xunit;
 
 namespace CosmoImage.Tests;
@@ -47,6 +48,13 @@ public class OmeTiffTests
 
     private static IVipsSource SourceFromBytes(byte[] bytes)
         => new PipeVipsSource(PipeReader.Create(new MemoryStream(bytes)));
+
+    private static byte[] LoadProfile(IImageProfile profile)
+    {
+        using var ms = new MemoryStream();
+        ms.Write(profile.ToByteArray());
+        return ms.ToArray();
+    }
 
     [Fact]
     public void LooksLikeOmeXml_DistinguishesOmeFromGenericXml()
@@ -136,6 +144,21 @@ public class OmeTiffTests
         Assert.Equal("ordinary photographer's notes, not OME-XML",
             loaded!.Metadata["tiff:image-description"]);
         Assert.False(VipsOmeTiff.IsOmeTiff(loaded));
+    }
+
+    [Fact]
+    public async Task TiffIccProfile_RoundTripsThroughNativeLoader()
+    {
+        var src = Uniform(4, 4, value: 100, bands: 3);
+        var icc = LoadProfile(ColorProfiles.SRGB);
+        src.MetadataBlobs["icc"] = icc;
+
+        var bytes = await SaveToBytesAsync(w => VipsTiffSaver.SaveAsync(src, w));
+        var loaded = await VipsTiffLoader.LoadAsync(SourceFromBytes(bytes));
+
+        Assert.NotNull(loaded);
+        Assert.True(loaded!.MetadataBlobs.ContainsKey("icc"));
+        Assert.Equal(icc, loaded.MetadataBlobs["icc"]);
     }
 
     [Fact]

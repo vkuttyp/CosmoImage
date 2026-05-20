@@ -12,8 +12,8 @@ namespace CosmoImage.Tests;
 /// Round 198 — <see cref="PureJpegDecoder"/>: pure-C# baseline JPEG
 /// decoder. Drops the JpegLibrary dependency for the dominant on-the-
 /// web JPEG subset (SOF0 baseline sequential, 8-bit, Huffman-coded).
-/// Falls back to JpegLibrary for progressive (SOF2) / arithmetic /
-/// 12-bit / lossless variants where the pure path returns null.
+/// Handles baseline and progressive JPEGs natively. Unsupported
+/// variants now fail explicitly rather than falling back to Magick.
 ///
 /// <para>Tests encode known images via the existing JPEG saver
 /// (which produces SOF0 baseline) and decode via PureJpegDecoder
@@ -152,9 +152,9 @@ public class Round198Tests
     }
 
     [Fact]
-    public async Task LoaderFastPath_ProducesSameResultAsFallback()
+    public async Task LoaderFastPath_ProducesExpectedBaselinePixels()
     {
-        // End-to-end: VipsJpegLoader.LoadAsync now routes through
+        // End-to-end: VipsJpegLoader.LoadAsync routes through
         // PureJpegDecoder for baseline JPEGs. Verify the loader's
         // pixel output is reasonable for a baseline JPEG.
         var src = SmoothRgb(64, 64);

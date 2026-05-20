@@ -17,7 +17,8 @@ namespace CosmoImage.Loaders;
 ///   <item>Uncompressed grayscale (type 3) and RLE grayscale (type 11)
 ///         at depth 8</item>
 /// </list>
-/// Anything outside this set falls back to Magick.NET.
+/// Anything outside this set throws a clear <see cref="NotSupportedException"/>
+/// instead of silently routing through Magick.NET.
 ///
 /// <para>TGA has no fixed magic at file offset 0. <see cref="IsTgaAsync"/>
 /// uses a coarse-but-reliable header validity check (image type ∈
@@ -58,10 +59,7 @@ public static class VipsTgaLoader
         var fast = TryDecodePureCSharp(bytes);
         if (fast != null) return fast;
 
-        return await VipsMagickWrapLoader.LoadAsync(
-            new PipeVipsSource(System.IO.Pipelines.PipeReader.Create(new MemoryStream(bytes))),
-            cancellationToken,
-            ImageMagick.MagickFormat.Tga);
+        throw new NotSupportedException("Unsupported TGA variant. CosmoImage only supports types 1/2/3/9/10/11 with 8/15/16/24/32-bit pixels.");
     }
 
     /// <summary>Streaming variant — same eager-buffer shape since TGA fast path needs random access.</summary>
@@ -70,8 +68,7 @@ public static class VipsTgaLoader
 
     /// <summary>
     /// Pure-C# decoder for non-paletted TGAs. Returns <see langword="null"/>
-    /// when the image type or depth is outside the supported set, signalling
-    /// the caller to fall back to Magick.
+    /// when the image type or depth is outside the supported set.
     /// </summary>
     private static VipsImage? TryDecodePureCSharp(byte[] bytes)
     {

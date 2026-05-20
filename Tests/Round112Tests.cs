@@ -113,10 +113,11 @@ public class Round112Tests
     }
 
     [Fact]
-    public async Task LoadAsync_HeterogeneousMultiPage_FallsBackToMagick()
+    public async Task LoadAsync_HeterogeneousMultiPage_ReturnsNull()
     {
-        // Pages with different dimensions can't be flat-stacked. Pure
-        // decoder rejects → Magick fallback collapses to single page.
+        // Pages with different dimensions can't be flat-stacked, and the
+        // native-only TIFF loader now rejects them instead of collapsing
+        // to the first page through Magick.
         using var collection = new MagickImageCollection();
         collection.Add(BuildPage(8, 4, 0));
         collection.Add(BuildPage(16, 8, 60));
@@ -131,10 +132,7 @@ public class Round112Tests
 
         var src = new PipeVipsSource(PipeReader.Create(new MemoryStream(tiff)));
         var img = await VipsTiffLoader.LoadAsync(src);
-        // Magick path returns the first page only when heterogeneous —
-        // either way we should get a valid image.
-        Assert.NotNull(img);
-        Assert.Equal(8, img!.Width);
+        Assert.Null(img);
     }
 
     [Fact]

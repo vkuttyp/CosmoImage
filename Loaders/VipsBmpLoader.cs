@@ -3,8 +3,6 @@ using System.Buffers.Binary;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using ImageMagick;
-
 namespace CosmoImage.Loaders;
 
 public static class VipsBmpLoader
@@ -77,12 +75,11 @@ public static class VipsBmpLoader
     }
 
     /// <summary>
-    /// Full BMP load with pixel data. Tries the pure-C# fast path first
-    /// (24bpp BGR / 32bpp BGRA, BI_RGB compression, BITMAPINFOHEADER) which
-    /// covers the modern common cases without a Magick.NET hop. Falls back
-    /// to Magick for paletted (1/4/8 bpp), 16-bit RGB555, RLE-compressed
-    /// (BI_RLE4 / BI_RLE8), BITFIELDS-masked, V4/V5 colour-space variants,
-    /// and any header version we don't recognise.
+    /// Full BMP load with pixel data. Supports the real-world BMP matrix in
+    /// pure C#: paletted 1/4/8 bpp, 16-bit BI_RGB RGB555, 24-bit BGR, 32-bit
+    /// BGRA, BI_RLE4, BI_RLE8, and BI_BITFIELDS for 16/32-bpp masked pixels.
+    /// Returns <see langword="null"/> for malformed input or unsupported BMP
+    /// variants we do not yet model.
     /// </summary>
     public static async ValueTask<VipsImage?> LoadAsync(IVipsSource source, CancellationToken cancellationToken = default)
     {
@@ -100,19 +97,12 @@ public static class VipsBmpLoader
 
         var imageBytes = ms.ToArray();
 
-        // Fast path: 24/32 bpp BI_RGB.
-        var fast = TryDecodePureCSharp(imageBytes);
-        if (fast != null) return fast;
-
-        // Fallback to Magick for everything else.
-        return DecodeViaMagick(imageBytes);
+        return TryDecodePureCSharp(imageBytes);
     }
 
     /// <summary>
-    /// Pure-C# decoder for the common BMP variants (BITMAPINFOHEADER,
-    /// 24bpp BGR or 32bpp BGRA, BI_RGB compression). Returns
-    /// <see langword="null"/> when the file uses a variant we don't handle,
-    /// signalling the caller to fall back to Magick.
+    /// Pure-C# decoder for the supported BMP variants. Returns
+    /// <see langword="null"/> when the file uses a variant we don't handle.
     /// </summary>
     private static VipsImage? TryDecodePureCSharp(byte[] bytes)
     {
@@ -531,107 +521,7 @@ public static class VipsBmpLoader
         WritePaletteEntry(pixels, dst, palette, idx);
     }
 
-    private static VipsImage? DecodeViaMagick(byte[] imageBytes)
-    {
-        int width, height, bands;
-        try
-        {
-            using var probe = new MagickImage(imageBytes);
-            width = (int)probe.Width;
-            height = (int)probe.Height;
-            int colorBands = probe.ColorSpace == ColorSpace.Gray ? 1 : 3;
-            bands = colorBands + (probe.HasAlpha ? 1 : 0);
-        }
-        catch
-        {
-            return null;
-        }
-
-        return new VipsImage
-        {
-            Width = width,
-            Height = height,
-            Bands = bands,
-            BandFormat = VipsBandFormat.UChar,
-            Interpretation = bands <= 2 ? VipsInterpretation.BW : VipsInterpretation.RGB,
-            Coding = VipsCoding.None,
-            XRes = 1.0,
-            YRes = 1.0,
-            PixelsLazy = new Lazy<byte[]>(() =>
-            {
-                using var img = new MagickImage(imageBytes);
-                int stride = width * bands;
-                var buf = new byte[stride * height];
-
-                if (bands == 1) img.ColorSpace = ColorSpace.Gray;
-                else if (bands == 3 && img.HasAlpha) img.Alpha(AlphaOption.Off);
-                else if (bands == 4 && !img.HasAlpha) img.Alpha(AlphaOption.On);
-
-                using var pixels = img.GetPixels();
-                for (int y = 0; y < height; y++)
-                {
-                    var row = pixels.GetArea(0, y, (uint)width, 1)
-                        ?? throw new InvalidOperationException($"BMP: pixel row {y} returned null");
-                    Array.Copy(row, 0, buf, y * stride, stride);
-                }
-                return buf;
-            })
-        };
-    }
-
-    /// <summary>
-    /// Streaming BMP load: feeds the source directly to Magick.NET, decodes
-    /// pixels eagerly, and drops the encoded buffer. Trades the laziness of
-    /// <see cref="LoadAsync"/> for not holding the encoded BMP alongside the
-    /// decoded pixel buffer.
-    /// </summary>
-    public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
-    {
-        if (!await IsBmpAsync(source, cancellationToken)) return null;
-        await Task.Yield();
-
-        try
-        {
-            using var stream = source.AsStream();
-            using var img = new MagickImage(stream);
-
-            int width = (int)img.Width;
-            int height = (int)img.Height;
-            int colorBands = img.ColorSpace == ColorSpace.Gray ? 1 : 3;
-            int bands = colorBands + (img.HasAlpha ? 1 : 0);
-            int stride = width * bands;
-            var buf = new byte[stride * height];
-
-            if (bands == 1) img.ColorSpace = ColorSpace.Gray;
-            else if (bands == 3 && img.HasAlpha) img.Alpha(AlphaOption.Off);
-            else if (bands == 4 && !img.HasAlpha) img.Alpha(AlphaOption.On);
-
-            using (var pixels = img.GetPixels())
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    var row = pixels.GetArea(0, y, (uint)width, 1)
-                        ?? throw new InvalidOperationException($"BMP streaming: pixel row {y} returned null");
-                    Array.Copy(row, 0, buf, y * stride, stride);
-                }
-            }
-
-            return new VipsImage
-            {
-                Width = width,
-                Height = height,
-                Bands = bands,
-                BandFormat = VipsBandFormat.UChar,
-                Interpretation = bands <= 2 ? VipsInterpretation.BW : VipsInterpretation.RGB,
-                Coding = VipsCoding.None,
-                XRes = 1.0,
-                YRes = 1.0,
-                PixelsLazy = new Lazy<byte[]>(() => buf),
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    /// <summary>Streaming BMP load currently shares the same eager-buffered decoder as <see cref="LoadAsync"/>.</summary>
+    public static ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
+        => LoadAsync(source, cancellationToken);
 }

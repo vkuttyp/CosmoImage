@@ -93,22 +93,8 @@ public class StreamingLoadTests
     [Fact]
     public async Task Bmp_StreamingLoad_MatchesByteBufferedLoad()
     {
-        // Round-trip through Magick: write a BMP, then load back via both paths.
         var src = SyntheticRgb(8, 8, fill: 75);
-        byte[] bytes;
-        using (var ms = new MemoryStream())
-        {
-            using var img = new ImageMagick.MagickImage(ImageMagick.MagickColors.White, 8, 8);
-            // Replace pixels with the synthetic content.
-            using (var pc = img.GetPixels())
-            {
-                var row = new byte[8 * 3];
-                for (int i = 0; i < row.Length; i++) row[i] = 75;
-                for (int y = 0; y < 8; y++) pc.SetArea(0, y, 8, 1, row);
-            }
-            img.Write(ms, ImageMagick.MagickFormat.Bmp);
-            bytes = ms.ToArray();
-        }
+        byte[] bytes = await SaveToBytesAsync(w => VipsBmpSaver.SaveAsync(src, w));
 
         var lazy = await VipsBmpLoader.LoadAsync(SourceFromBytes(bytes));
         var streamed = await VipsBmpLoader.LoadStreamingAsync(SourceFromBytes(bytes));
@@ -176,18 +162,34 @@ public class StreamingLoadTests
     [Fact]
     public async Task Gif_StreamingLoad_AnimatedPropagatesNPages()
     {
-        // Round-trip a 2-frame animated GIF.
-        byte[] bytes;
-        using (var ms = new MemoryStream())
-        using (var col = new ImageMagick.MagickImageCollection())
+        var src = new VipsImage
         {
-            col.Add(new ImageMagick.MagickImage(ImageMagick.MagickColors.Red, 8, 8));
-            col.Add(new ImageMagick.MagickImage(ImageMagick.MagickColors.Blue, 8, 8));
-            col[0].AnimationDelay = 10;
-            col[1].AnimationDelay = 20;
-            col.Write(ms, ImageMagick.MagickFormat.Gif);
-            bytes = ms.ToArray();
-        }
+            Width = 8,
+            Height = 16,
+            Bands = 3,
+            BandFormat = VipsBandFormat.UChar,
+            Interpretation = VipsInterpretation.RGB,
+            GenerateFn = (VipsRegion reg, object? seq, object? a, object? b, ref bool stop) =>
+            {
+                for (int y = 0; y < reg.Valid.Height; y++)
+                {
+                    int gy = reg.Valid.Top + y;
+                    int frame = gy / 8;
+                    var addr = reg.GetAddress(reg.Valid.Left, gy);
+                    for (int x = 0; x < reg.Valid.Width; x++)
+                    {
+                        addr[x * 3 + 0] = (byte)(frame == 0 ? 255 : 0);
+                        addr[x * 3 + 1] = 0;
+                        addr[x * 3 + 2] = (byte)(frame == 1 ? 255 : 0);
+                    }
+                }
+                return 0;
+            }
+        };
+        src.Metadata["n-pages"] = "2";
+        src.Metadata["page-height"] = "8";
+        src.Metadata["animation-delays"] = "10,20";
+        byte[] bytes = await SaveToBytesAsync(w => VipsGifSaver.SaveAsync(src, w));
 
         var streamed = await VipsGifLoader.LoadStreamingAsync(SourceFromBytes(bytes));
         Assert.NotNull(streamed);
@@ -202,6 +204,7 @@ public class StreamingLoadTests
     public async Task Tiff_StreamingLoad_MatchesByteBufferedLoad()
     {
         var src = SyntheticRgb(16, 16, fill: 175);
+        src.Metadata["tiff:image-description"] = "streaming tiff";
         var bytes = await SaveToBytesAsync(w => VipsTiffSaver.SaveAsync(src, w));
 
         var lazy = await VipsTiffLoader.LoadAsync(SourceFromBytes(bytes));
@@ -210,6 +213,8 @@ public class StreamingLoadTests
         Assert.NotNull(streamed);
         Assert.Equal(lazy!.Width, streamed!.Width);
         Assert.Equal(lazy.Height, streamed.Height);
+        Assert.Equal("streaming tiff", lazy.Metadata["tiff:image-description"]);
+        Assert.Equal("streaming tiff", streamed.Metadata["tiff:image-description"]);
 
         using var rl = new VipsRegion(lazy);
         using var rs = new VipsRegion(streamed);

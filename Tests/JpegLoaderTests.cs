@@ -54,4 +54,32 @@ public class JpegLoaderTests
         // Assert
         Assert.True(isJpeg);
     }
+
+    [Fact]
+    public async Task LoadAsync_UnsupportedJpegVariant_ThrowsNotSupported()
+    {
+        // SOF3 (lossless JPEG) marker: recognized as JPEG, but outside the
+        // native decoder contract.
+        byte[] jpegBytes =
+        {
+            0xFF, 0xD8, // SOI
+            0xFF, 0xC3, // SOF3
+            0x00, 0x0B, // length
+            0x08,       // precision
+            0x00, 0x01, // height
+            0x00, 0x01, // width
+            0x01,       // components
+            0x01, 0x11, 0x00,
+            0xFF, 0xD9  // EOI
+        };
+
+        var pipe = new Pipe();
+        await pipe.Writer.WriteAsync(jpegBytes);
+        await pipe.Writer.CompleteAsync();
+
+        await using var source = new PipeVipsSource(pipe.Reader);
+
+        var ex = await Assert.ThrowsAsync<NotSupportedException>(async () => await VipsJpegLoader.LoadAsync(source));
+        Assert.Contains("Unsupported JPEG variant", ex.Message);
+    }
 }

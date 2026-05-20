@@ -1,8 +1,8 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using ImageMagick;
 
 namespace CosmoImage.Loaders;
 
@@ -116,132 +116,37 @@ public static class VipsTiffLoader
 
         var imageBytes = ms.ToArray();
 
-        // Pure-managed fast path for baseline uncompressed single-page TIFFs.
-        // Returns null for compressed / multi-page / tiled / planar / BigTIFF —
-        // those still flow through Magick below.
+        // Native TIFF decode path. Unsupported layouts return null rather than
+        // falling back to Magick.NET.
         var pure = PureTiffDecoder.TryDecode(imageBytes);
-        if (pure != null)
-        {
-            AttachTiffMetadata(imageBytes, pure);
-            return pure;
-        }
+        if (pure == null) return null;
 
-        // Probe via Magick.NET for dimensions, colorspace, and page count.
-        // Multi-page TIFFs are detected via collection.Count > 1; pages are
-        // stacked into a tall buffer with n-pages/page-height metadata, same
-        // convention as animated GIF/WebP. Heterogeneous-page TIFFs (different
-        // dims per page) fall back to single-page mode — flat-buffer layout
-        // can't represent them.
-        int width, pageHeight, bands, nPages;
-        try
-        {
-            using var pages = new MagickImageCollection(imageBytes);
-            if (pages.Count == 0) return null;
-
-            width = (int)pages[0].Width;
-            pageHeight = (int)pages[0].Height;
-            int colorBands = pages[0].ColorSpace == ColorSpace.Gray ? 1 : 3;
-            bands = colorBands + (pages[0].HasAlpha ? 1 : 0);
-
-            bool uniform = true;
-            for (int i = 1; i < pages.Count; i++)
-            {
-                if ((int)pages[i].Width != width || (int)pages[i].Height != pageHeight)
-                {
-                    uniform = false;
-                    break;
-                }
-            }
-            nPages = uniform ? pages.Count : 1;
-        }
-        catch
-        {
-            return null;
-        }
-
-        int totalHeight = pageHeight * nPages;
-
-        var image = new VipsImage
-        {
-            Width = width,
-            Height = totalHeight,
-            Bands = bands,
-            BandFormat = VipsBandFormat.UChar,
-            Interpretation = bands <= 2 ? VipsInterpretation.BW : VipsInterpretation.RGB,
-            Coding = VipsCoding.None,
-            XRes = 1.0,
-            YRes = 1.0,
-            PixelsLazy = new Lazy<byte[]>(() =>
-            {
-                using var collection = new MagickImageCollection(imageBytes);
-                int stride = width * bands;
-                var buf = new byte[stride * totalHeight];
-
-                for (int p = 0; p < nPages; p++)
-                {
-                    var frame = collection[p];
-                    if (bands == 1) frame.ColorSpace = ColorSpace.Gray;
-                    else if (bands == 3 && frame.HasAlpha) frame.Alpha(AlphaOption.Off);
-                    else if (bands == 4 && !frame.HasAlpha) frame.Alpha(AlphaOption.On);
-
-                    using var pixels = frame.GetPixels();
-                    int pageBase = p * pageHeight * stride;
-                    for (int y = 0; y < pageHeight; y++)
-                    {
-                        var row = pixels.GetArea(0, y, (uint)width, 1)
-                            ?? throw new InvalidOperationException($"TIFF: page {p} row {y} returned null");
-                        Array.Copy(row, 0, buf, pageBase + y * stride, stride);
-                    }
-                }
-                return buf;
-            })
-        };
-
-        if (nPages > 1)
-        {
-            image.Metadata["n-pages"] = nPages.ToString();
-            image.Metadata["page-height"] = pageHeight.ToString();
-        }
-
-        AttachTiffMetadata(imageBytes, image);
-
-        return image;
+        AttachTiffMetadata(imageBytes, pure);
+        return pure;
     }
 
     /// <summary>
-    /// Eager probe via Magick for EXIF/XMP/ICC profiles + orientation +
-    /// ImageDescription. Best-effort: silently swallows Magick failures so
-    /// metadata extraction never fails an otherwise successful load.
+    /// Best-effort TIFF metadata extraction from the primary IFD.
+    /// Reads orientation, ICC/XMP blobs, and ImageDescription without
+    /// depending on Magick.NET.
     /// </summary>
     private static void AttachTiffMetadata(byte[] imageBytes, VipsImage image)
     {
-        try
-        {
-            using var probe = new MagickImage(imageBytes);
-            var exifProfile = probe.GetProfile("exif");
-            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
-            var xmpProfile = probe.GetProfile("xmp");
-            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
-            var iccProfile = probe.GetColorProfile();
-            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
+        if (!TryReadPrimaryIfdMetadata(imageBytes, out var metadata))
+            return;
 
-            int orient = (int)probe.Orientation;
-            if (orient >= 1 && orient <= 8)
-                image.Metadata["orientation"] = orient.ToString();
-
-            // ImageDescription (TIFF tag 270). Magick exposes it under the
-            // "comment" attribute. Carrier for OME-XML in microscopy /
-            // pathology (OME-TIFF) — see VipsOmeTiff for typed accessors.
-            CapturImageDescription(probe, image);
-        }
-        catch { /* best-effort */ }
+        if (metadata.IccProfile != null)
+            image.MetadataBlobs["icc"] = metadata.IccProfile;
+        if (metadata.XmpProfile != null)
+            image.MetadataBlobs["xmp"] = metadata.XmpProfile;
+        if (metadata.Orientation is int orientation && orientation >= 1 && orientation <= 8)
+            image.Metadata["orientation"] = orientation.ToString();
+        if (!string.IsNullOrEmpty(metadata.ImageDescription))
+            CaptureImageDescription(metadata.ImageDescription, image);
     }
 
-    private static void CapturImageDescription(IMagickImage<byte> probe, VipsImage image)
+    private static void CaptureImageDescription(string imageDescription, VipsImage image)
     {
-        var imageDescription = probe.GetAttribute("comment");
-        if (string.IsNullOrEmpty(imageDescription)) return;
-
         image.Metadata["tiff:image-description"] = imageDescription;
 
         // OME-TIFF carries OME-XML in this same tag. Surface the XML under a
@@ -255,102 +160,171 @@ public static class VipsTiffLoader
     }
 
     /// <summary>
-    /// Streaming TIFF load: feeds the source directly to Magick.NET via
-    /// <see cref="VipsSourceStream"/>, decodes all pages eagerly, and drops
-    /// the encoded buffer. TIFFs are typically large (often tens of MB) so
-    /// the savings here are meaningful — a 50 MB TIFF that decodes to 200 MB
-    /// of pixels keeps just the 200 MB instead of 250 MB.
-    ///
-    /// Forfeits the laziness of <see cref="LoadAsync"/>; use when memory
-    /// matters more than deferring decode (typical CDN-thumbnail workflows
-    /// always materialize anyway).
+    /// Streaming TIFF load currently reuses the byte-buffered native loader.
+    /// This preserves semantics while avoiding a separate Magick-backed path.
     /// </summary>
     public static async ValueTask<VipsImage?> LoadStreamingAsync(IVipsSource source, CancellationToken cancellationToken = default)
     {
-        if (!await IsTiffAsync(source, cancellationToken)) return null;
-        await Task.Yield();
+        return await LoadAsync(source, cancellationToken);
+    }
 
-        try
+    private static bool TryReadPrimaryIfdMetadata(byte[] bytes, out TiffPrimaryMetadata metadata)
+    {
+        metadata = default;
+        if (bytes.Length < 8)
+            return false;
+
+        bool le;
+        if (bytes[0] == 0x49 && bytes[1] == 0x49) le = true;
+        else if (bytes[0] == 0x4D && bytes[1] == 0x4D) le = false;
+        else return false;
+
+        ushort magic = ReadU16(bytes, 2, le);
+        bool bigTiff;
+        ulong ifdOffset;
+        if (magic == 0x002A)
         {
-            using var stream = source.AsStream();
-            using var pages = new MagickImageCollection(stream);
-            if (pages.Count == 0) return null;
+            bigTiff = false;
+            ifdOffset = ReadU32(bytes, 4, le);
+        }
+        else if (magic == 0x002B)
+        {
+            if (bytes.Length < 16) return false;
+            ushort offsetSize = ReadU16(bytes, 4, le);
+            ushort reserved = ReadU16(bytes, 6, le);
+            if (offsetSize != 8 || reserved != 0) return false;
+            bigTiff = true;
+            ifdOffset = ReadU64(bytes, 8, le);
+        }
+        else
+        {
+            return false;
+        }
 
-            int width = (int)pages[0].Width;
-            int pageHeight = (int)pages[0].Height;
-            int colorBands = pages[0].ColorSpace == ColorSpace.Gray ? 1 : 3;
-            int bands = colorBands + (pages[0].HasAlpha ? 1 : 0);
+        return TryReadIfdMetadata(bytes, le, bigTiff, ifdOffset, out metadata);
+    }
 
-            bool uniform = true;
-            for (int i = 1; i < pages.Count; i++)
+    private static bool TryReadIfdMetadata(byte[] bytes, bool le, bool bigTiff, ulong ifdOffset, out TiffPrimaryMetadata metadata)
+    {
+        metadata = default;
+        if (ifdOffset == 0 || ifdOffset > (ulong)bytes.Length)
+            return false;
+
+        int countSize = bigTiff ? 8 : 2;
+        int entrySize = bigTiff ? 20 : 12;
+        int nextSize = bigTiff ? 8 : 4;
+        if (ifdOffset + (ulong)countSize > (ulong)bytes.Length)
+            return false;
+
+        ulong numEntries = bigTiff
+            ? ReadU64(bytes, (int)ifdOffset, le)
+            : ReadU16(bytes, (int)ifdOffset, le);
+        if (numEntries > 65535)
+            return false;
+
+        int entriesStart = (int)ifdOffset + countSize;
+        long afterEntries = (long)entriesStart + (long)numEntries * entrySize;
+        if (afterEntries + nextSize > bytes.Length)
+            return false;
+
+        for (ulong i = 0; i < numEntries; i++)
+        {
+            int entryOffset = entriesStart + (int)i * entrySize;
+            ushort tag = ReadU16(bytes, entryOffset, le);
+            ushort type = ReadU16(bytes, entryOffset + 2, le);
+            ulong count = bigTiff
+                ? ReadU64(bytes, entryOffset + 4, le)
+                : ReadU32(bytes, entryOffset + 4, le);
+
+            switch (tag)
             {
-                if ((int)pages[i].Width != width || (int)pages[i].Height != pageHeight)
+                case 270:
                 {
-                    uniform = false;
+                    var raw = ReadValueBytes(bytes, entryOffset, type, count, le, bigTiff);
+                    if (raw != null)
+                        metadata.ImageDescription = Encoding.UTF8.GetString(raw).TrimEnd('\0');
+                    break;
+                }
+                case 274:
+                {
+                    var orientation = ReadUnsignedValue(bytes, entryOffset, type, count, le, bigTiff);
+                    if (orientation.HasValue && orientation.Value <= int.MaxValue)
+                        metadata.Orientation = (int)orientation.Value;
+                    break;
+                }
+                case 700:
+                {
+                    metadata.XmpProfile = ReadValueBytes(bytes, entryOffset, type, count, le, bigTiff);
+                    break;
+                }
+                case 34675:
+                {
+                    metadata.IccProfile = ReadValueBytes(bytes, entryOffset, type, count, le, bigTiff);
                     break;
                 }
             }
-            int nPages = uniform ? pages.Count : 1;
-            int totalHeight = pageHeight * nPages;
-            int stride = width * bands;
-            var buf = new byte[stride * totalHeight];
-
-            for (int p = 0; p < nPages; p++)
-            {
-                var frame = pages[p];
-                if (bands == 1) frame.ColorSpace = ColorSpace.Gray;
-                else if (bands == 3 && frame.HasAlpha) frame.Alpha(AlphaOption.Off);
-                else if (bands == 4 && !frame.HasAlpha) frame.Alpha(AlphaOption.On);
-
-                using var pixels = frame.GetPixels();
-                int pageBase = p * pageHeight * stride;
-                for (int y = 0; y < pageHeight; y++)
-                {
-                    var row = pixels.GetArea(0, y, (uint)width, 1)
-                        ?? throw new InvalidOperationException($"TIFF streaming: page {p} row {y} returned null");
-                    Array.Copy(row, 0, buf, pageBase + y * stride, stride);
-                }
-            }
-
-            var image = new VipsImage
-            {
-                Width = width,
-                Height = totalHeight,
-                Bands = bands,
-                BandFormat = VipsBandFormat.UChar,
-                Interpretation = bands <= 2 ? VipsInterpretation.BW : VipsInterpretation.RGB,
-                Coding = VipsCoding.None,
-                XRes = 1.0,
-                YRes = 1.0,
-                PixelsLazy = new Lazy<byte[]>(() => buf),
-            };
-
-            if (nPages > 1)
-            {
-                image.Metadata["n-pages"] = nPages.ToString();
-                image.Metadata["page-height"] = pageHeight.ToString();
-            }
-
-            // Profile + orientation metadata from the first page (already
-            // decoded; same source object).
-            var first = pages[0];
-            var exifProfile = first.GetProfile("exif");
-            if (exifProfile != null) image.MetadataBlobs["exif"] = exifProfile.ToByteArray();
-            var xmpProfile = first.GetProfile("xmp");
-            if (xmpProfile != null) image.MetadataBlobs["xmp"] = xmpProfile.ToByteArray();
-            var iccProfile = first.GetColorProfile();
-            if (iccProfile != null) image.MetadataBlobs["icc"] = iccProfile.ToByteArray();
-            int orient = (int)first.Orientation;
-            if (orient >= 1 && orient <= 8) image.Metadata["orientation"] = orient.ToString();
-            CapturImageDescription(first, image);
-
-            return image;
         }
-        catch
-        {
-            return null;
-        }
+
+        return true;
     }
+
+    private static byte[]? ReadValueBytes(byte[] bytes, int entryOffset, ushort type, ulong count, bool le, bool bigTiff)
+    {
+        int typeSize = GetTypeSize(type);
+        if (typeSize == 0) return null;
+        if (count > ulong.MaxValue / (ulong)typeSize) return null;
+
+        ulong byteCount = count * (ulong)typeSize;
+        int inlineBytes = bigTiff ? 8 : 4;
+        int valueOffset = entryOffset + (bigTiff ? 12 : 8);
+
+        if (byteCount == 0) return Array.Empty<byte>();
+        if (byteCount <= (ulong)inlineBytes)
+        {
+            if ((ulong)valueOffset + byteCount > (ulong)bytes.Length) return null;
+            var raw = new byte[(int)byteCount];
+            Buffer.BlockCopy(bytes, valueOffset, raw, 0, raw.Length);
+            return raw;
+        }
+
+        ulong dataOffset = bigTiff
+            ? ReadU64(bytes, valueOffset, le)
+            : ReadU32(bytes, valueOffset, le);
+        if (dataOffset + byteCount > (ulong)bytes.Length || byteCount > int.MaxValue)
+            return null;
+
+        var blob = new byte[(int)byteCount];
+        Buffer.BlockCopy(bytes, (int)dataOffset, blob, 0, blob.Length);
+        return blob;
+    }
+
+    private static ulong? ReadUnsignedValue(byte[] bytes, int entryOffset, ushort type, ulong count, bool le, bool bigTiff)
+    {
+        if (count != 1) return null;
+
+        var raw = ReadValueBytes(bytes, entryOffset, type, count, le, bigTiff);
+        if (raw == null) return null;
+
+        return type switch
+        {
+            1 or 6 or 7 when raw.Length >= 1 => raw[0],
+            3 or 8 when raw.Length >= 2 => le
+                ? (ulong)(raw[0] | (raw[1] << 8))
+                : (ulong)((raw[0] << 8) | raw[1]),
+            4 or 9 or 11 when raw.Length >= 4 => ReadU32(raw, 0, le),
+            16 or 17 or 18 when raw.Length >= 8 => ReadU64(raw, 0, le),
+            _ => null
+        };
+    }
+
+    private static int GetTypeSize(ushort type) => type switch
+    {
+        1 or 2 or 6 or 7 => 1,
+        3 or 8 => 2,
+        4 or 9 or 11 => 4,
+        5 or 10 or 12 or 16 or 17 or 18 => 8,
+        _ => 0,
+    };
 
     private static ushort ReadU16(byte[] buf, int offset, bool le) =>
         le ? (ushort)(buf[offset] | (buf[offset + 1] << 8))
@@ -359,4 +333,19 @@ public static class VipsTiffLoader
     private static uint ReadU32(byte[] buf, int offset, bool le) =>
         le ? (uint)(buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24))
            : (uint)((buf[offset] << 24) | (buf[offset + 1] << 16) | (buf[offset + 2] << 8) | buf[offset + 3]);
+
+    private static ulong ReadU64(byte[] buf, int offset, bool le)
+    {
+        uint lo = ReadU32(buf, offset + (le ? 0 : 4), le);
+        uint hi = ReadU32(buf, offset + (le ? 4 : 0), le);
+        return ((ulong)hi << 32) | lo;
+    }
+
+    private struct TiffPrimaryMetadata
+    {
+        public int? Orientation;
+        public string? ImageDescription;
+        public byte[]? XmpProfile;
+        public byte[]? IccProfile;
+    }
 }

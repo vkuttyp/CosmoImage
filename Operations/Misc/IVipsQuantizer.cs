@@ -1,6 +1,4 @@
 using System;
-using System.IO;
-using ImageMagick;
 
 namespace CosmoImage.Operations.Misc;
 
@@ -26,9 +24,9 @@ public interface IVipsQuantizer
 }
 
 /// <summary>
-/// Default quantizer — routes through Magick.NET's Wu / median-cut
-/// implementation with optional Floyd-Steinberg dithering. Same
-/// algorithm <see cref="VipsQuantize"/> uses internally.
+/// Compatibility quantizer that preserves the long-standing
+/// <see cref="MagickQuantizer"/> API while routing through the native
+/// <see cref="VipsOctreeQuantizer"/> implementation.
 /// </summary>
 public sealed class MagickQuantizer : IVipsQuantizer
 {
@@ -45,57 +43,10 @@ public sealed class MagickQuantizer : IVipsQuantizer
             throw new ArgumentOutOfRangeException(nameof(Colors), "Colors must be in 2..256");
         if (input.Bands != 1 && input.Bands != 3 && input.Bands != 4)
             throw new ArgumentException("MagickQuantizer requires 1, 3, or 4 band input", nameof(input));
-
-        int width = input.Width, height = input.Height, bands = input.Bands;
-
-        // Materialise input pixels.
-        byte[] inputPixels;
-        if (input.Pixels is { } existing) inputPixels = existing;
-        else
+        return new VipsOctreeQuantizer
         {
-            var sink = new MemorySink(input);
-            sink.RunAsync().GetAwaiter().GetResult();
-            inputPixels = sink.Pixels;
-        }
-
-        var rawFormat = bands switch
-        {
-            1 => MagickFormat.Gray,
-            3 => MagickFormat.Rgb,
-            _ => MagickFormat.Rgba,
-        };
-
-        var settings = new MagickReadSettings
-        {
-            Width = (uint)width, Height = (uint)height,
-            Format = rawFormat, Depth = 8,
-        };
-
-        using var img = new MagickImage();
-        img.Read(inputPixels, settings);
-        img.Quantize(new QuantizeSettings
-        {
-            Colors = (uint)Colors,
-            DitherMethod = Dither ? DitherMethod.FloydSteinberg : DitherMethod.No,
-        });
-
-        // Quantize switches the image to palette-indexed storage, which
-        // makes GetPixels.GetArea return palette indices instead of
-        // RGB(A) triples. Round-trip through raw output to coerce back
-        // to direct-color bytes of the right shape.
-        img.Settings.Format = rawFormat;
-        img.Settings.Depth = 8;
-        var outBuf = img.ToByteArray(rawFormat);
-
-        var output = new VipsImage
-        {
-            Width = width, Height = height, Bands = bands,
-            BandFormat = input.BandFormat, Interpretation = input.Interpretation,
-            Coding = input.Coding, XRes = input.XRes, YRes = input.YRes,
-            PixelsLazy = new Lazy<byte[]>(() => outBuf),
-        };
-        output.CopyMetadataFrom(input);
-        output.SetPipeline(VipsDemandStyle.Any, input);
-        return output;
+            Colors = Colors,
+            Dither = Dither,
+        }.Apply(input);
     }
 }

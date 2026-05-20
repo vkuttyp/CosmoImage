@@ -154,7 +154,7 @@ public static class VipsImageExtensions
     public static VipsImage Sketch(this VipsImage image, double radius = 1.0, double sigma = 0.5, double angle = 0.0)
         => VipsImageOps.Sketch(image, radius, sigma, angle);
 
-    /// <summary>Polaroid effect — white frame + rotation, RGBA output (Magick.NET).</summary>
+    /// <summary>Polaroid effect — white frame + rotation, RGBA output.</summary>
     public static VipsImage Polaroid(this VipsImage image, double angle = -5.0)
         => VipsImageOps.Polaroid(image, angle);
 

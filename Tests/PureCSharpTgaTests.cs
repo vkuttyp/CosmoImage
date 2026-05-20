@@ -11,8 +11,8 @@ namespace CosmoImage.Tests;
 /// <summary>
 /// Pure-C# TGA fast-path coverage. Round-trips through the new
 /// VipsTgaLoader fast path (types 2/3/10/11, depth 24/32/8) and the new
-/// pure-C# VipsTgaSaver. RLE-compressed input is decoded via a
-/// Magick-synthesized fixture; the saver always emits uncompressed.
+/// pure-C# VipsTgaSaver. RLE-compressed input is covered with a
+/// hand-authored fixture; the saver always emits uncompressed.
 /// </summary>
 public class PureCSharpTgaTests
 {
@@ -178,21 +178,21 @@ public class PureCSharpTgaTests
     [Fact]
     public async Task RleEncodedTga_DecodesViaFastPath()
     {
-        // Magick.NET emits RLE TGA when given a uniform image. Confirms the
-        // type-10/11 RLE branch of the fast path actually runs (and matches
-        // what an external encoder produced).
-        byte[] rleBytes;
-        using (var ms = new MemoryStream())
-        {
-            using var img = new ImageMagick.MagickImage(ImageMagick.MagickColors.Magenta, 16, 8);
-            img.Settings.Compression = ImageMagick.CompressionMethod.RLE;
-            img.Write(ms, ImageMagick.MagickFormat.Tga);
-            rleBytes = ms.ToArray();
-        }
+        // One type-10 RLE packet (ctrl=0xFF => 128 repeats) followed by a
+        // single BGR source pixel. Covers the RLE branch without Magick.
+        var rleBytes = new byte[18 + 1 + 3];
+        rleBytes[2] = 10;             // RLE RGB
+        rleBytes[12] = 16;            // width = 16
+        rleBytes[14] = 8;             // height = 8
+        rleBytes[16] = 24;            // 24 bpp
+        rleBytes[17] = 0x20;          // top-down
+        rleBytes[18] = 0xFF;          // RLE packet, count = 128
+        rleBytes[19] = 255;           // B
+        rleBytes[20] = 0;             // G
+        rleBytes[21] = 255;           // R
 
         // Sanity: image type byte should be 10 (RLE RGB).
-        Assert.True(rleBytes[2] == 10 || rleBytes[2] == 2,
-            $"expected RLE or uncompressed RGB, got type {rleBytes[2]}");
+        Assert.Equal(10, rleBytes[2]);
 
         var decoded = await VipsTgaLoader.LoadAsync(SourceFromBytes(rleBytes));
         Assert.NotNull(decoded);

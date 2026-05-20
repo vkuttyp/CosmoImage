@@ -16,8 +16,7 @@ namespace CosmoImage.Loaders;
 /// canvas height × frame count, with <c>n-pages</c>, <c>page-height</c>,
 /// and <c>animation-delays</c> set on the loaded image.</para>
 ///
-/// <para>Returns <c>null</c> for malformed streams; caller falls
-/// back to Magick.NET on failure.</para>
+/// <para>Returns <c>null</c> for malformed or unsupported streams.</para>
 /// </summary>
 internal static class PureGifDecoder
 {

@@ -1,7 +1,6 @@
 using System;
 using System.IO.Pipelines;
 using System.Threading.Tasks;
-using ImageMagick;
 using CosmoImage.Loaders;
 using CosmoImage.Savers;
 // Bring VipsPnmVariant enum into scope.
@@ -667,54 +666,73 @@ public static partial class VipsImageOps
     // From Operations/Drawing/VipsText.cs
     public static VipsImage Text(string text, string font = "Arial", int fontSize = 72)
     {
-        // Text is a generator that creates a new image
-        var settings = new MagickReadSettings
+        var baseOptions = new VipsTextOptions
         {
-            Font = font,
-            FontPointsize = fontSize,
-            BackgroundColor = MagickColors.Transparent,
-            FillColor = MagickColors.White
+            Text = text,
+            FontFamily = font,
+            FontSize = fontSize,
+            Color = new byte[] { 255, 255, 255, 255 },
         };
 
-        using var image = new MagickImage();
-        image.Read($"label:{text}", settings);
-
-        // Convert MagickImage metadata to VipsImage
-        var vipsImage = new VipsImage
+        var bounds = VipsTextOps.MeasureBounds(baseOptions);
+        if (bounds.Width <= 0 || bounds.Height <= 0)
         {
-            Width = (int)image.Width,
-            Height = (int)image.Height,
+            return new VipsImage
+            {
+                Width = 0,
+                Height = 0,
+                Bands = 4,
+                BandFormat = VipsBandFormat.UChar,
+                Interpretation = VipsInterpretation.RGB,
+                XRes = 1.0,
+                YRes = 1.0,
+                PixelsLazy = new Lazy<byte[]>(Array.Empty<byte>),
+            };
+        }
+
+        int left = (int)Math.Floor(bounds.X);
+        int top = (int)Math.Floor(bounds.Y);
+        int width = Math.Max(1, (int)Math.Ceiling(bounds.X + bounds.Width) - left);
+        int height = Math.Max(1, (int)Math.Ceiling(bounds.Y + bounds.Height) - top);
+
+        var canvasPixels = new byte[width * height * 4];
+        var canvas = new VipsImage
+        {
+            Width = width,
+            Height = height,
             Bands = 4,
             BandFormat = VipsBandFormat.UChar,
             Interpretation = VipsInterpretation.RGB,
             XRes = 1.0,
-            YRes = 1.0
+            YRes = 1.0,
+            PixelsLazy = new Lazy<byte[]>(() => canvasPixels),
         };
 
-        // Cache the pixels immediately for text since it's usually small
-        byte[] pixels = new byte[vipsImage.Width * vipsImage.Height * 4];
-        using (var pc = image.GetPixels())
+        var drawOptions = new VipsTextOptions
         {
-            var data = pc.ToByteArray(0, 0, (uint)vipsImage.Width, (uint)vipsImage.Height, "RGBA");
-            if (data != null) Array.Copy(data, pixels, data.Length);
-        }
-
-        vipsImage.GenerateFn = (VipsRegion reg, object? seq, object? a, object? b, ref bool stop) =>
-        {
-            byte[] pix = (byte[])a!;
-            VipsRect r = reg.Valid;
-            int stride = vipsImage.Width * 4;
-            for (int y = 0; y < r.Height; y++)
-            {
-                var dest = reg.GetAddress(r.Left, r.Top + y);
-                int srcOffset = (r.Top + y) * stride + r.Left * 4;
-                pix.AsSpan(srcOffset, r.Width * 4).CopyTo(dest);
-            }
-            return 0;
+            Text = text,
+            FontFamily = font,
+            FontSize = fontSize,
+            Color = new byte[] { 255, 255, 255, 255 },
+            X = -left,
+            Y = -top,
         };
-        vipsImage.ClientA = pixels;
 
-        return vipsImage;
+        var fill = new VipsFillPath
+        {
+            In = canvas,
+            Path = VipsTextOps.TextToPath(drawOptions),
+            Brush = new VipsSolidBrush(255, 255, 255, 255),
+            Antialiased = true,
+        };
+        if (fill.Build() != 0)
+            throw new Exception("Failed to build text image");
+
+        var rendered = fill.Out!;
+        rendered.Interpretation = VipsInterpretation.RGB;
+        rendered.XRes = 1.0;
+        rendered.YRes = 1.0;
+        return rendered;
     }
 
     /// <summary>
@@ -838,7 +856,7 @@ public static partial class VipsImageOps
     /// <summary>
     /// Polaroid effect: white border + rotation, RGBA output sized to the
     /// rotated bounding box. <paramref name="angle"/> in degrees (negative
-    /// tilts left). Wraps Magick.NET.
+    /// tilts left).
     /// </summary>
     public static VipsImage Polaroid(VipsImage input, double angle = -5.0)
         => Run(new VipsPolaroid { In = input, Angle = angle });

@@ -77,24 +77,12 @@ public class PdfLoaderTests
         var pdfBytes = BuildPdfWithPatternResource();
         await using var source = CreateSource(pdfBytes);
 
-        if (VipsPdfLoader.IsFallbackRendererAvailable)
-        {
-            using var image = await VipsPdfLoader.LoadAsync(source, dpi: 72);
-
-            Assert.NotNull(image);
-            Assert.Equal("magick-fallback", image!.Metadata["pdf-renderer"]);
-            Assert.Contains("pattern resources", image.Metadata["pdf-renderer-reason"]);
-            Assert.True(ContainsPixel(image, p => p.R > 200 && p.G < 50 && p.B < 50 && p.A == 255));
-            return;
-        }
-
         var ex = await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {
             using var _ = await VipsPdfLoader.LoadAsync(source, dpi: 72);
         });
 
         Assert.Contains("pattern resources", ex.Message);
-        Assert.Contains("fallback renderer is unavailable", ex.Message);
     }
 
     private static PipeVipsSource CreateSource(byte[] bytes)

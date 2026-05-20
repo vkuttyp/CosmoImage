@@ -145,15 +145,7 @@ public static class VipsJpegLoader
 
         var jpegBytes = ms.ToArray();
         if (!PureJpegDecoder.TryReadHeader(jpegBytes, out int width, out int height, out int bands))
-        {
-            // Fallback: route the whole file through Magick to extract
-            // dimensions for variants the pure header probe doesn't
-            // recognise (12-bit, JPEG XR-tagged, etc.). Rare in the wild.
-            return await VipsMagickWrapLoader.LoadAsync(
-                new PipeVipsSource(System.IO.Pipelines.PipeReader.Create(new MemoryStream(jpegBytes))),
-                cancellationToken,
-                ImageMagick.MagickFormat.Jpeg);
-        }
+            throw CreateUnsupportedVariantException();
 
         // Memory-image dtype: pixels live directly on the VipsImage. Decoding
         // is lazy — the first downstream Prepare forces materialization, but
@@ -165,11 +157,8 @@ public static class VipsJpegLoader
 
         var pixelsLazy = new Lazy<byte[]>(() =>
         {
-            // Pure-C# fast path. Handles baseline + progressive JPEGs
-            // (the dominant on-the-web subset). Returns null on
-            // arithmetic / lossless / 12-bit / unusual subsampling, in
-            // which case we fall through to a Magick-based decode for
-            // the long tail.
+            // Pure-C# path. Handles the supported JPEG subset directly and
+            // fails explicitly for unsupported variants.
             var pure = PureJpegDecoder.TryDecode(jpegBytes, out int pw, out int ph, out int pc);
             if (pure != null && pw == width && ph == height && pc == bands)
             {
@@ -177,8 +166,7 @@ public static class VipsJpegLoader
                 return pure;
             }
 
-            // Magick fallback for variants the pure decoder doesn't cover.
-            return DecodeViaMagick(jpegBytes, width, height, bands, colorSpace);
+            throw CreateUnsupportedVariantException();
         });
 
         var image = new VipsImage
@@ -241,15 +229,9 @@ public static class VipsJpegLoader
         var jpegBytes = ms.ToArray();
 
         if (!PureJpegDecoder.TryReadHeader(jpegBytes, out int width, out int height, out int bands))
-        {
-            return await VipsMagickWrapLoader.LoadAsync(
-                new PipeVipsSource(System.IO.Pipelines.PipeReader.Create(new MemoryStream(jpegBytes))),
-                cancellationToken,
-                ImageMagick.MagickFormat.Jpeg);
-        }
+            throw CreateUnsupportedVariantException();
 
         // Decode eagerly so we can drop jpegBytes after this call.
-        // Pure-C# fast path; Magick fallback for unsupported variants.
         var colorSpace = DetectJpegColorSpace(jpegBytes, bands);
         byte[] pixels;
         var pure = PureJpegDecoder.TryDecode(jpegBytes, out int pw, out int ph, out int pc);
@@ -260,7 +242,8 @@ public static class VipsJpegLoader
         }
         else
         {
-            pixels = DecodeViaMagick(jpegBytes, width, height, bands, colorSpace);
+            await Task.Yield();
+            throw CreateUnsupportedVariantException();
         }
 
         var image = new VipsImage
@@ -471,7 +454,7 @@ public static class VipsJpegLoader
             }
             else
             {
-                scratch = DecodeViaMagick(jpegBytes, w, h, n, forceRgbPassthrough ? JpegColorSpace.Rgb : cs);
+                return false;
             }
 
             int srcRow = w * n;
@@ -485,55 +468,6 @@ public static class VipsJpegLoader
         }
     }
 
-    /// <summary>
-    /// Magick-backed fallback for JPEG variants the pure decoder
-    /// doesn't cover (12-bit precision, hierarchical, arithmetic-coded,
-    /// unusual subsampling combinations). Materialises the entire
-    /// image to a flat row-major byte buffer in the same shape the
-    /// pure path produces; the caller's <see cref="ConvertColorSpace"/>
-    /// finishes the YCbCr → RGB conversion.
-    /// </summary>
-    internal static byte[] DecodeViaMagick(byte[] jpegBytes, int width, int height, int bands, JpegColorSpace cs)
-    {
-        var settings = new ImageMagick.MagickReadSettings
-        {
-            Format = ImageMagick.MagickFormat.Jpeg,
-        };
-        using var img = new ImageMagick.MagickImage(jpegBytes, settings);
-        // ToByteArray with a pixel-mapping string lays the bytes out
-        // in the requested per-pixel channel order. Magick has already
-        // demosaiced the JPEG components and unmangled YCbCr → RGB
-        // internally, so we read RGB / RGBA / I (intensity) directly.
-        string mapping = bands switch
-        {
-            1 => "I",
-            3 => "RGB",
-            4 => "RGBA",
-            _ => "RGB",
-        };
-        var pixels = img.GetPixelsUnsafe().ToByteArray(mapping)
-                     ?? throw new InvalidOperationException("Magick JPEG decode produced no bytes");
-        // Magick handed us already-converted RGB bytes; the caller's
-        // ConvertColorSpace assumes raw component samples (YCbCr for
-        // a YCbCr-tagged JPEG, untouched RGB for an RGB-tagged JPEG,
-        // etc.). Pre-encode RGB → YCbCr so ConvertColorSpace's later
-        // YCbCr → RGB pass produces the right output.
-        if (cs == JpegColorSpace.YCbCr && bands == 3) RgbToYCbCrInPlace(pixels);
-        return pixels;
-    }
-
-    /// <summary>Inverse of <see cref="ConvertColorSpace"/>'s YCbCr→RGB path.</summary>
-    private static void RgbToYCbCrInPlace(byte[] buf)
-    {
-        for (int i = 0; i < buf.Length; i += 3)
-        {
-            int r = buf[i + 0], g = buf[i + 1], b = buf[i + 2];
-            int Y = (66 * r + 129 * g + 25 * b + 128) >> 8;
-            int Cb = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-            int Cr = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-            buf[i + 0] = (byte)Math.Clamp(Y, 0, 255);
-            buf[i + 1] = (byte)Math.Clamp(Cb, 0, 255);
-            buf[i + 2] = (byte)Math.Clamp(Cr, 0, 255);
-        }
-    }
+    private static NotSupportedException CreateUnsupportedVariantException() =>
+        new("Unsupported JPEG variant. CosmoImage currently supports 8-bit baseline/progressive grayscale and 3-component JPEG streams.");
 }

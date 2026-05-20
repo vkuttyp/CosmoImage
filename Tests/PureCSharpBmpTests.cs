@@ -10,9 +10,8 @@ using Xunit;
 namespace CosmoImage.Tests;
 
 /// <summary>
-/// Pure-C# BMP coverage. Round-trips through the new VipsBmpSaver and
-/// the new fast-path branch of VipsBmpLoader. Paletted BMPs still go
-/// through Magick (covered by the pre-existing BmpLoaderTests).
+/// Pure-C# BMP coverage. Round-trips through the native VipsBmpSaver and
+/// VipsBmpLoader across direct-color and paletted variants.
 /// </summary>
 public class PureCSharpBmpTests
 {
@@ -237,27 +236,50 @@ public class PureCSharpBmpTests
     }
 
     [Fact]
-    public async Task PalettedBmp_FallsThroughToMagick()
+    public async Task PalettedBmp_DecodesNatively()
     {
-        // 8bpp paletted BMPs aren't in the fast path. We don't synthesize
-        // one here; we just confirm the loader still answers something
-        // when handed a non-fast-path file by relying on the existing
-        // Magick-backed BmpLoaderTests for paletted coverage. This test
-        // is a smoke check that DecodeViaMagick isn't broken — build it
-        // via Magick.NET directly.
-        byte[] paletted;
-        using (var ms = new MemoryStream())
-        {
-            using var img = new ImageMagick.MagickImage(ImageMagick.MagickColors.Magenta, 8, 8);
-            img.ColorType = ImageMagick.ColorType.Palette;
-            img.Settings.Compression = ImageMagick.CompressionMethod.RLE;
-            img.Write(ms, ImageMagick.MagickFormat.Bmp);
-            paletted = ms.ToArray();
-        }
+        const int width = 2;
+        const int height = 2;
+        const int bpp = 8;
+        int pixelOffset = 14 + 40 + 4 * 4;
+        int rowStride = 4;
+        int fileSize = pixelOffset + rowStride * height;
+        var paletted = new byte[fileSize];
 
-        // Sanity: not 24/32 bpp → fast path returns null → Magick handles.
+        paletted[0] = (byte)'B'; paletted[1] = (byte)'M';
+        BinaryPrimitives.WriteUInt32LittleEndian(paletted.AsSpan(2, 4), (uint)fileSize);
+        BinaryPrimitives.WriteUInt32LittleEndian(paletted.AsSpan(10, 4), (uint)pixelOffset);
+        BinaryPrimitives.WriteUInt32LittleEndian(paletted.AsSpan(14, 4), 40);
+        BinaryPrimitives.WriteInt32LittleEndian(paletted.AsSpan(18, 4), width);
+        BinaryPrimitives.WriteInt32LittleEndian(paletted.AsSpan(22, 4), height);
+        BinaryPrimitives.WriteUInt16LittleEndian(paletted.AsSpan(26, 2), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(paletted.AsSpan(28, 2), bpp);
+        BinaryPrimitives.WriteUInt32LittleEndian(paletted.AsSpan(30, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(paletted.AsSpan(46, 4), 4);
+
+        // Palette entries are BGRA.
+        paletted[54] = 0; paletted[55] = 0; paletted[56] = 255; paletted[57] = 0;     // red
+        paletted[58] = 0; paletted[59] = 255; paletted[60] = 0; paletted[61] = 0;     // green
+        paletted[62] = 255; paletted[63] = 0; paletted[64] = 0; paletted[65] = 0;     // blue
+        paletted[66] = 255; paletted[67] = 255; paletted[68] = 255; paletted[69] = 0; // white
+
+        // Bottom row then top row, padded to 4-byte stride.
+        paletted[pixelOffset + 0] = 2; // blue
+        paletted[pixelOffset + 1] = 3; // white
+        paletted[pixelOffset + rowStride + 0] = 0; // red
+        paletted[pixelOffset + rowStride + 1] = 1; // green
+
         var img2 = await VipsBmpLoader.LoadAsync(SourceFromBytes(paletted));
         Assert.NotNull(img2);
-        Assert.Equal(8, img2!.Width);
+        Assert.Equal(width, img2!.Width);
+        Assert.Equal(3, img2.Bands);
+        using var reg = new VipsRegion(img2);
+        reg.Prepare(new VipsRect(0, 0, width, height));
+        Assert.Equal(255, reg.GetAddress(0, 0)[0]);
+        Assert.Equal(0, reg.GetAddress(0, 0)[1]);
+        Assert.Equal(0, reg.GetAddress(0, 0)[2]);
+        Assert.Equal(0, reg.GetAddress(1, 0)[0]);
+        Assert.Equal(255, reg.GetAddress(1, 0)[1]);
+        Assert.Equal(255, reg.GetAddress(1, 1)[0]);
     }
 }
